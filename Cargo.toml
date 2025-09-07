@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ethers = { version = "2.0", features = ["ws", "rustls"] }
+alloy = { version = "1.0.30", features = ["full"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio-tungstenite = "0.20"
-futures = "0.3"
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0.16"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
-hex = "0.4"
-reqwest = { version = "0.11", features = ["json"] }
+alloy-node-bindings = "1.0.30"
+tokio-stream = "0.1.17"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
