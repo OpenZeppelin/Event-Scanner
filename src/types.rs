@@ -12,10 +12,7 @@ pub struct CallbackConfig {
 
 impl Default for CallbackConfig {
     fn default() -> Self {
-        Self {
-            max_attempts: 3,
-            delay_ms: 200,
-        }
+        Self { max_attempts: 3, delay_ms: 200 }
     }
 }
 

@@ -109,10 +109,7 @@ impl Scanner {
 
             let to_block = (current + max_blocks).min(chain_head);
 
-            info!(
-                from_block = current,
-                to_block, chain_head, "processing historical block range"
-            );
+            info!(from_block = current, to_block, chain_head, "processing historical block range");
 
             self.process_block_events(current, to_block).await?;
 

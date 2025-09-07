@@ -54,6 +54,7 @@ impl ScannerBuilder {
             self.max_blocks_per_filter,
             self.tracked_events,
             self.callback_config,
-        ).await
+        )
+        .await
     }
 }
