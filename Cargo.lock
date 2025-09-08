@@ -1905,6 +1905,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "historical_scanning"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "alloy-node-bindings",
+ "anyhow",
+ "async-trait",
+ "event-scanner",
+ "hex",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "hmac"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3443,6 +3458,21 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "simple_counter"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "alloy-node-bindings",
+ "anyhow",
+ "async-trait",
+ "event-scanner",
+ "hex",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
