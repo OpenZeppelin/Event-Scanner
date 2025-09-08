@@ -138,7 +138,7 @@ impl Scanner {
 
             self.process_block_events(from_block, to_block).await?;
 
-            self.current_head = Some(block_number);
+            self.current_head = Some(block_number + 1);
         }
 
         Ok(())
@@ -154,17 +154,16 @@ impl Scanner {
 
             match self.provider.get_logs(&filter).await {
                 Ok(logs) => {
-                    info!(
-                        contract = ?event_filter.contract_address,
-                        event = event_filter.event,
-                        log_count = logs.len(),
-                        from_block,
-                        to_block,
-                        "found logs for event in block range"
-                    );
-
-                    for log in logs {
-                        if let Err(e) = self.invoke_with_retry(&event_filter.callback, &log).await {
+                    for log in &logs {
+                        info!(
+                            contract = ?event_filter.contract_address,
+                            event = event_filter.event,
+                            log_count = &logs.len(),
+                            from_block,
+                            to_block,
+                            "found logs for event in block range"
+                        );
+                        if let Err(e) = self.invoke_with_retry(&event_filter.callback, log).await {
                             error!(
                                 contract = ?event_filter.contract_address,
                                 event = event_filter.event,
