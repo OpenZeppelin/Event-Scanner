@@ -72,12 +72,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     let task_1 = tokio::spawn(async move {
-        match scanner.start().await {
-            Ok(_) => info!("Scanner started successfully"),
-            Err(e) => {
-                tracing::error!("Scanner indexer failed: {:?}", e);
-            }
-        }
+        scanner.start().await.expect("failed to start scanner");
     });
 
     let task_2 = tokio::spawn(async move {

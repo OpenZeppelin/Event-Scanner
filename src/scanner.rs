@@ -120,7 +120,7 @@ impl Scanner {
     }
 
     async fn subscribe_to_new_blocks(&mut self) -> anyhow::Result<()> {
-        info!("starting scanner in live indexing mode");
+        info!("starting scanner in live mode");
         let sub = self.provider.subscribe_blocks().await?;
         let mut stream = sub.into_stream();
 
@@ -159,6 +159,7 @@ impl Scanner {
                             contract = ?event_filter.contract_address,
                             event = event_filter.event,
                             log_count = &logs.len(),
+                            at_block = log.block_number,
                             from_block,
                             to_block,
                             "found logs for event in block range"
