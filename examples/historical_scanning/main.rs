@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use alloy::providers::ProviderBuilder;
+use alloy::providers::{ProviderBuilder};
 use alloy::rpc::types::Log;
 use alloy::sol;
 use alloy::sol_types::SolEvent;
@@ -65,28 +65,17 @@ async fn main() -> anyhow::Result<()> {
         callback: Arc::new(CounterCallback),
     };
 
+    counter_contract.increase().send().await?;
+
     let mut scanner = ScannerBuilder::new(anvil.ws_endpoint_url())
         .add_event_filter(increase_filter)
         .callback_config(CallbackConfig { max_attempts: 3, delay_ms: 200 })
+        .start_block(0)
         .build()
         .await?;
 
-    let task_1 = tokio::spawn(async move {
-        scanner.start().await.expect("failed to start scanner");
-    });
-
-    let task_2 = tokio::spawn(async move {
-        sleep(Duration::from_secs(5)).await;
-        match counter_contract.increase().send().await {
-            Ok(_) => info!("Tx sent succsefully"),
-            Err(e) => {
-                tracing::error!("Failed to send tx {:?}", e);
-            }
-        }
-    });
-
-    task_1.await.ok();
-    task_2.await.ok();
+    sleep(Duration::from_secs(10)).await;
+    scanner.start().await.expect("failed to start scanner");
 
     Ok(())
 }

@@ -125,20 +125,20 @@ impl Scanner {
         let mut stream = sub.into_stream();
 
         while let Some(block) = stream.next().await {
-            let block_number = block.number;
+            let latest_block_number = block.number;
 
             // TODO: Handle reorgs
             let from_block = match self.current_head {
                 Some(head) => head,
-                None => block_number,
+                None => latest_block_number,
             };
-            let to_block = block_number;
+            let to_block = latest_block_number;
 
             info!(from_block, to_block, "processing blocks:");
 
             self.process_block_events(from_block, to_block).await?;
 
-            self.current_head = Some(block_number + 1);
+            self.current_head = Some(latest_block_number + 1);
         }
 
         Ok(())
