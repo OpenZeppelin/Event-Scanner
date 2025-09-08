@@ -1,0 +1,21 @@
+[package]
+name = "simple_counter"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "simple_counter"
+path = "main.rs"
+
+[dependencies]
+alloy = { version = "1.0.30", features = ["full"] }
+alloy-node-bindings = "1.0.30"
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+hex = "0.4"
+
+[dependencies.event-scanner]
+path = "../.."
