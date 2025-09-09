@@ -81,13 +81,24 @@ impl Scanner {
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
-        match self.start_block {
-            Some(start) => {
-                self.process_historical_blocks(start).await?;
-                // TODO: Ensure transition to live indexing is properly handled
+        match (self.start_block, self.end_block) {
+            (None, Some(end)) => {
+                info!("Scanning from genesis block 0 to {}", end);
+                self.process_historical_blocks(0, Some(end)).await?
+            }
+            (Some(start), Some(end)) => {
+                info!("Scanning from block {} to {}", start, end);
+                self.process_historical_blocks(start, Some(end)).await?
+            }
+            (Some(start), None) => {
+                info!("Scanning from block {} to latest, then switching to live mode", start);
+                self.process_historical_blocks(start, None).await?;
                 self.subscribe_to_new_blocks().await?
             }
-            None => self.subscribe_to_new_blocks().await?,
+            (None, None) => {
+                info!("Starting in live mode only");
+                self.subscribe_to_new_blocks().await?
+            }
         }
         Ok(())
     }
@@ -100,24 +111,31 @@ impl Scanner {
         self.tracked_events.push(filter);
     }
 
-    async fn process_historical_blocks(&mut self, start_block: u64) -> anyhow::Result<()> {
-        info!(start_block, "starting historical block processing");
+    async fn process_historical_blocks(
+        &mut self,
+        start_block: u64,
+        end_block: Option<u64>,
+    ) -> anyhow::Result<()> {
+        info!(start_block, end_block = ?end_block, "starting historical block processing");
 
         let mut current = start_block;
         let max_blocks = self.max_blocks_per_filter;
 
-        loop {
-            let chain_head = self.provider.get_block_number().await?;
+        let target_end = match end_block {
+            Some(end) => end,
+            None => self.provider.get_block_number().await?,
+        };
 
-            if current > chain_head {
-                self.current_head = Some(current);
-                info!(last_block = current, "Last block processed");
+        loop {
+            if current > target_end {
+                self.current_head = Some(target_end);
+                info!(last_block = target_end, "Historical processing completed");
                 break;
             }
 
-            let to_block = (current + max_blocks).min(chain_head);
+            let to_block = (current + max_blocks - 1).min(target_end);
 
-            info!(from_block = current, to_block, chain_head, "processing historical block range");
+            info!(from_block = current, to_block, target_end, "processing historical block range");
 
             self.process_block_events(current, to_block).await?;
 
