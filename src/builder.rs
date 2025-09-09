@@ -6,6 +6,7 @@ use crate::{
 pub struct ScannerBuilder {
     rpc_url: String,
     start_block: Option<u64>,
+    end_block: Option<u64>,
     max_blocks_per_filter: u64,
     tracked_events: Vec<EventFilter>,
     callback_config: CallbackConfig,
@@ -16,6 +17,7 @@ impl ScannerBuilder {
         Self {
             rpc_url: rpc_url.into(),
             start_block: None,
+            end_block: None,
             max_blocks_per_filter: 1000,
             tracked_events: Vec::new(),
             callback_config: CallbackConfig::default(),
@@ -24,6 +26,11 @@ impl ScannerBuilder {
 
     pub fn start_block(mut self, start_block: u64) -> Self {
         self.start_block = Some(start_block);
+        self
+    }
+
+    pub fn end_block(mut self, end_block: u64) -> Self {
+        self.end_block = Some(end_block);
         self
     }
 
@@ -51,6 +58,7 @@ impl ScannerBuilder {
         Scanner::new(
             self.rpc_url,
             self.start_block,
+            self.end_block,
             self.max_blocks_per_filter,
             self.tracked_events,
             self.callback_config,

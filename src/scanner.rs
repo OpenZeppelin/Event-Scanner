@@ -22,6 +22,7 @@ pub struct Scanner {
     provider: Arc<dyn Provider>,
     current_head: Option<u64>,
     start_block: Option<u64>,
+    end_block: Option<u64>,
     max_blocks_per_filter: u64,
     tracked_events: Vec<EventFilter>,
     callback_config: CallbackConfig,
@@ -31,32 +32,39 @@ impl Scanner {
     pub async fn new(
         rpc_url: String,
         start_block: Option<u64>,
+        end_block: Option<u64>,
         max_blocks_per_filter: u64,
         tracked_events: Vec<EventFilter>,
         callback_config: CallbackConfig,
     ) -> anyhow::Result<Self> {
-        let provider = match Self::detect_provider_type(&rpc_url) {
-            Ok(ProviderType::WebSocket) => {
-                info!("connecting to provider via WebSocket: {}", &rpc_url);
-                let ws = WsConnect::new(&rpc_url);
-                ProviderBuilder::new().connect_ws(ws).await?
-            }
-            Ok(ProviderType::Ipc) => {
-                info!("connecting to provider via IPC: {}", &rpc_url);
-                let ipc = IpcConnect::new(rpc_url.clone());
-                ProviderBuilder::new().connect_ipc(ipc).await?
-            }
-            Err(e) => return Err(e),
-        };
+        let provider = Self::get_provider(&rpc_url).await?;
 
         Ok(Self {
-            provider: Arc::new(provider),
+            provider,
             current_head: start_block,
             start_block,
+            end_block,
             max_blocks_per_filter,
             tracked_events,
             callback_config,
         })
+    }
+
+    async fn get_provider(url: &str) -> anyhow::Result<Arc<dyn Provider>> {
+        let provider = match Self::detect_provider_type(url) {
+            Ok(ProviderType::WebSocket) => {
+                info!("connecting to provider via WebSocket: {}", url);
+                let ws = WsConnect::new(url);
+                ProviderBuilder::new().connect_ws(ws).await?
+            }
+            Ok(ProviderType::Ipc) => {
+                info!("connecting to provider via IPC: {}", url);
+                let ipc = IpcConnect::new(url.to_string());
+                ProviderBuilder::new().connect_ipc(ipc).await?
+            }
+            Err(e) => return Err(e),
+        };
+        Ok(Arc::new(provider))
     }
 
     fn detect_provider_type(url: &str) -> anyhow::Result<ProviderType> {
