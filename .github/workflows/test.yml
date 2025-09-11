@@ -40,3 +40,7 @@ jobs:
 
       - name: Cargo test
         run: cargo nextest run --workspace --all-targets --all-features --no-tests=pass
+
+        # https://github.com/rust-lang/cargo/issues/6669
+      - name: Run doc tests
+        run: cargo test --locked --doc
