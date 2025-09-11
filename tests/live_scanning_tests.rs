@@ -180,6 +180,8 @@ async fn test_live_scanning_with_slow_processor() -> anyhow::Result<()> {
         sleep(Duration::from_millis(50)).await;
     }
 
+    sleep(Duration::from_millis(200)).await;
+
     scanner_handle.abort();
 
     assert_eq!(processed.load(Ordering::SeqCst), 3);
