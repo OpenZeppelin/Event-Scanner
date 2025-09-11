@@ -48,7 +48,7 @@ impl std::fmt::Display for BlockScannerError {
 
 type EndIterFunc = fn();
 type UpdateCurrentFunc = fn(Header);
-type OnBlocksFunc<N> =
+pub type OnBlocksFunc<N> =
     fn(<N as Network>::BlockResponse, UpdateCurrentFunc, EndIterFunc) -> anyhow::Result<()>;
 
 pub struct BlockScannerBuilder<N: Network> {
