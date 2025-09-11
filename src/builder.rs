@@ -35,8 +35,6 @@ impl ScannerBuilder {
     }
 
     pub fn max_blocks_per_filter(mut self, max_blocks: u64) -> Self {
-        // TODO: Limit max_blocks_per_filter to a reasonable value
-
         self.max_blocks_per_filter = max_blocks;
         self
     }

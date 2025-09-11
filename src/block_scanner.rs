@@ -82,7 +82,6 @@ impl<N: Network> BlockScannerBuilder<N> {
     }
 
     pub fn with_blocks_read_per_epoch(&mut self, blocks_read_per_epoch: u64) -> &mut Self {
-        // TODO: Clamp this value to a reasonable range
         self.blocks_read_per_epoch = blocks_read_per_epoch;
         self
     }
