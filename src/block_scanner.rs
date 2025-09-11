@@ -186,6 +186,10 @@ where
     P: Provider<N>,
     N: Network,
 {
+    pub fn provider(&self) -> &P {
+        &self.provider
+    }
+
     pub async fn start(self) -> ReceiverStream<Result<N::BlockResponse, BlockScannerError>> {
         let receiver_stream = ReceiverStream::new(self.receiver);
 

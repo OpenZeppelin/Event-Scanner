@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
     block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
@@ -8,9 +8,14 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
     providers::{Provider, RootProvider},
-    rpc::client::RpcClient,
+    rpc::{
+        client::RpcClient,
+        types::{Filter, Log},
+    },
     transports::TransportError,
 };
+use tokio::sync::mpsc;
+use tracing::{error, info, warn};
 
 pub struct EventScannerBuilder<N: Network> {
     block_scanner: BlockScannerBuilder<N>,
@@ -137,6 +142,119 @@ pub struct EventScanner<P: Provider<N>, N: Network> {
 
 impl<P: Provider<N>, N: Network> EventScanner<P, N> {
     pub async fn start(&mut self) -> anyhow::Result<()> {
-        todo!()
+        let mut event_channels: HashMap<String, mpsc::Sender<Log>> = HashMap::new();
+
+        for filter in &self.tracked_events {
+            let event_name = filter.event.clone();
+            if event_channels.contains_key(&event_name) {
+                continue;
+            }
+            let (sender, mut receiver) = mpsc::channel::<Log>(1024); // TODO: configurable buffer size / smaller buffer ? 
+            let cfg = self.callback_config.clone();
+            let event_name_clone = event_name.clone();
+            let callback = filter.callback.clone();
+            tokio::spawn(async move {
+                while let Some(log) = receiver.recv().await {
+                    if let Err(e) = invoke_with_retry_static(&callback, &log, &cfg).await {
+                        error!(
+                            event = %event_name_clone,
+                            at_block = &log.block_number,
+                            error = %e,
+                            "failed to invoke callback after retries"
+                        );
+                    }
+                }
+            });
+            event_channels.insert(event_name, sender);
+        }
+
+        // TODO: replace with blockstream
+        let from_block: u64 = 0;
+        let to_block: u64 = 0;
+
+        info!(from_block, to_block, "processing placeholder block range");
+        self.process_block_range(from_block, to_block, &event_channels).await?;
+
+        Ok(())
     }
+
+    async fn process_block_range(
+        &self,
+        from_block: u64,
+        to_block: u64,
+        event_channels: &HashMap<String, mpsc::Sender<Log>>,
+    ) -> anyhow::Result<()> {
+        for event_filter in &self.tracked_events {
+            let filter = Filter::new()
+                .address(event_filter.contract_address)
+                .event(event_filter.event.as_str())
+                .from_block(from_block)
+                .to_block(to_block);
+
+            match self.block_scanner.provider().get_logs(&filter).await {
+                Ok(logs) => {
+                    if logs.is_empty() {
+                        continue;
+                    }
+                    info!(
+                        contract = ?event_filter.contract_address,
+                        event = %event_filter.event,
+                        log_count = logs.len(),
+                        from_block,
+                        to_block,
+                        "found logs for event in block range"
+                    );
+
+                    if let Some(sender) = event_channels.get(&event_filter.event) {
+                        for log in logs {
+                            if let Err(e) = sender.send(log.clone()).await {
+                                warn!(event = %event_filter.event, error = %e, "failed to enqueue log for processing");
+                            }
+                        }
+                    } else {
+                        warn!(event = %event_filter.event, "no channel found for event type");
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        contract = ?event_filter.contract_address,
+                        event = %event_filter.event,
+                        error = %e,
+                        from_block,
+                        to_block,
+                        "failed to get logs for block range"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+async fn invoke_with_retry_static(
+    callback: &Arc<dyn crate::callback::EventCallback + Send + Sync>,
+    log: &Log,
+    config: &CallbackConfig,
+) -> anyhow::Result<()> {
+    let attempts = config.max_attempts.max(1);
+    let mut last_err: Option<anyhow::Error> = None;
+    for attempt in 1..=attempts {
+        match callback.on_event(log).await {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < attempts {
+                    warn!(
+                        attempt,
+                        max_attempts = attempts,
+                        "callback failed; retrying after fixed delay"
+                    );
+                    tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
+                    continue;
+                }
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("callback failed with unknown error")))
 }
