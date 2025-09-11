@@ -39,7 +39,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Cargo test
-        run: cargo nextest run --workspace --all-targets --all-features --no-tests=pass
+        run: cargo nextest run --locked --all-targets --all-features --no-tests=pass
 
         # https://github.com/rust-lang/cargo/issues/6669
       - name: Run doc tests
