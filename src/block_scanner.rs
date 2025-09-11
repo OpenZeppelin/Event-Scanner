@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connect_ws_propagates_config_and_channel_capacity() {
+    async fn test_channel_buffer_is_equal_to_blocks_read_per_epoch() {
         let anvil = Anvil::new().try_spawn().expect("failed to spawn anvil");
         let ws = WsConnect::new(anvil.ws_endpoint_url());
 
