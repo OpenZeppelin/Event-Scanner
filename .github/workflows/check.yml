@@ -1,0 +1,87 @@
+name: check
+# This workflow runs whenever a PR is opened or updated, or a commit is pushed
+# to main. It runs several checks:
+# - fmt: checks that the code is formatted according to `rustfmt`.
+# - clippy: checks that the code does not contain any `clippy` warnings.
+# - doc: checks that the code can be documented without errors.
+# - typos: checks for typos across the repo.
+permissions:
+  contents: read
+# This configuration allows maintainers of this repo to create a branch and
+# pull request based on the new branch. Restricting the push trigger to the
+# main branch ensures that the PR only gets built once.
+on:
+  push:
+    branches: [main, v*]
+  pull_request:
+# If new code is pushed to a PR branch, then cancel in progress workflows for
+# that PR. Ensures that we don't waste CI time, and returns results quicker.
+# https://github.com/jonhoo/rust-ci-conf/pull/5
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-build:
+    name: Cargo Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Repository
+        uses: actions/checkout@v5
+
+      - name: Install stable toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: cargo build
+        run: cargo b --locked --all-targets --all-features
+
+  cargo-fmt:
+    name: Cargo fmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Repository
+        uses: actions/checkout@v5
+
+      - name: Install stable toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+          toolchain: nightly
+
+      - name: Rustfmt Check
+        run: cargo fmt --all --check
+
+  cargo-clippy:
+    name: Cargo clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Repository
+        uses: actions/checkout@v5
+
+      - name: Install stable toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+
+      - name: Clippy Check
+        uses: giraffate/clippy-action@v1
+        with:
+          reporter: "github-pr-check"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clippy_flags: --all-targets --all-features -- -D warnings -D clippy::pedantic
+
+  typos-cli:
+    name: typos
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Repository
+        uses: actions/checkout@v5
+
+      - name: Check spelling of files in the workspace
+        uses: crate-ci/typos@v1

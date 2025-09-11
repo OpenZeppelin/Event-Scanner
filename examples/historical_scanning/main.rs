@@ -1,9 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use alloy::providers::{ProviderBuilder};
-use alloy::rpc::types::Log;
-use alloy::sol;
-use alloy::sol_types::SolEvent;
+use alloy::{providers::ProviderBuilder, rpc::types::Log, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 use async_trait::async_trait;
 use event_scanner::{CallbackConfig, EventCallback, EventFilter, ScannerBuilder};
@@ -65,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         callback: Arc::new(CounterCallback),
     };
 
-    counter_contract.increase().send().await?;
+    let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
     let mut scanner = ScannerBuilder::new(anvil.ws_endpoint_url())
         .add_event_filter(increase_filter)
