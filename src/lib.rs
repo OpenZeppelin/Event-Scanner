@@ -1,9 +1,13 @@
+pub mod block_scanner;
 pub mod builder;
 pub mod callback;
+pub mod event_scanner;
 pub mod scanner;
 pub mod types;
 
-pub use crate::builder::ScannerBuilder;
-pub use crate::callback::EventCallback;
-pub use crate::scanner::Scanner;
-pub use crate::types::{CallbackConfig, EventFilter};
+pub use crate::{
+    builder::ScannerBuilder,
+    callback::EventCallback,
+    scanner::Scanner,
+    types::{CallbackConfig, EventFilter},
+};
