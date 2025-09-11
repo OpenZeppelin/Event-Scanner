@@ -73,8 +73,7 @@ impl ScannerBuilder {
 mod tests {
     use super::*;
     use crate::callback::EventCallback;
-    use alloy::primitives::address;
-    use alloy::rpc::types::Log;
+    use alloy::{primitives::address, rpc::types::Log};
     use async_trait::async_trait;
     use std::sync::Arc;
 
