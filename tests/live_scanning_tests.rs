@@ -91,6 +91,8 @@ async fn test_live_scanning_basic() -> anyhow::Result<()> {
         let _ = contract.increase().send().await?.get_receipt().await?;
     }
 
+    sleep(Duration::from_millis(200)).await;
+
     scanner_handle.abort();
 
     assert_eq!(event_count.load(Ordering::SeqCst), 5);
@@ -141,6 +143,8 @@ async fn test_live_scanning_multiple_events() -> anyhow::Result<()> {
             let _ = contract.decrease().send().await?.get_receipt().await?;
         }
     }
+
+    sleep(Duration::from_millis(200)).await;
 
     scanner_handle.abort();
 
