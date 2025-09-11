@@ -11,7 +11,7 @@ use alloy::{
         client::{ClientBuilder, RpcClient},
         types::Header,
     },
-    transports::{TransportError, http::reqwest},
+    transports::TransportError,
 };
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
@@ -59,6 +59,12 @@ pub struct BlockScannerBuilder<N: Network> {
     reorg_rewind_depth: u64,
     retry_interval: Duration,
     block_confirmations: u64,
+}
+
+impl<N: Network> Default for BlockScannerBuilder<N> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<N: Network> BlockScannerBuilder<N> {
@@ -128,11 +134,6 @@ impl<N: Network> BlockScannerBuilder<N> {
         Ok(self.connect_client(client))
     }
 
-    pub fn connect_http(self, rpc_url: reqwest::Url) -> BlockScanner<RootProvider<N>, N> {
-        let client = ClientBuilder::default().http(rpc_url);
-        self.connect_client(client)
-    }
-
     pub fn connect_client(self, client: RpcClient) -> BlockScanner<RootProvider<N>, N> {
         let provider = RootProvider::new(client);
         self.connect_provider(provider)
@@ -189,11 +190,9 @@ where
         let receiver_stream = ReceiverStream::new(self.receiver);
 
         tokio::spawn(async move {
-            if self.sender.send(Err(BlockScannerError::ErrEOF {})).await.is_err() {
-                return;
-            }
+            if self.sender.send(Err(BlockScannerError::ErrEOF {})).await.is_err() {}
         });
 
-        return receiver_stream
+        receiver_stream
     }
 }

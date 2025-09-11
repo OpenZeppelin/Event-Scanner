@@ -9,13 +9,19 @@ use alloy::{
     network::Network,
     providers::{Provider, RootProvider},
     rpc::client::RpcClient,
-    transports::{TransportError, http::reqwest},
+    transports::TransportError,
 };
 
 pub struct EventScannerBuilder<N: Network> {
     block_scanner: BlockScannerBuilder<N>,
     tracked_events: Vec<EventFilter>,
     callback_config: CallbackConfig,
+}
+
+impl<N: Network> Default for EventScannerBuilder<N> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<N: Network> EventScannerBuilder<N> {
@@ -102,15 +108,6 @@ impl<N: Network> EventScannerBuilder<N> {
             tracked_events: self.tracked_events,
             callback_config: self.callback_config,
         })
-    }
-
-    pub fn connect_http(self, rpc_url: reqwest::Url) -> EventScanner<RootProvider<N>, N> {
-        let block_scanner = self.block_scanner.connect_http(rpc_url);
-        EventScanner {
-            block_scanner,
-            tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
-        }
     }
 
     pub fn connect_client(self, client: RpcClient) -> EventScanner<RootProvider<N>, N> {
