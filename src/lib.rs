@@ -1,4 +1,4 @@
-pub mod block_channel;
+pub mod block_scanner;
 pub mod builder;
 pub mod callback;
 pub mod scanner;
