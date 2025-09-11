@@ -7,7 +7,8 @@ use crate::{
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
-    providers::{Provider, RootProvider},
+    providers::{IpcConnect, Provider, RootProvider, WsConnect},
+    pubsub::PubSubConnect,
     rpc::client::RpcClient,
     transports::TransportError,
 };
@@ -85,7 +86,7 @@ impl<N: Network> EventScannerBuilder<N> {
 
     pub async fn connect_ws(
         self,
-        connect: alloy::transports::ws::WsConnect,
+        connect: WsConnect,
     ) -> Result<EventScanner<RootProvider<N>, N>, TransportError> {
         let block_scanner = self.block_scanner.connect_ws(connect).await?;
         Ok(EventScanner {
@@ -97,10 +98,10 @@ impl<N: Network> EventScannerBuilder<N> {
 
     pub async fn connect_ipc<T>(
         self,
-        connect: alloy::transports::ipc::IpcConnect<T>,
+        connect: IpcConnect<T>,
     ) -> Result<EventScanner<RootProvider<N>, N>, TransportError>
     where
-        alloy::transports::ipc::IpcConnect<T>: alloy::pubsub::PubSubConnect,
+        IpcConnect<T>: PubSubConnect,
     {
         let block_scanner = self.block_scanner.connect_ipc(connect).await?;
         Ok(EventScanner {
