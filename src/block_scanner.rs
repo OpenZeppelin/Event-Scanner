@@ -11,7 +11,7 @@ use alloy::{
         client::{ClientBuilder, RpcClient},
         types::Header,
     },
-    transports::http::reqwest,
+    transports::{TransportError, http::reqwest},
 };
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
@@ -107,6 +107,25 @@ impl<N: Network> BlockScannerBuilder<N> {
     pub fn with_block_confirmations(&mut self, block_confirmations: u64) -> &mut Self {
         self.block_confirmations = block_confirmations;
         self
+    }
+
+    pub async fn connect_ws(
+        self,
+        connect: alloy::transports::ws::WsConnect,
+    ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError> {
+        let client = ClientBuilder::default().ws(connect).await?;
+        Ok(self.connect_client(client))
+    }
+
+    pub async fn connect_ipc<T>(
+        self,
+        connect: alloy::transports::ipc::IpcConnect<T>,
+    ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError>
+    where
+        alloy::transports::ipc::IpcConnect<T>: alloy::pubsub::PubSubConnect,
+    {
+        let client = ClientBuilder::default().ipc(connect).await?;
+        Ok(self.connect_client(client))
     }
 
     pub fn connect_http(self, rpc_url: reqwest::Url) -> BlockScanner<RootProvider<N>, N> {

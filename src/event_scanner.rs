@@ -9,7 +9,7 @@ use alloy::{
     network::Network,
     providers::{Provider, RootProvider},
     rpc::client::RpcClient,
-    transports::http::reqwest,
+    transports::{TransportError, http::reqwest},
 };
 
 pub struct EventScannerBuilder<N: Network> {
@@ -75,6 +75,33 @@ impl<N: Network> EventScannerBuilder<N> {
     pub fn with_block_confirmations(&mut self, block_confirmations: u64) -> &mut Self {
         self.block_scanner.with_block_confirmations(block_confirmations);
         self
+    }
+
+    pub async fn connect_ws(
+        self,
+        connect: alloy::transports::ws::WsConnect,
+    ) -> Result<EventScanner<RootProvider<N>, N>, TransportError> {
+        let block_scanner = self.block_scanner.connect_ws(connect).await?;
+        Ok(EventScanner {
+            block_scanner,
+            tracked_events: self.tracked_events,
+            callback_config: self.callback_config,
+        })
+    }
+
+    pub async fn connect_ipc<T>(
+        self,
+        connect: alloy::transports::ipc::IpcConnect<T>,
+    ) -> Result<EventScanner<RootProvider<N>, N>, TransportError>
+    where
+        alloy::transports::ipc::IpcConnect<T>: alloy::pubsub::PubSubConnect,
+    {
+        let block_scanner = self.block_scanner.connect_ipc(connect).await?;
+        Ok(EventScanner {
+            block_scanner,
+            tracked_events: self.tracked_events,
+            callback_config: self.callback_config,
+        })
     }
 
     pub fn connect_http(self, rpc_url: reqwest::Url) -> EventScanner<RootProvider<N>, N> {
