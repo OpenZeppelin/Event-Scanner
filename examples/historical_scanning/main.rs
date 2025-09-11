@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         callback: Arc::new(CounterCallback),
     };
 
-    counter_contract.increase().send().await?;
+    let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
     let mut scanner = ScannerBuilder::new(anvil.ws_endpoint_url())
         .add_event_filter(increase_filter)

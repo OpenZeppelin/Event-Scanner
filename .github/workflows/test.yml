@@ -1,0 +1,46 @@
+name: tests
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-next-test:
+    name: Cargo test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Repository
+        uses: actions/checkout@v5
+
+      - name: Install stable toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache cargo-nextest binary
+        id: cache-cargo-nextest
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-nextest
+        if: steps.cache-cargo-nextest.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Cargo test
+        run: cargo nextest run --locked --all-targets --all-features --no-tests=pass
+
+        # https://github.com/rust-lang/cargo/issues/6669
+      - name: Run doc tests
+        run: cargo test --locked --doc
