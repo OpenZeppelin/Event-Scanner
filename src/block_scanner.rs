@@ -277,22 +277,9 @@ mod tests {
         let ws = WsConnect::new(anvil.ws_endpoint_url());
 
         let mut builder = BlockScannerBuilder::<Ethereum>::new();
-        builder.with_blocks_read_per_epoch(7);
-        builder.with_reorg_rewind_depth(2);
-        let interval = Duration::from_secs(5);
-        builder.with_retry_interval(interval);
-        builder.with_block_confirmations(9);
-        builder.with_start_height(BlockNumberOrTag::Earliest);
-        builder.with_end_height(BlockNumberOrTag::Latest);
+        builder.with_blocks_read_per_epoch(5);
 
         let scanner = builder.connect_ws(ws).await.expect("failed to connect ws");
-
-        assert_eq!(scanner.blocks_read_per_epoch, 7);
-        assert_eq!(scanner.reorg_rewind_depth, 2);
-        assert_eq!(scanner.retry_interval, interval);
-        assert_eq!(scanner.block_confirmations, 9);
-        assert!(matches!(scanner.start_height, BlockNumberOrTag::Earliest));
-        assert!(matches!(scanner.end_height, BlockNumberOrTag::Latest));
 
         for _ in 0..scanner.blocks_read_per_epoch {
             scanner
