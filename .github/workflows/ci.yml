@@ -69,10 +69,5 @@ jobs:
       - name: Fetch Repository
         uses: actions/checkout@v5
 
-      - name: Install Typos
-        uses: taiki-e/install-action@v2
-        with:
-          tool: typos-cli
-
-      - name: run typos
-        run: typos
+      - name: Check spelling of files in the workspace
+        uses: crate-ci/typos@v1
