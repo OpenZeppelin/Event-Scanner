@@ -26,7 +26,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: cargo build
-        run: cargo b --workspace --all-targets --all-features
+        run: cargo b --locked --all-targets --all-features
 
   cargo-fmt:
     name: Cargo fmt
