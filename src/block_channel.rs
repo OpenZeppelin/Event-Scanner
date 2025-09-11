@@ -1,17 +1,17 @@
 use std::{marker::PhantomData, time::Duration};
 
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio_stream::wrappers::ReceiverStream;
 
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
-    providers::{Provider, ProviderBuilder, RootProvider},
+    providers::{Provider, RootProvider},
     rpc::{
-        self,
         client::{ClientBuilder, RpcClient},
         types::Header,
     },
-    transports::http::{Client, Http, reqwest},
+    transports::http::reqwest,
 };
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
@@ -27,63 +27,47 @@ const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const STATE_SYNC_MAX_RETRIES: u64 = 12;
 
-#[derive(Debug, Clone)]
-struct ErrEOF;
-
-#[derive(Debug, Clone)]
-struct ErrContinue;
-
-impl std::fmt::Display for ErrEOF {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "end of block batch iterator")
-    }
+#[derive(Debug)]
+pub enum BlockScannerError {
+    ErrEOF,
+    ErrContinue,
+    TerminalError(u64),
 }
 
-impl std::fmt::Display for ErrContinue {
+impl std::fmt::Display for BlockScannerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "continue")
+        match self {
+            BlockScannerError::ErrEOF => write!(f, "end of block batch iterator"),
+            BlockScannerError::ErrContinue => write!(f, "continue"),
+            BlockScannerError::TerminalError(height) => {
+                write!(f, "terminal error at block height {}", height)
+            }
+        }
     }
 }
 
 type EndIterFunc = fn();
 type UpdateCurrentFunc = fn(Header);
-type OnBlocksFunc = fn(Header, Header, UpdateCurrentFunc, EndIterFunc) -> anyhow::Result<()>;
+type OnBlocksFunc<N> =
+    fn(<N as Network>::BlockResponse, UpdateCurrentFunc, EndIterFunc) -> anyhow::Result<()>;
 
-// BlockScanner iterates the blocks in batches between the given start and end heights,
-// with the awareness of reorganization.
-pub struct BlockScanner<P: Provider<N>, N: Network> {
-    provider: P,
-    sender: Sender<N::BlockResponse>,
-    receiver: Receiver<N::BlockResponse>,
+pub struct BlockScannerBuilder<N: Network> {
     blocks_read_per_epoch: u64,
     start_height: BlockNumberOrTag,
     end_height: BlockNumberOrTag,
-    current: Header,
-    on_blocks: OnBlocksFunc,
-    is_end: bool,
-    reorg_rewind_depth: u64,
-    retry_interval: Duration,
-    block_confirmations: u64,
-    network: PhantomData<fn() -> N>,
-}
-
-pub struct BlockScannerBuilder {
-    blocks_read_per_epoch: u64,
-    start_height: BlockNumberOrTag,
-    end_height: BlockNumberOrTag,
-    on_blocks: OnBlocksFunc,
+    on_blocks: OnBlocksFunc<N>,
     reorg_rewind_depth: u64,
     retry_interval: Duration,
     block_confirmations: u64,
 }
 
-impl BlockScannerBuilder {
+impl<N: Network> BlockScannerBuilder<N> {
     pub fn new() -> Self {
         Self {
             blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
             start_height: BlockNumberOrTag::Earliest,
             end_height: BlockNumberOrTag::Latest,
-            on_blocks: |_, _, _, _| Ok(()),
+            on_blocks: |_, _, _| Ok(()),
             reorg_rewind_depth: DEFAULT_REORG_REWIND_DEPTH,
             retry_interval: DEFAULT_RETRY_INTERVAL,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
@@ -105,7 +89,7 @@ impl BlockScannerBuilder {
         self
     }
 
-    pub fn with_on_blocks(&mut self, on_blocks: OnBlocksFunc) -> &mut Self {
+    pub fn with_on_blocks(&mut self, on_blocks: OnBlocksFunc<N>) -> &mut Self {
         self.on_blocks = on_blocks;
         self
     }
@@ -125,26 +109,19 @@ impl BlockScannerBuilder {
         self
     }
 
-    pub fn connect_http<N: Network>(
-        self,
-        rpc_url: reqwest::Url,
-    ) -> BlockScanner<RootProvider<N>, N> {
+    pub fn connect_http(self, rpc_url: reqwest::Url) -> BlockScanner<RootProvider<N>, N> {
         let client = ClientBuilder::default().http(rpc_url);
         self.connect_client(client)
     }
 
-    pub fn connect_client<N>(self, client: RpcClient) -> BlockScanner<RootProvider<N>, N>
-    where
-        N: Network,
-    {
+    pub fn connect_client(self, client: RpcClient) -> BlockScanner<RootProvider<N>, N> {
         let provider = RootProvider::new(client);
         self.connect_provider(provider)
     }
 
-    pub fn connect_provider<P, N>(self, provider: P) -> BlockScanner<P, N>
+    pub fn connect_provider<P>(self, provider: P) -> BlockScanner<P, N>
     where
         P: Provider<N>,
-        N: Network,
     {
         let (sender, receiver) = mpsc::channel(self.blocks_read_per_epoch.try_into().unwrap());
 
@@ -163,5 +140,41 @@ impl BlockScannerBuilder {
             block_confirmations: self.block_confirmations,
             network: PhantomData,
         }
+    }
+}
+
+// BlockScanner iterates the blocks in batches between the given start and end heights,
+// with the awareness of reorganization.
+pub struct BlockScanner<P: Provider<N>, N: Network> {
+    provider: P,
+    sender: Sender<Result<N::BlockResponse, BlockScannerError>>,
+    receiver: Receiver<Result<N::BlockResponse, BlockScannerError>>,
+    blocks_read_per_epoch: u64,
+    start_height: BlockNumberOrTag,
+    end_height: BlockNumberOrTag,
+    current: Header,
+    on_blocks: OnBlocksFunc<N>,
+    is_end: bool,
+    reorg_rewind_depth: u64,
+    retry_interval: Duration,
+    block_confirmations: u64,
+    network: PhantomData<fn() -> N>,
+}
+
+impl<P, N> BlockScanner<P, N>
+where
+    P: Provider<N>,
+    N: Network,
+{
+    pub async fn start(self) -> ReceiverStream<Result<N::BlockResponse, BlockScannerError>> {
+        let receiver_stream = ReceiverStream::new(self.receiver);
+
+        tokio::spawn(async move {
+            if self.sender.send(Err(BlockScannerError::ErrEOF {})).await.is_err() {
+                return;
+            }
+        });
+
+        return receiver_stream
     }
 }
