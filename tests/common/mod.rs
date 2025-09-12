@@ -10,6 +10,7 @@ use alloy::{network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol}
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use async_trait::async_trait;
 use event_scanner::EventCallback;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 // Shared test contract used across integration tests
@@ -61,6 +62,54 @@ impl EventCallback for SlowProcessor {
     async fn on_event(&self, _log: &Log) -> anyhow::Result<()> {
         sleep(Duration::from_millis(self.delay_ms)).await;
         self.processed.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// A callback that fails `fail_times` attempts before succeeding once.
+pub struct FlakyCallback {
+    pub attempts: Arc<AtomicUsize>,
+    pub successes: Arc<AtomicUsize>,
+    pub fail_times: usize,
+}
+
+#[async_trait]
+impl EventCallback for FlakyCallback {
+    async fn on_event(&self, _log: &Log) -> anyhow::Result<()> {
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempt <= self.fail_times {
+            anyhow::bail!("intentional failure on attempt {attempt}");
+        }
+        self.successes.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// A callback that always fails and records attempts.
+pub struct AlwaysFailingCallback {
+    pub attempts: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl EventCallback for AlwaysFailingCallback {
+    async fn on_event(&self, _log: &Log) -> anyhow::Result<()> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        anyhow::bail!("always failing callback")
+    }
+}
+
+/// Captures block numbers in the order they are processed.
+pub struct OrderingCapture {
+    pub blocks: Arc<Mutex<Vec<u64>>>,
+}
+
+#[async_trait]
+impl EventCallback for OrderingCapture {
+    async fn on_event(&self, log: &Log) -> anyhow::Result<()> {
+        let mut guard = self.blocks.lock().await;
+        if let Some(n) = log.block_number {
+            guard.push(n);
+        }
         Ok(())
     }
 }
