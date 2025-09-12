@@ -10,7 +10,10 @@ use alloy::{network::Ethereum, providers::WsConnect, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
 use tokio::time::sleep;
 
-use crate::common::{EventCounter, TestCounter, build_provider, deploy_counter, spawn_anvil};
+use crate::{
+    common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
+    mock_callbacks::BasicCounterCallback,
+};
 
 #[tokio::test]
 async fn high_event_volume_no_loss() -> anyhow::Result<()> {
@@ -19,7 +22,7 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
     let contract = deploy_counter(provider).await?;
 
     let count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(EventCounter { count: count.clone() });
+    let callback = Arc::new(BasicCounterCallback { count: count.clone() });
     let filter = EventFilter {
         contract_address: *contract.address(),
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),

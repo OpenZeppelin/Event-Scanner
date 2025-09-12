@@ -1,8 +1,20 @@
-use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
+use crate::{
+    common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
+    mock_callbacks::{AlwaysFailingCallback, FlakyCallback, SlowProcessorCallback},
+};
 use alloy::{network::Ethereum, providers::WsConnect, sol_types::SolEvent};
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil, SlowProcessor, FlakyCallback, AlwaysFailingCallback};
-use event_scanner::{types::{EventFilter, CallbackConfig}, event_scanner::EventScannerBuilder};
+use event_scanner::{
+    event_scanner::EventScannerBuilder,
+    types::{CallbackConfig, EventFilter},
+};
 use tokio::time::sleep;
 
 #[tokio::test]
@@ -13,9 +25,13 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
     let contract_address = *contract.address();
 
     let processed = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(SlowProcessor { delay_ms: 100, processed: processed.clone() });
+    let callback = Arc::new(SlowProcessorCallback { delay_ms: 100, processed: processed.clone() });
 
-    let filter = EventFilter { contract_address, event: TestCounter::CountIncreased::SIGNATURE.to_owned(), callback };
+    let filter = EventFilter {
+        contract_address,
+        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        callback,
+    };
     let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
     let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
 
@@ -42,12 +58,21 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
 
     let attempts = Arc::new(AtomicUsize::new(0));
     let successes = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(FlakyCallback { attempts: attempts.clone(), successes: successes.clone(), fail_times: 2 });
+    let callback = Arc::new(FlakyCallback {
+        attempts: attempts.clone(),
+        successes: successes.clone(),
+        fail_times: 2,
+    });
 
-    let filter = EventFilter { contract_address: *contract.address(), event: TestCounter::CountIncreased::SIGNATURE.to_owned(), callback };
+    let filter = EventFilter {
+        contract_address: *contract.address(),
+        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        callback,
+    };
     let cfg = CallbackConfig { max_attempts: 3, delay_ms: 50 };
 
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter).with_callback_config(cfg);
+    let builder =
+        EventScannerBuilder::<Ethereum>::new().with_event_filter(filter).with_callback_config(cfg);
     let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
     let scanner_handle = tokio::spawn(async move { scanner.start().await });
 
@@ -69,9 +94,14 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
     let attempts = Arc::new(AtomicUsize::new(0));
     let callback = Arc::new(AlwaysFailingCallback { attempts: attempts.clone() });
 
-    let filter = EventFilter { contract_address: *contract.address(), event: TestCounter::CountIncreased::SIGNATURE.to_owned(), callback };
+    let filter = EventFilter {
+        contract_address: *contract.address(),
+        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        callback,
+    };
     let cfg = CallbackConfig { max_attempts: 2, delay_ms: 20 };
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter).with_callback_config(cfg);
+    let builder =
+        EventScannerBuilder::<Ethereum>::new().with_event_filter(filter).with_callback_config(cfg);
     let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
     let scanner_handle = tokio::spawn(async move { scanner.start().await });
 
