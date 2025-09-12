@@ -248,7 +248,7 @@ mod tests {
         let builder = BlockScannerBuilder::<Ethereum>::new();
         assert_eq!(builder.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
         assert!(matches!(builder.start_height, BlockNumberOrTag::Latest));
-        assert!(matches!(builder.end_height, None));
+        assert!(builder.end_height.is_none());
         assert_eq!(builder.reorg_rewind_depth, DEFAULT_REORG_REWIND_DEPTH);
         assert_eq!(builder.retry_interval, DEFAULT_RETRY_INTERVAL);
         assert_eq!(builder.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
