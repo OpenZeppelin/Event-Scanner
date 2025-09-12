@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::{marker::PhantomData, time::Duration};
 
 use tokio::sync::mpsc::{self, Receiver, Sender};
