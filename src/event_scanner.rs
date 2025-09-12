@@ -279,7 +279,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         config: &CallbackConfig,
     ) -> anyhow::Result<()> {
         match callback.on_event(log).await {
-            Ok(_) => Ok(()),
+            Ok(()) => Ok(()),
             Err(first_err) => {
                 // use exponential backoff for state-sync errors
                 if is_missing_trie_node_error(&first_err) {
@@ -306,7 +306,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
 
                         tokio::time::sleep(delay).await;
                         match callback.on_event(log).await {
-                            Ok(_) => return Ok(()),
+                            Ok(()) => return Ok(()),
                             Err(e) => {
                                 last_err = e;
                                 let next_secs = delay.as_secs_f64() * STATE_SYNC_RETRY_MULTIPLIER;
@@ -333,10 +333,9 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
                         );
                         tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
                         match callback.on_event(log).await {
-                            Ok(_) => return Ok(()),
+                            Ok(()) => return Ok(()),
                             Err(e) => {
                                 last_err = e;
-                                continue;
                             }
                         }
                     }
