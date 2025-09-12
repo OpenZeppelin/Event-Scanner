@@ -24,36 +24,47 @@ impl ScannerBuilder {
         }
     }
 
+    #[must_use]
     pub fn start_block(mut self, start_block: u64) -> Self {
         self.start_block = Some(start_block);
         self
     }
 
+    #[must_use]
     pub fn end_block(mut self, end_block: u64) -> Self {
         self.end_block = Some(end_block);
         self
     }
 
+    #[must_use]
     pub fn max_blocks_per_filter(mut self, max_blocks: u64) -> Self {
         self.max_blocks_per_filter = max_blocks;
         self
     }
 
+    #[must_use]
     pub fn add_event_filter(mut self, filter: EventFilter) -> Self {
         self.tracked_events.push(filter);
         self
     }
 
+    #[must_use]
     pub fn add_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
         self.tracked_events.extend(filters);
         self
     }
 
+    #[must_use]
     pub fn callback_config(mut self, cfg: CallbackConfig) -> Self {
         self.callback_config = cfg;
         self
     }
 
+    /// Builds the scanner
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to build
     pub async fn build(self) -> anyhow::Result<Scanner> {
         Scanner::new(
             self.rpc_url,
