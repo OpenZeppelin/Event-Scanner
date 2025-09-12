@@ -81,7 +81,7 @@ impl ScannerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::callback::EventCallback;
+    use crate::{block_scanner::BACK_OFF_MAX_RETRIES, callback::EventCallback};
     use alloy::{primitives::address, rpc::types::Log};
     use async_trait::async_trait;
     use std::sync::Arc;
@@ -153,7 +153,7 @@ mod tests {
     fn test_builder_default_callback_config() {
         let builder = ScannerBuilder::new(WS_URL);
 
-        assert_eq!(builder.callback_config.max_attempts, 3);
+        assert_eq!(builder.callback_config.max_attempts, BACK_OFF_MAX_RETRIES);
         assert_eq!(builder.callback_config.delay_ms, 200);
     }
 
