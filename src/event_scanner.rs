@@ -208,7 +208,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
                 Ok(range) => {
                     let from_block = range.start;
                     let to_block = range.end;
-                    info!(from_block, to_block, "processing placeholder block range");
+                    info!(from_block, to_block, "processing block range");
                     self.process_block_range(from_block, to_block, &event_channels).await?;
                 }
                 Err(e) => {
