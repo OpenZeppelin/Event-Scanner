@@ -7,9 +7,9 @@ use std::{
 };
 
 mod common;
-use alloy::sol_types::SolEvent;
+use alloy::{network::Ethereum, providers::WsConnect, sol_types::SolEvent};
 use common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use event_scanner::{EventFilter, ScannerBuilder};
+use event_scanner::{EventFilter, event_scanner::EventScannerBuilder};
 use tokio::time::sleep;
 
 use crate::common::{EventCounter, SlowProcessor};
@@ -30,8 +30,8 @@ async fn test_live_scanning_basic() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner =
-        ScannerBuilder::new(anvil.ws_endpoint_url()).add_event_filter(filter).build().await?;
+    let scanner_builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
+    let mut scanner = scanner_builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
 
     let scanner_handle = tokio::spawn(async move { scanner.start().await });
 
@@ -74,11 +74,10 @@ async fn test_live_scanning_multiple_events() -> anyhow::Result<()> {
         callback: decrease_callback,
     };
 
-    let mut scanner = ScannerBuilder::new(anvil.ws_endpoint_url())
-        .add_event_filter(increase_filter)
-        .add_event_filter(decrease_filter)
-        .build()
-        .await?;
+    let scanner_builder = EventScannerBuilder::<Ethereum>::new()
+        .with_event_filter(increase_filter)
+        .with_event_filter(decrease_filter);
+    let mut scanner = scanner_builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
 
     let scanner_handle = tokio::spawn(async move { scanner.start().await });
 
@@ -115,8 +114,8 @@ async fn test_live_scanning_with_slow_processor() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner =
-        ScannerBuilder::new(anvil.ws_endpoint_url()).add_event_filter(filter).build().await?;
+    let scanner_builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
+    let mut scanner = scanner_builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
 
     let scanner_handle = tokio::spawn(async move { scanner.start().await });
 
