@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use std::{future, marker::PhantomData, time::Duration};
+use std::{future, marker::PhantomData, ops::Range, time::Duration};
 
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
@@ -57,7 +57,7 @@ pub type OnBlocksFunc<N> =
 pub struct BlockScannerBuilder<N: Network> {
     blocks_read_per_epoch: usize,
     start_height: BlockNumberOrTag,
-    end_height: BlockNumberOrTag,
+    end_height: Option<BlockNumberOrTag>,
     on_blocks: OnBlocksFunc<N>,
     reorg_rewind_depth: u64,
     retry_interval: Duration,
@@ -75,8 +75,8 @@ impl<N: Network> BlockScannerBuilder<N> {
     pub fn new() -> Self {
         Self {
             blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
-            start_height: BlockNumberOrTag::Earliest,
-            end_height: BlockNumberOrTag::Latest,
+            start_height: BlockNumberOrTag::Latest,
+            end_height: None,
             on_blocks: |_, _, _| Ok(()),
             reorg_rewind_depth: DEFAULT_REORG_REWIND_DEPTH,
             retry_interval: DEFAULT_RETRY_INTERVAL,
@@ -98,7 +98,7 @@ impl<N: Network> BlockScannerBuilder<N> {
 
     #[must_use]
     pub fn with_end_height(&mut self, end_height: BlockNumberOrTag) -> &mut Self {
-        self.end_height = end_height;
+        self.end_height = Some(end_height);
         self
     }
 
@@ -187,7 +187,7 @@ pub struct BlockScanner<P: Provider<N>, N: Network> {
     provider: P,
     blocks_read_per_epoch: usize,
     start_height: BlockNumberOrTag,
-    end_height: BlockNumberOrTag,
+    end_height: Option<BlockNumberOrTag>,
     current: Header,
     on_blocks: OnBlocksFunc<N>,
     is_end: bool,
@@ -202,7 +202,7 @@ where
     P: Provider<N>,
     N: Network,
 {
-    pub async fn start(&self) -> ReceiverStream<Result<N::BlockResponse, BlockScannerError>> {
+    pub async fn start(&self) -> ReceiverStream<Result<Range<u64>, BlockScannerError>> {
         let (sender, receiver) = mpsc::channel(self.blocks_read_per_epoch);
 
         let receiver_stream = ReceiverStream::new(receiver);
@@ -247,8 +247,8 @@ mod tests {
     fn test_builder_defaults() {
         let builder = BlockScannerBuilder::<Ethereum>::new();
         assert_eq!(builder.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
-        assert!(matches!(builder.start_height, BlockNumberOrTag::Earliest));
-        assert!(matches!(builder.end_height, BlockNumberOrTag::Latest));
+        assert!(matches!(builder.start_height, BlockNumberOrTag::Latest));
+        assert!(matches!(builder.end_height, None));
         assert_eq!(builder.reorg_rewind_depth, DEFAULT_REORG_REWIND_DEPTH);
         assert_eq!(builder.retry_interval, DEFAULT_RETRY_INTERVAL);
         assert_eq!(builder.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
@@ -268,7 +268,7 @@ mod tests {
 
         assert_eq!(builder.blocks_read_per_epoch, 25);
         assert!(matches!(builder.start_height, BlockNumberOrTag::Earliest));
-        assert!(matches!(builder.end_height, BlockNumberOrTag::Latest));
+        assert!(matches!(builder.end_height, Some(BlockNumberOrTag::Latest)));
         assert_eq!(builder.reorg_rewind_depth, 5);
         assert_eq!(builder.retry_interval, interval);
         assert_eq!(builder.block_confirmations, 12);
