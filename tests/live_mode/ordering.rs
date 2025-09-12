@@ -75,8 +75,7 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
     assert_eq!(data.len(), 5, "expected 5 events, got {}: {:?}", data.len(), data);
     assert!(
         data.windows(2).all(|w| w[0] <= w[1]),
-        "block numbers must be non-decreasing: {:?}",
-        data
+        "block numbers must be non-decreasing: {data:?}",
     );
 
     Ok(())
