@@ -6,7 +6,9 @@ use std::{
     time::Duration,
 };
 
-use alloy::{network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol, primitives::U256};
+use alloy::{
+    network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol, sol_types::SolEvent,
+};
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use async_trait::async_trait;
 use event_scanner::EventCallback;
@@ -85,7 +87,7 @@ impl EventCallback for FlakyCallback {
     }
 }
 
-/// A callback that always fails and records attempts.
+// A callback that always fails and records attempts.
 pub struct AlwaysFailingCallback {
     pub attempts: Arc<AtomicUsize>,
 }
@@ -98,7 +100,7 @@ impl EventCallback for AlwaysFailingCallback {
     }
 }
 
-/// Captures block numbers in the order they are processed.
+// Captures block numbers in the order they are processed.
 pub struct OrderingCapture {
     pub blocks: Arc<Mutex<Vec<u64>>>,
 }
@@ -114,7 +116,7 @@ impl EventCallback for OrderingCapture {
     }
 }
 
-/// Captures decoded CountIncreased `newCount` values to verify callback/event ordering.
+// Captures decoded CountIncreased `newCount` values to verify callback/event ordering.
 pub struct OrderingCaptureCount {
     pub counts: Arc<Mutex<Vec<u64>>>,
 }
@@ -122,23 +124,22 @@ pub struct OrderingCaptureCount {
 #[async_trait]
 impl EventCallback for OrderingCaptureCount {
     async fn on_event(&self, log: &Log) -> anyhow::Result<()> {
-        // Decode single uint256 from data field (non-indexed arg ABI encoding)
-        let data = &log.inner.data;
-        if data.len() < 32 {
-            anyhow::bail!("log data too short for uint256: {} bytes", data.len());
+        if let Some(&TestCounter::CountIncreased::SIGNATURE_HASH) = log.topic0() {
+            let TestCounter::CountIncreased { newCount } = log.log_decode()?.inner.data;
+            let mut guard = self.counts.lock().await;
+            guard.push(newCount.try_into().unwrap());
         }
-        let value = U256::from_be_slice(&data[..32]);
-        let as_u64 = value.try_into().unwrap_or(u64::MAX);
-        let mut guard = self.counts.lock().await;
-        guard.push(as_u64);
         Ok(())
     }
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub fn spawn_anvil(block_time_secs: u64) -> anyhow::Result<AnvilInstance> {
     Ok(Anvil::new().block_time(block_time_secs).try_spawn()?)
 }
 
+#[allow(clippy::missing_errors_doc)]
+#[allow(clippy::missing_panics_doc)]
 pub async fn build_provider(
     anvil: &AnvilInstance,
 ) -> anyhow::Result<impl alloy::providers::Provider<Ethereum> + Clone> {
@@ -147,6 +148,7 @@ pub async fn build_provider(
     Ok(provider)
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub async fn deploy_counter<P>(provider: P) -> anyhow::Result<TestCounter::TestCounterInstance<P>>
 where
     P: alloy::providers::Provider<Ethereum> + Clone,
