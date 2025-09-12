@@ -1,8 +1,7 @@
 use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
 
-mod common;
 use alloy::{network::Ethereum, providers::WsConnect, sol_types::SolEvent};
-use common::{TestCounter, build_provider, deploy_counter, spawn_anvil, SlowProcessor, FlakyCallback, AlwaysFailingCallback};
+use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil, SlowProcessor, FlakyCallback, AlwaysFailingCallback};
 use event_scanner::{types::{EventFilter, CallbackConfig}, event_scanner::EventScannerBuilder};
 use tokio::time::sleep;
 
@@ -83,4 +82,3 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     Ok(())
 }
-

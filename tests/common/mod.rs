@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use alloy::{network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol};
+use alloy::{network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol, primitives::U256};
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use async_trait::async_trait;
 use event_scanner::EventCallback;
@@ -110,6 +110,27 @@ impl EventCallback for OrderingCapture {
         if let Some(n) = log.block_number {
             guard.push(n);
         }
+        Ok(())
+    }
+}
+
+/// Captures decoded CountIncreased `newCount` values to verify callback/event ordering.
+pub struct OrderingCaptureCount {
+    pub counts: Arc<Mutex<Vec<u64>>>,
+}
+
+#[async_trait]
+impl EventCallback for OrderingCaptureCount {
+    async fn on_event(&self, log: &Log) -> anyhow::Result<()> {
+        // Decode single uint256 from data field (non-indexed arg ABI encoding)
+        let data = &log.inner.data;
+        if data.len() < 32 {
+            anyhow::bail!("log data too short for uint256: {} bytes", data.len());
+        }
+        let value = U256::from_be_slice(&data[..32]);
+        let as_u64 = value.try_into().unwrap_or(u64::MAX);
+        let mut guard = self.counts.lock().await;
+        guard.push(as_u64);
         Ok(())
     }
 }
