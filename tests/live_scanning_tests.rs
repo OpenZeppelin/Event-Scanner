@@ -6,9 +6,9 @@ use std::{
     time::Duration,
 };
 
-use alloy::sol_types::SolEvent;
 mod common;
-use common::{LiveTestCounter, build_provider, deploy_counter, spawn_anvil};
+use alloy::sol_types::SolEvent;
+use common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use event_scanner::{EventFilter, ScannerBuilder};
 use tokio::time::sleep;
 
@@ -26,7 +26,7 @@ async fn test_live_scanning_basic() -> anyhow::Result<()> {
 
     let filter = EventFilter {
         contract_address,
-        event: LiveTestCounter::CountIncreased::SIGNATURE.to_owned(),
+        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
 
@@ -64,13 +64,13 @@ async fn test_live_scanning_multiple_events() -> anyhow::Result<()> {
 
     let increase_filter = EventFilter {
         contract_address,
-        event: LiveTestCounter::CountIncreased::SIGNATURE.to_owned(),
+        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback: increase_callback,
     };
 
     let decrease_filter = EventFilter {
         contract_address,
-        event: LiveTestCounter::CountDecreased::SIGNATURE.to_owned(),
+        event: TestCounter::CountDecreased::SIGNATURE.to_owned(),
         callback: decrease_callback,
     };
 
@@ -111,7 +111,7 @@ async fn test_live_scanning_with_slow_processor() -> anyhow::Result<()> {
 
     let filter = EventFilter {
         contract_address,
-        event: LiveTestCounter::CountIncreased::SIGNATURE.to_owned(),
+        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
 
