@@ -1,13 +1,15 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
-use alloy::rpc::types::Log;
-use alloy::sol_types::SolEvent;
+use alloy::{rpc::types::Log, sol_types::SolEvent};
 use async_trait::async_trait;
 use event_scanner::EventCallback;
-use tokio::sync::Mutex;
-use tokio::time::sleep;
+use tokio::{sync::Mutex, time::sleep};
 
 use crate::common::TestCounter;
 
