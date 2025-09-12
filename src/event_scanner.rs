@@ -1,8 +1,11 @@
 #![allow(unused)]
-use std::{collections::HashMap, future, sync::Arc, time::Duration};
+use std::{cmp, collections::HashMap, future, sync::Arc, time::Duration};
 
 use crate::{
-    block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
+    block_scanner::{
+        BlockScanner, BlockScannerBuilder, OnBlocksFunc, STATE_SYNC_RETRY_INTERVAL,
+        STATE_SYNC_RETRY_MAX_ELAPSED, STATE_SYNC_RETRY_MAX_INTERVAL, STATE_SYNC_RETRY_MULTIPLIER,
+    },
     types::{CallbackConfig, EventFilter},
 };
 use alloy::{
@@ -185,7 +188,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
             let callback = filter.callback.clone();
             tokio::spawn(async move {
                 while let Some(log) = receiver.recv().await {
-                    if let Err(e) = Self::invoke_with_retry_static(&callback, &log, &cfg).await {
+                    if let Err(e) = Self::smart_retry(&callback, &log, &cfg).await {
                         error!(
                             event = %event_name_clone,
                             at_block = &log.block_number,
@@ -261,30 +264,81 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         Ok(())
     }
 
-    async fn invoke_with_retry_static(
+    async fn smart_retry(
         callback: &Arc<dyn crate::callback::EventCallback + Send + Sync>,
         log: &Log,
         config: &CallbackConfig,
     ) -> anyhow::Result<()> {
-        let attempts = config.max_attempts.max(1);
-        let mut last_err: Option<anyhow::Error> = None;
-        for attempt in 1..=attempts {
-            match callback.on_event(log).await {
-                Ok(_) => return Ok(()),
-                Err(e) => {
-                    last_err = Some(e);
-                    if attempt < attempts {
+        match callback.on_event(log).await {
+            Ok(_) => Ok(()),
+            Err(first_err) => {
+                // use exponential backoff for state-sync errors
+                if is_missing_trie_node_error(&first_err) {
+                    warn!(
+                        error = %first_err,
+                        "Detected missing trie node/state not available; using state-sync aware retry"
+                    );
+
+                    let mut delay = STATE_SYNC_RETRY_INTERVAL;
+                    let start = tokio::time::Instant::now();
+
+                    info!(
+                        initial_interval = ?STATE_SYNC_RETRY_INTERVAL,
+                        max_interval = ?STATE_SYNC_RETRY_MAX_INTERVAL,
+                        max_elapsed = ?STATE_SYNC_RETRY_MAX_ELAPSED,
+                        "Starting state-sync aware retry"
+                    );
+
+                    let mut last_err: anyhow::Error = first_err;
+                    loop {
+                        if start.elapsed() >= STATE_SYNC_RETRY_MAX_ELAPSED {
+                            return Err(last_err);
+                        }
+
+                        tokio::time::sleep(delay).await;
+                        match callback.on_event(log).await {
+                            Ok(_) => return Ok(()),
+                            Err(e) => {
+                                last_err = e;
+                                let next_secs = delay.as_secs_f64() * STATE_SYNC_RETRY_MULTIPLIER;
+                                let next = Duration::from_secs_f64(next_secs);
+                                delay = cmp::min(STATE_SYNC_RETRY_MAX_INTERVAL, next);
+                                let elapsed = start.elapsed();
+                                warn!(
+                                    next_delay = ?delay,
+                                    elapsed = ?elapsed,
+                                    error = %last_err,
+                                    "State-sync retry operation failed: will retry"
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    let mut last_err: anyhow::Error = first_err;
+                    for attempt in 1..=config.max_attempts {
                         warn!(
                             attempt,
-                            max_attempts = attempts,
-                            "callback failed; retrying after fixed delay"
+                            max_attempts = config.max_attempts,
+                            delay_ms = config.delay_ms,
+                            "Callback failed: retrying after fixed delay"
                         );
                         tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
-                        continue;
+                        match callback.on_event(log).await {
+                            Ok(_) => return Ok(()),
+                            Err(e) => {
+                                last_err = e;
+                                continue;
+                            }
+                        }
                     }
+                    Err(last_err)
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("callback failed with unknown error")))
     }
+}
+
+fn is_missing_trie_node_error(err: &anyhow::Error) -> bool {
+    let s = err.to_string().to_lowercase();
+    s.contains("missing trie node") && s.contains("state") && s.contains("not available")
 }
