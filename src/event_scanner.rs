@@ -279,7 +279,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         let mut last_err: Option<anyhow::Error> = None;
         for attempt in 1..=attempts {
             match callback.on_event(log).await {
-                Ok(_) => return Ok(()),
+                Ok(()) => return Ok(()),
                 Err(e) => {
                     last_err = Some(e);
                     if attempt < attempts {
@@ -289,7 +289,6 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
                             "callback failed; retrying after fixed delay"
                         );
                         tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
-                        continue;
                     }
                 }
             }
