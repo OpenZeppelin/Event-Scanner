@@ -199,14 +199,19 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
             event_channels.insert(event_name, sender);
         }
 
-        // TODO: replace with blockstream
-        let from_block: u64 = 0;
-        let to_block: u64 = 0;
-
         let mut stream = self.block_scanner.start().await;
-        while let Some(block) = stream.next().await {
-            info!(from_block, to_block, "processing placeholder block range");
-            self.process_block_range(from_block, to_block, &event_channels).await?;
+        while let Some(range) = stream.next().await {
+            match range {
+                Ok(range) => {
+                    let from_block = range.start;
+                    let to_block = range.end;
+                    info!(from_block, to_block, "processing placeholder block range");
+                    self.process_block_range(from_block, to_block, &event_channels).await?;
+                }
+                Err(e) => {
+                    error!(error = %e, "failed to get block range");
+                }
+            }
         }
 
         Ok(())
