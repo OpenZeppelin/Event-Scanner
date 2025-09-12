@@ -6,6 +6,9 @@ members = [
 ]
 resolver = "2"
 
+[lints.clippy]
+pedantic = "warn"
+
 [workspace.dependencies]
 alloy = { version = "1.0.30", features = ["full"] }
 alloy-node-bindings = "1.0.30"
