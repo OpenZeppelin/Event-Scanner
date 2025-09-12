@@ -9,11 +9,12 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
     providers::{Provider, RootProvider},
+    pubsub::PubSubConnect,
     rpc::{
         client::{ClientBuilder, RpcClient},
         types::Header,
     },
-    transports::TransportError,
+    transports::{TransportError, ipc::IpcConnect, ws::WsConnect},
 };
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
@@ -132,7 +133,7 @@ impl<N: Network> BlockScannerBuilder<N> {
     /// Returns an error if the connection fails
     pub async fn connect_ws(
         self,
-        connect: alloy::transports::ws::WsConnect,
+        connect: WsConnect,
     ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError> {
         let client = ClientBuilder::default().ws(connect).await?;
         Ok(self.connect_client(client))
@@ -145,10 +146,10 @@ impl<N: Network> BlockScannerBuilder<N> {
     /// Returns an error if the connection fails
     pub async fn connect_ipc<T>(
         self,
-        connect: alloy::transports::ipc::IpcConnect<T>,
+        connect: IpcConnect<T>,
     ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError>
     where
-        alloy::transports::ipc::IpcConnect<T>: alloy::pubsub::PubSubConnect,
+        IpcConnect<T>: PubSubConnect,
     {
         let client = ClientBuilder::default().ipc(connect).await?;
         Ok(self.connect_client(client))
@@ -217,5 +218,100 @@ where
         });
 
         receiver_stream
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::network::{Ethereum, Network};
+    use alloy_node_bindings::Anvil;
+    use tokio_stream::StreamExt;
+
+    #[allow(clippy::unnecessary_wraps)]
+    fn no_op_on_blocks<N: Network>(
+        _block: <N as Network>::BlockResponse,
+        _update_current: UpdateCurrentFunc,
+        _end_iter: EndIterFunc,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_scanner_error_display() {
+        assert_eq!(format!("{}", BlockScannerError::ErrEOF), "end of block batch iterator");
+        assert_eq!(format!("{}", BlockScannerError::ErrContinue), "continue");
+        assert_eq!(
+            format!("{}", BlockScannerError::TerminalError(42)),
+            "terminal error at block height 42"
+        );
+    }
+
+    #[test]
+    fn test_builder_defaults() {
+        let builder = BlockScannerBuilder::<Ethereum>::new();
+        assert_eq!(builder.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        assert!(matches!(builder.start_height, BlockNumberOrTag::Earliest));
+        assert!(matches!(builder.end_height, BlockNumberOrTag::Latest));
+        assert_eq!(builder.reorg_rewind_depth, DEFAULT_REORG_REWIND_DEPTH);
+        assert_eq!(builder.retry_interval, DEFAULT_RETRY_INTERVAL);
+        assert_eq!(builder.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn test_builder_setters() {
+        let mut builder = BlockScannerBuilder::<Ethereum>::new();
+        builder.with_blocks_read_per_epoch(25);
+        builder.with_start_height(BlockNumberOrTag::Earliest);
+        builder.with_end_height(BlockNumberOrTag::Latest);
+        builder.with_on_blocks(no_op_on_blocks::<Ethereum>);
+        builder.with_reorg_rewind_depth(5);
+        let interval = Duration::from_secs(3);
+        builder.with_retry_interval(interval);
+        builder.with_block_confirmations(12);
+
+        assert_eq!(builder.blocks_read_per_epoch, 25);
+        assert!(matches!(builder.start_height, BlockNumberOrTag::Earliest));
+        assert!(matches!(builder.end_height, BlockNumberOrTag::Latest));
+        assert_eq!(builder.reorg_rewind_depth, 5);
+        assert_eq!(builder.retry_interval, interval);
+        assert_eq!(builder.block_confirmations, 12);
+    }
+
+    #[tokio::test]
+    async fn test_connect_ws_and_start_stream_eof() {
+        let anvil = Anvil::new().try_spawn().expect("failed to spawn anvil");
+        let ws = WsConnect::new(anvil.ws_endpoint_url());
+
+        let builder = BlockScannerBuilder::<Ethereum>::new();
+        let scanner = builder.connect_ws(ws).await.expect("failed to connect ws");
+
+        let mut stream = scanner.start().await;
+        let first = stream.next().await;
+        match first {
+            Some(Err(BlockScannerError::ErrEOF)) => {}
+            other => panic!("expected first stream item to be ErrEOF, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_channel_buffer_is_equal_to_blocks_read_per_epoch() {
+        let anvil = Anvil::new().try_spawn().expect("failed to spawn anvil");
+        let ws = WsConnect::new(anvil.ws_endpoint_url());
+
+        let mut builder = BlockScannerBuilder::<Ethereum>::new();
+        builder.with_blocks_read_per_epoch(5);
+
+        let scanner = builder.connect_ws(ws).await.expect("failed to connect ws");
+
+        for _ in 0..scanner.blocks_read_per_epoch {
+            scanner
+                .sender
+                .try_send(Err(BlockScannerError::ErrContinue))
+                .expect("channel should not be full yet");
+        }
+
+        let res = scanner.sender.try_send(Err(BlockScannerError::ErrContinue));
+        assert!(matches!(res, Err(tokio::sync::mpsc::error::TrySendError::Full(_))));
     }
 }

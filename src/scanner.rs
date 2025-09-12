@@ -265,3 +265,52 @@ impl Scanner {
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("callback failed with unknown error")))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloy_node_bindings::Anvil;
+
+    use crate::ScannerBuilder;
+
+    use super::*;
+
+    #[test]
+    fn test_detect_provider_type_websocket() {
+        assert!(matches!(
+            Scanner::detect_provider_type("ws://localhost:8545"),
+            Ok(ProviderType::WebSocket)
+        ));
+        assert!(matches!(
+            Scanner::detect_provider_type("wss://mainnet.infura.io/ws"),
+            Ok(ProviderType::WebSocket)
+        ));
+    }
+
+    #[test]
+    fn test_detect_provider_type_ipc() {
+        assert!(matches!(Scanner::detect_provider_type("/tmp/geth.ipc"), Ok(ProviderType::Ipc)));
+        assert!(matches!(
+            Scanner::detect_provider_type("./path/to/node.ipc"),
+            Ok(ProviderType::Ipc)
+        ));
+        assert!(matches!(
+            Scanner::detect_provider_type("/var/run/geth/ipc"),
+            Ok(ProviderType::Ipc)
+        ));
+    }
+
+    #[test]
+    fn test_detect_provider_type_invalid() {
+        assert!(Scanner::detect_provider_type("http://localhost:8545").is_err());
+        assert!(Scanner::detect_provider_type("https://mainnet.infura.io").is_err());
+        assert!(Scanner::detect_provider_type("invalid-url").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_builds_ws_provider() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let rpc_url = anvil.ws_endpoint_url();
+        let scanner = ScannerBuilder::new(rpc_url).build().await;
+        assert!(scanner.is_ok());
+    }
+}
