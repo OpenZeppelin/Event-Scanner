@@ -288,3 +288,5 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("callback failed with unknown error")))
     }
 }
+
+// TODO: implement max channel buffer size test
