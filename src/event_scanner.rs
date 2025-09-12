@@ -172,3 +172,5 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         todo!()
     }
 }
+
+// TODO: implement max channel buffer size test

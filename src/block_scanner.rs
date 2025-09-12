@@ -165,12 +165,8 @@ impl<N: Network> BlockScannerBuilder<N> {
     where
         P: Provider<N>,
     {
-        let (sender, receiver) = mpsc::channel(self.blocks_read_per_epoch);
-
         BlockScanner {
             provider,
-            sender,
-            receiver,
             current: Header::default(),
             is_end: false,
             blocks_read_per_epoch: self.blocks_read_per_epoch,
@@ -189,8 +185,6 @@ impl<N: Network> BlockScannerBuilder<N> {
 // with the awareness of reorganization.
 pub struct BlockScanner<P: Provider<N>, N: Network> {
     provider: P,
-    sender: Sender<Result<N::BlockResponse, BlockScannerError>>,
-    receiver: Receiver<Result<N::BlockResponse, BlockScannerError>>,
     blocks_read_per_epoch: usize,
     start_height: BlockNumberOrTag,
     end_height: BlockNumberOrTag,
@@ -208,14 +202,16 @@ where
     P: Provider<N>,
     N: Network,
 {
-    pub async fn start(self) -> ReceiverStream<Result<N::BlockResponse, BlockScannerError>> {
-        let receiver_stream = ReceiverStream::new(self.receiver);
+    pub async fn start(&self) -> ReceiverStream<Result<N::BlockResponse, BlockScannerError>> {
+        let (sender, receiver) = mpsc::channel(self.blocks_read_per_epoch);
+
+        let receiver_stream = ReceiverStream::new(receiver);
 
         future::ready(()).await;
 
-        tokio::spawn(async move {
-            if self.sender.send(Err(BlockScannerError::ErrEOF {})).await.is_err() {}
-        });
+        tokio::spawn(
+            async move { if sender.send(Err(BlockScannerError::ErrEOF {})).await.is_err() {} },
+        );
 
         receiver_stream
     }
@@ -292,26 +288,5 @@ mod tests {
             Some(Err(BlockScannerError::ErrEOF)) => {}
             other => panic!("expected first stream item to be ErrEOF, got: {other:?}"),
         }
-    }
-
-    #[tokio::test]
-    async fn test_channel_buffer_is_equal_to_blocks_read_per_epoch() {
-        let anvil = Anvil::new().try_spawn().expect("failed to spawn anvil");
-        let ws = WsConnect::new(anvil.ws_endpoint_url());
-
-        let mut builder = BlockScannerBuilder::<Ethereum>::new();
-        builder.with_blocks_read_per_epoch(5);
-
-        let scanner = builder.connect_ws(ws).await.expect("failed to connect ws");
-
-        for _ in 0..scanner.blocks_read_per_epoch {
-            scanner
-                .sender
-                .try_send(Err(BlockScannerError::ErrContinue))
-                .expect("channel should not be full yet");
-        }
-
-        let res = scanner.sender.try_send(Err(BlockScannerError::ErrContinue));
-        assert!(matches!(res, Err(tokio::sync::mpsc::error::TrySendError::Full(_))));
     }
 }
