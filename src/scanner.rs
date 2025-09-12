@@ -29,6 +29,11 @@ pub struct Scanner {
 }
 
 impl Scanner {
+    /// Creates a new scanner
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to start
     pub async fn new(
         rpc_url: String,
         start_block: Option<u64>,
@@ -70,7 +75,11 @@ impl Scanner {
     fn detect_provider_type(url: &str) -> anyhow::Result<ProviderType> {
         if url.starts_with("ws://") || url.starts_with("wss://") {
             Ok(ProviderType::WebSocket)
-        } else if url.ends_with(".ipc") || url.contains("ipc") {
+        } else if std::path::Path::new(url)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ipc")) ||
+            url.contains("ipc")
+        {
             Ok(ProviderType::Ipc)
         } else {
             Err(anyhow::anyhow!(
@@ -80,29 +89,35 @@ impl Scanner {
         }
     }
 
+    /// Starts the scanner
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to start
     pub async fn start(&mut self) -> anyhow::Result<()> {
         match (self.start_block, self.end_block) {
             (None, Some(end)) => {
                 info!("Scanning from genesis block 0 to {}", end);
-                self.process_historical_blocks(0, Some(end)).await?
+                self.process_historical_blocks(0, Some(end)).await?;
             }
             (Some(start), Some(end)) => {
                 info!("Scanning from block {} to {}", start, end);
-                self.process_historical_blocks(start, Some(end)).await?
+                self.process_historical_blocks(start, Some(end)).await?;
             }
             (Some(start), None) => {
                 info!("Scanning from block {} to latest, then switching to live mode", start);
                 self.process_historical_blocks(start, None).await?;
-                self.subscribe_to_new_blocks().await?
+                self.subscribe_to_new_blocks().await?;
             }
             (None, None) => {
                 info!("Starting in live mode only");
-                self.subscribe_to_new_blocks().await?
+                self.subscribe_to_new_blocks().await?;
             }
         }
         Ok(())
     }
 
+    #[must_use]
     pub fn current_head(&self) -> Option<u64> {
         self.current_head
     }
@@ -233,7 +248,7 @@ impl Scanner {
         let mut last_err: Option<anyhow::Error> = None;
         for attempt in 1..=attempts {
             match callback.on_event(log).await {
-                Ok(_) => return Ok(()),
+                Ok(()) => return Ok(()),
                 Err(e) => {
                     last_err = Some(e);
                     if attempt < attempts {
@@ -243,7 +258,6 @@ impl Scanner {
                             "callback failed; retrying after fixed delay"
                         );
                         sleep(Duration::from_millis(config.delay_ms)).await;
-                        continue;
                     }
                 }
             }
