@@ -17,6 +17,7 @@ use alloy::{
     transports::TransportError,
 };
 use tokio::sync::mpsc;
+use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
 pub struct EventScannerBuilder<N: Network> {
@@ -202,8 +203,11 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         let from_block: u64 = 0;
         let to_block: u64 = 0;
 
-        info!(from_block, to_block, "processing placeholder block range");
-        self.process_block_range(from_block, to_block, &event_channels).await?;
+        let mut stream = self.block_scanner.start().await;
+        while let Some(block) = stream.next().await {
+            info!(from_block, to_block, "processing placeholder block range");
+            self.process_block_range(from_block, to_block, &event_channels).await?;
+        }
 
         Ok(())
     }
