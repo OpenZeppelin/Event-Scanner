@@ -14,7 +14,7 @@ use alloy::{
         client::{ClientBuilder, RpcClient},
         types::Header,
     },
-    transports::{TransportError, ipc::IpcConnect, ws::WsConnect},
+    transports::{RpcError, TransportError, TransportErrorKind, ipc::IpcConnect, ws::WsConnect},
 };
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
@@ -35,6 +35,16 @@ pub enum BlockScannerError {
     ErrEOF,
     ErrContinue,
     TerminalError(u64),
+    EndHeightSmallerThanStartHeight(BlockNumberOrTag, BlockNumberOrTag),
+    NonExistentStartHeader(BlockNumberOrTag),
+    NonExistentEndHeader(BlockNumberOrTag),
+    Rpc(RpcError<TransportErrorKind>),
+}
+
+impl From<RpcError<TransportErrorKind>> for BlockScannerError {
+    fn from(value: RpcError<TransportErrorKind>) -> Self {
+        BlockScannerError::Rpc(value)
+    }
 }
 
 impl std::fmt::Display for BlockScannerError {
@@ -45,6 +55,16 @@ impl std::fmt::Display for BlockScannerError {
             BlockScannerError::TerminalError(height) => {
                 write!(f, "terminal error at block height {height}")
             }
+            BlockScannerError::EndHeightSmallerThanStartHeight(start, end) => {
+                write!(f, "start height ({start}) > end height ({end})")
+            }
+            BlockScannerError::NonExistentStartHeader(height) => {
+                write!(f, "failed to get start header, height: {height}")
+            }
+            BlockScannerError::NonExistentEndHeader(height) => {
+                write!(f, "failed to get end header, height: {height}")
+            }
+            BlockScannerError::Rpc(err) => write!(f, "rpc error: {err}"),
         }
     }
 }
@@ -134,9 +154,9 @@ impl<N: Network> BlockScannerBuilder<N> {
     pub async fn connect_ws(
         self,
         connect: WsConnect,
-    ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError> {
+    ) -> Result<BlockScanner<RootProvider<N>, N>, BlockScannerError> {
         let client = ClientBuilder::default().ws(connect).await?;
-        Ok(self.connect_client(client))
+        self.connect_client(client).await
     }
 
     /// Connects to the provider via IPC
@@ -147,25 +167,55 @@ impl<N: Network> BlockScannerBuilder<N> {
     pub async fn connect_ipc<T>(
         self,
         connect: IpcConnect<T>,
-    ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError>
+    ) -> Result<BlockScanner<RootProvider<N>, N>, BlockScannerError>
     where
         IpcConnect<T>: PubSubConnect,
     {
         let client = ClientBuilder::default().ipc(connect).await?;
-        Ok(self.connect_client(client))
+        self.connect_client(client).await
     }
 
     #[must_use]
-    pub fn connect_client(self, client: RpcClient) -> BlockScanner<RootProvider<N>, N> {
+    pub async fn connect_client(
+        self,
+        client: RpcClient,
+    ) -> Result<BlockScanner<RootProvider<N>, N>, BlockScannerError> {
         let provider = RootProvider::new(client);
-        self.connect_provider(provider)
+        self.connect_provider(provider).await
     }
 
-    pub fn connect_provider<P>(self, provider: P) -> BlockScanner<P, N>
+    pub async fn connect_provider<P>(
+        self,
+        provider: P,
+    ) -> Result<BlockScanner<P, N>, BlockScannerError>
     where
         P: Provider<N>,
     {
-        BlockScanner {
+        if let Some(end_height) = self.end_height {
+            match (self.start_height, end_height) {
+                (_, BlockNumberOrTag::Latest) => (),
+                (_, BlockNumberOrTag::Number(end))
+                    if end == provider.get_block_number().await? =>
+                {
+                    ()
+                }
+                (_, BlockNumberOrTag::Number(end)) if end > provider.get_block_number().await? => {
+                    return Err(BlockScannerError::NonExistentEndHeader(end_height));
+                }
+                (BlockNumberOrTag::Number(start), BlockNumberOrTag::Number(end)) => {
+                    if start > end {
+                        return Err(BlockScannerError::EndHeightSmallerThanStartHeight(
+                            self.start_height,
+                            end_height,
+                        ));
+                    }
+                }
+                // TODO: handle other cases
+                _ => {}
+            };
+        }
+
+        Ok(BlockScanner {
             provider,
             current: Header::default(),
             is_end: false,
@@ -177,7 +227,7 @@ impl<N: Network> BlockScannerBuilder<N> {
             retry_interval: self.retry_interval,
             block_confirmations: self.block_confirmations,
             network: PhantomData,
-        }
+        })
     }
 }
 
@@ -203,11 +253,18 @@ where
     N: Network,
 {
     pub async fn start(&self) -> ReceiverStream<Result<Range<u64>, BlockScannerError>> {
-        let (sender, receiver) = mpsc::channel(self.blocks_read_per_epoch);
+        let (sender, receiver) =
+            mpsc::channel::<Result<Range<u64>, BlockScannerError>>(self.blocks_read_per_epoch);
 
         let receiver_stream = ReceiverStream::new(receiver);
 
-        future::ready(()).await;
+        match (self.start_height, self.end_height) {
+            (BlockNumberOrTag::Latest, Some(end_height)) => {
+                let last_block_number = self.provider.get_block_number().await.unwrap();
+                sender.send(Ok(last_block_number..last_block_number)).await.unwrap();
+            }
+            _ => {}
+        }
 
         tokio::spawn(
             async move { if sender.send(Err(BlockScannerError::ErrEOF {})).await.is_err() {} },

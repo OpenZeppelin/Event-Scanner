@@ -3,7 +3,7 @@
 use std::{future, time::Duration};
 
 use crate::{
-    block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
+    block_scanner::{BlockScanner, BlockScannerBuilder, BlockScannerError, OnBlocksFunc},
     types::{CallbackConfig, EventFilter},
 };
 use alloy::{
@@ -105,7 +105,7 @@ impl<N: Network> EventScannerBuilder<N> {
     pub async fn connect_ws(
         self,
         connect: WsConnect,
-    ) -> Result<EventScanner<RootProvider<N>, N>, TransportError> {
+    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError> {
         let block_scanner = self.block_scanner.connect_ws(connect).await?;
         Ok(EventScanner {
             block_scanner,
@@ -122,7 +122,7 @@ impl<N: Network> EventScannerBuilder<N> {
     pub async fn connect_ipc<T>(
         self,
         connect: IpcConnect<T>,
-    ) -> Result<EventScanner<RootProvider<N>, N>, TransportError>
+    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError>
     where
         IpcConnect<T>: PubSubConnect,
     {
@@ -135,23 +135,29 @@ impl<N: Network> EventScannerBuilder<N> {
     }
 
     #[must_use]
-    pub fn connect_client(self, client: RpcClient) -> EventScanner<RootProvider<N>, N> {
-        let block_scanner = self.block_scanner.connect_client(client);
-        EventScanner {
+    pub async fn connect_client(
+        self,
+        client: RpcClient,
+    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError> {
+        let block_scanner = self.block_scanner.connect_client(client).await?;
+        Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
             callback_config: self.callback_config,
-        }
+        })
     }
 
     #[must_use]
-    pub fn connect_provider(self, provider: RootProvider<N>) -> EventScanner<RootProvider<N>, N> {
-        let block_scanner = self.block_scanner.connect_provider(provider);
-        EventScanner {
+    pub async fn connect_provider(
+        self,
+        provider: RootProvider<N>,
+    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError> {
+        let block_scanner = self.block_scanner.connect_provider(provider).await?;
+        Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
             callback_config: self.callback_config,
-        }
+        })
     }
 }
 
