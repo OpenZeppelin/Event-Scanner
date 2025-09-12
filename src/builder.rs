@@ -214,23 +214,23 @@ mod tests {
         let addr3 = address!("3C44CdDdB6a900fa2b585dd299e03d12FA4293BC");
         let event3 = "Mint(address,uint256)".to_string();
 
-        let filter1 = EventFilter {
+        let filter_1 = EventFilter {
             contract_address: addr1,
             event: event1.clone(),
             callback: Arc::new(MockCallback),
         };
-        let filter2 = EventFilter {
+        let filter_2 = EventFilter {
             contract_address: addr2,
             event: event2.clone(),
             callback: Arc::new(MockCallback),
         };
-        let filter3 = EventFilter {
+        let filter_3 = EventFilter {
             contract_address: addr3,
             event: event3.clone(),
             callback: Arc::new(MockCallback),
         };
 
-        let filters = vec![filter1.clone(), filter2.clone(), filter3.clone()];
+        let filters = vec![filter_1.clone(), filter_2.clone(), filter_3.clone()];
         let builder = ScannerBuilder::new(WS_URL).add_event_filters(filters.clone());
 
         assert_eq!(builder.tracked_events.len(), filters.len());

@@ -228,6 +228,7 @@ mod tests {
     use alloy_node_bindings::Anvil;
     use tokio_stream::StreamExt;
 
+    #[allow(clippy::unnecessary_wraps)]
     fn no_op_on_blocks<N: Network>(
         _block: <N as Network>::BlockResponse,
         _update_current: UpdateCurrentFunc,
@@ -289,7 +290,7 @@ mod tests {
         let first = stream.next().await;
         match first {
             Some(Err(BlockScannerError::ErrEOF)) => {}
-            other => panic!("expected first stream item to be ErrEOF, got: {:?}", other),
+            other => panic!("expected first stream item to be ErrEOF, got: {other:?}"),
         }
     }
 
