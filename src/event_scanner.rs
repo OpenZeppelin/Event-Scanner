@@ -6,6 +6,7 @@ use crate::{
         BlockScanner, BlockScannerBuilder, OnBlocksFunc, STATE_SYNC_RETRY_INTERVAL,
         STATE_SYNC_RETRY_MAX_ELAPSED, STATE_SYNC_RETRY_MAX_INTERVAL, STATE_SYNC_RETRY_MULTIPLIER,
     },
+    callback_strategy::{CallbackStrategy, FixedRetryStrategy, StateSyncAwareStrategy},
     types::{CallbackConfig, EventFilter},
 };
 use alloy::{
@@ -27,6 +28,7 @@ pub struct EventScannerBuilder<N: Network> {
     block_scanner: BlockScannerBuilder<N>,
     tracked_events: Vec<EventFilter>,
     callback_config: CallbackConfig,
+    callback_strategy: Option<Arc<dyn CallbackStrategy>>,
 }
 
 impl<N: Network> Default for EventScannerBuilder<N> {
@@ -42,6 +44,7 @@ impl<N: Network> EventScannerBuilder<N> {
             block_scanner: BlockScannerBuilder::new(),
             tracked_events: Vec::new(),
             callback_config: CallbackConfig::default(),
+            callback_strategy: None,
         }
     }
 
@@ -60,6 +63,12 @@ impl<N: Network> EventScannerBuilder<N> {
     #[must_use]
     pub fn with_callback_config(mut self, cfg: CallbackConfig) -> Self {
         self.callback_config = cfg;
+        self
+    }
+
+    #[must_use]
+    pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
+        self.callback_strategy = Some(strategy);
         self
     }
 
@@ -115,10 +124,14 @@ impl<N: Network> EventScannerBuilder<N> {
         connect: WsConnect,
     ) -> Result<EventScanner<RootProvider<N>, N>, TransportError> {
         let block_scanner = self.block_scanner.connect_ws(connect).await?;
+        let strategy: Arc<dyn CallbackStrategy> = self
+            .callback_strategy
+            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
             callback_config: self.callback_config,
+            callback_strategy: strategy,
         })
     }
 
@@ -135,30 +148,42 @@ impl<N: Network> EventScannerBuilder<N> {
         IpcConnect<T>: PubSubConnect,
     {
         let block_scanner = self.block_scanner.connect_ipc(connect).await?;
+        let strategy: Arc<dyn CallbackStrategy> = self
+            .callback_strategy
+            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
             callback_config: self.callback_config,
+            callback_strategy: strategy,
         })
     }
 
     #[must_use]
     pub fn connect_client(self, client: RpcClient) -> EventScanner<RootProvider<N>, N> {
         let block_scanner = self.block_scanner.connect_client(client);
+        let strategy: Arc<dyn CallbackStrategy> = self
+            .callback_strategy
+            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
             callback_config: self.callback_config,
+            callback_strategy: strategy,
         }
     }
 
     #[must_use]
     pub fn connect_provider(self, provider: RootProvider<N>) -> EventScanner<RootProvider<N>, N> {
         let block_scanner = self.block_scanner.connect_provider(provider);
+        let strategy: Arc<dyn CallbackStrategy> = self
+            .callback_strategy
+            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
             callback_config: self.callback_config,
+            callback_strategy: strategy,
         }
     }
 }
@@ -167,6 +192,7 @@ pub struct EventScanner<P: Provider<N>, N: Network> {
     block_scanner: BlockScanner<P, N>,
     tracked_events: Vec<EventFilter>,
     callback_config: CallbackConfig,
+    callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
 impl<P: Provider<N>, N: Network> EventScanner<P, N> {
@@ -188,10 +214,10 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
             // TODO: configurable buffer size / smaller buffer ?
             let (sender, mut receiver) = mpsc::channel::<Log>(1024);
 
-            let cfg = self.callback_config.clone();
             let event_name_clone = event_name.clone();
             let callback = filter.callback.clone();
-            Self::spawn_event_callback_task_executors(receiver, callback, cfg, event_name_clone);
+            let strategy = self.callback_strategy.clone();
+            Self::spawn_event_callback_task_executors(receiver, callback, strategy, event_name_clone);
 
             event_channels.insert(event_name, sender);
         }
@@ -217,12 +243,12 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
     fn spawn_event_callback_task_executors(
         mut receiver: Receiver<Log>,
         callback: Arc<dyn crate::callback::EventCallback + Send + Sync>,
-        cfg: CallbackConfig,
+        strategy: Arc<dyn CallbackStrategy>,
         event_name: String,
     ) {
         tokio::spawn(async move {
             while let Some(log) = receiver.recv().await {
-                if let Err(e) = Self::smart_retry(&callback, &log, &cfg).await {
+                if let Err(e) = strategy.execute(&callback, &log).await {
                     error!(
                         event = %event_name,
                         at_block = &log.block_number,
@@ -287,80 +313,4 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         Ok(())
     }
 
-    async fn smart_retry(
-        callback: &Arc<dyn crate::callback::EventCallback + Send + Sync>,
-        log: &Log,
-        config: &CallbackConfig,
-    ) -> anyhow::Result<()> {
-        match callback.on_event(log).await {
-            Ok(()) => Ok(()),
-            Err(first_err) => {
-                // use exponential backoff for state-sync errors
-                if is_missing_trie_node_error(&first_err) {
-                    warn!(
-                        error = %first_err,
-                        "Detected missing trie node/state not available; using state-sync aware retry"
-                    );
-
-                    let mut delay = STATE_SYNC_RETRY_INTERVAL;
-                    let start = tokio::time::Instant::now();
-
-                    info!(
-                        initial_interval = ?STATE_SYNC_RETRY_INTERVAL,
-                        max_interval = ?STATE_SYNC_RETRY_MAX_INTERVAL,
-                        max_elapsed = ?STATE_SYNC_RETRY_MAX_ELAPSED,
-                        "Starting state-sync aware retry"
-                    );
-
-                    let mut last_err: anyhow::Error = first_err;
-                    loop {
-                        if start.elapsed() >= STATE_SYNC_RETRY_MAX_ELAPSED {
-                            return Err(last_err);
-                        }
-
-                        tokio::time::sleep(delay).await;
-                        match callback.on_event(log).await {
-                            Ok(()) => return Ok(()),
-                            Err(e) => {
-                                last_err = e;
-                                let next_secs = delay.as_secs_f64() * STATE_SYNC_RETRY_MULTIPLIER;
-                                let next = Duration::from_secs_f64(next_secs);
-                                delay = cmp::min(STATE_SYNC_RETRY_MAX_INTERVAL, next);
-                                let elapsed = start.elapsed();
-                                warn!(
-                                    next_delay = ?delay,
-                                    elapsed = ?elapsed,
-                                    error = %last_err,
-                                    "State-sync retry operation failed: will retry"
-                                );
-                            }
-                        }
-                    }
-                } else {
-                    let mut last_err: anyhow::Error = first_err;
-                    for attempt in 1..=config.max_attempts {
-                        warn!(
-                            attempt,
-                            max_attempts = config.max_attempts,
-                            delay_ms = config.delay_ms,
-                            "Callback failed: retrying after fixed delay"
-                        );
-                        tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
-                        match callback.on_event(log).await {
-                            Ok(()) => return Ok(()),
-                            Err(e) => {
-                                last_err = e;
-                            }
-                        }
-                    }
-                    Err(last_err)
-                }
-            }
-        }
-    }
-}
-
-fn is_missing_trie_node_error(err: &anyhow::Error) -> bool {
-    let s = err.to_string().to_lowercase();
-    s.contains("missing trie node") && s.contains("state") && s.contains("not available")
 }
