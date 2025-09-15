@@ -19,7 +19,7 @@ use alloy::{
     },
     transports::TransportError,
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Receiver};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
@@ -180,25 +180,19 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
 
         for filter in &self.tracked_events {
             let event_name = filter.event.clone();
+
             if event_channels.contains_key(&event_name) {
                 continue;
             }
-            let (sender, mut receiver) = mpsc::channel::<Log>(1024); // TODO: configurable buffer size / smaller buffer ? 
+
+            // TODO: configurable buffer size / smaller buffer ?
+            let (sender, mut receiver) = mpsc::channel::<Log>(1024);
+
             let cfg = self.callback_config.clone();
             let event_name_clone = event_name.clone();
             let callback = filter.callback.clone();
-            tokio::spawn(async move {
-                while let Some(log) = receiver.recv().await {
-                    if let Err(e) = Self::smart_retry(&callback, &log, &cfg).await {
-                        error!(
-                            event = %event_name_clone,
-                            at_block = &log.block_number,
-                            error = %e,
-                            "failed to invoke callback after retries"
-                        );
-                    }
-                }
-            });
+            Self::spawn_event_callback_task_executors(receiver, callback, cfg, event_name_clone);
+
             event_channels.insert(event_name, sender);
         }
 
@@ -218,6 +212,26 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         }
 
         Ok(())
+    }
+
+    fn spawn_event_callback_task_executors(
+        mut receiver: Receiver<Log>,
+        callback: Arc<dyn crate::callback::EventCallback + Send + Sync>,
+        cfg: CallbackConfig,
+        event_name: String,
+    ) {
+        tokio::spawn(async move {
+            while let Some(log) = receiver.recv().await {
+                if let Err(e) = Self::smart_retry(&callback, &log, &cfg).await {
+                    error!(
+                        event = %event_name,
+                        at_block = &log.block_number,
+                        error = %e,
+                        "failed to invoke callback after retries"
+                    );
+                }
+            }
+        });
     }
 
     async fn process_block_range(
