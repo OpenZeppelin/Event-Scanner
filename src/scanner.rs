@@ -8,7 +8,7 @@ use tokio::time::{Duration, sleep};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
-use crate::{callback::EventCallback, types::EventFilter};
+use crate::{FixedRetryConfig, callback::EventCallback, types::EventFilter};
 
 enum ProviderType {
     WebSocket,
@@ -22,7 +22,7 @@ pub struct Scanner {
     end_block: Option<u64>,
     max_blocks_per_filter: u64,
     tracked_events: Vec<EventFilter>,
-    callback_config: CallbackConfig,
+    callback_config: FixedRetryConfig,
 }
 
 impl Scanner {
@@ -37,7 +37,7 @@ impl Scanner {
         end_block: Option<u64>,
         max_blocks_per_filter: u64,
         tracked_events: Vec<EventFilter>,
-        callback_config: CallbackConfig,
+        callback_config: FixedRetryConfig,
     ) -> anyhow::Result<Self> {
         let provider = Self::get_provider(&rpc_url).await?;
 
@@ -239,7 +239,7 @@ impl Scanner {
     async fn invoke_with_retry_static(
         callback: &Arc<dyn EventCallback + Send + Sync>,
         log: &Log,
-        config: &CallbackConfig,
+        config: &FixedRetryConfig,
     ) -> anyhow::Result<()> {
         let attempts = config.max_attempts.max(1);
         let mut last_err: Option<anyhow::Error> = None;
