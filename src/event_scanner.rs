@@ -42,63 +42,53 @@ impl<N: Network> EventScannerBuilder<N> {
         }
     }
 
-    #[must_use]
-    pub fn with_event_filter(mut self, filter: EventFilter) -> Self {
+    pub fn with_event_filter(&mut self, filter: EventFilter) -> &mut Self {
         self.tracked_events.push(filter);
         self
     }
 
-    #[must_use]
-    pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
+    pub fn with_event_filters(&mut self, filters: Vec<EventFilter>) -> &mut Self {
         self.tracked_events.extend(filters);
         self
     }
 
-    #[must_use]
-    pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
+    pub fn with_callback_strategy(&mut self, strategy: Arc<dyn CallbackStrategy>) -> &mut Self {
         self.callback_strategy = Some(strategy);
         self
     }
 
-    #[must_use]
     pub fn with_blocks_read_per_epoch(&mut self, blocks_read_per_epoch: usize) -> &mut Self {
-        self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
+        let _ = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
     }
 
-    #[must_use]
     pub fn with_start_height(&mut self, start_height: BlockNumberOrTag) -> &mut Self {
-        self.block_scanner.with_start_height(start_height);
+        let _ = self.block_scanner.with_start_height(start_height);
         self
     }
 
-    #[must_use]
     pub fn with_end_height(&mut self, end_height: BlockNumberOrTag) -> &mut Self {
-        self.block_scanner.with_end_height(end_height);
+        let _ = self.block_scanner.with_end_height(end_height);
         self
     }
 
-    #[must_use]
     pub fn with_on_blocks(&mut self, on_blocks: OnBlocksFunc<N>) -> &mut Self {
-        self.block_scanner.with_on_blocks(on_blocks);
+        let _ = self.block_scanner.with_on_blocks(on_blocks);
         self
     }
 
-    #[must_use]
     pub fn with_reorg_rewind_depth(&mut self, reorg_rewind_depth: u64) -> &mut Self {
-        self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
+        let _ = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
     }
 
-    #[must_use]
     pub fn with_retry_interval(&mut self, retry_interval: Duration) -> &mut Self {
-        self.block_scanner.with_retry_interval(retry_interval);
+        let _ = self.block_scanner.with_retry_interval(retry_interval);
         self
     }
 
-    #[must_use]
     pub fn with_block_confirmations(&mut self, block_confirmations: u64) -> &mut Self {
-        self.block_scanner.with_block_confirmations(block_confirmations);
+        let _ = self.block_scanner.with_block_confirmations(block_confirmations);
         self
     }
 

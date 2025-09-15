@@ -41,6 +41,7 @@ pub struct FixedRetryStrategy {
 }
 
 impl FixedRetryStrategy {
+    #[must_use]
     pub fn new(cfg: FixedRetryConfig) -> Self {
         Self { cfg }
     }
@@ -99,18 +100,28 @@ pub struct StateSyncAwareStrategy {
     cfg: StateSyncConfig,
 }
 
+impl Default for StateSyncAwareStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StateSyncAwareStrategy {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: FixedRetryStrategy::new(FixedRetryConfig::default()),
             cfg: StateSyncConfig::default(),
         }
     }
+
+    #[must_use]
     pub fn with_state_sync_config(mut self, cfg: StateSyncConfig) -> Self {
         self.cfg = cfg;
         self
     }
 
+    #[must_use]
     pub fn with_fixed_retry_config(mut self, cfg: FixedRetryConfig) -> Self {
         self.inner = FixedRetryStrategy::new(cfg);
         self
