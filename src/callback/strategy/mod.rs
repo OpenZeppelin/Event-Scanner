@@ -17,6 +17,5 @@ pub trait CallbackStrategy: Send + Sync {
 pub mod fixed_retry;
 pub mod state_sync_aware;
 
-pub use fixed_retry::{FixedRetryConfig, FixedRetryStrategy};
+pub use fixed_retry::{BACK_OFF_MAX_RETRIES, FixedRetryConfig, FixedRetryStrategy};
 pub use state_sync_aware::{StateSyncAwareStrategy, StateSyncConfig};
-pub use fixed_retry::BACK_OFF_MAX_RETRIES;

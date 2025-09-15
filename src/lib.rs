@@ -7,11 +7,12 @@ pub mod types;
 
 pub use crate::{
     builder::ScannerBuilder,
-    callback::EventCallback,
-    callback::strategy as callback_strategy,
-    callback::strategy::{
-        CallbackStrategy, FixedRetryConfig, FixedRetryStrategy, StateSyncAwareStrategy,
-        StateSyncConfig,
+    callback::{
+        EventCallback, strategy as callback_strategy,
+        strategy::{
+            CallbackStrategy, FixedRetryConfig, FixedRetryStrategy, StateSyncAwareStrategy,
+            StateSyncConfig,
+        },
     },
     scanner::Scanner,
     types::EventFilter,

@@ -74,8 +74,8 @@ impl Scanner {
             Ok(ProviderType::WebSocket)
         } else if std::path::Path::new(url)
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("ipc"))
-            || url.contains("ipc")
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ipc")) ||
+            url.contains("ipc")
         {
             Ok(ProviderType::Ipc)
         } else {

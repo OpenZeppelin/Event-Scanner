@@ -78,7 +78,9 @@ impl ScannerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FixedRetryConfig, callback::EventCallback, callback_strategy::BACK_OFF_MAX_RETRIES};
+    use crate::{
+        FixedRetryConfig, callback::EventCallback, callback_strategy::BACK_OFF_MAX_RETRIES,
+    };
     use alloy::{primitives::address, rpc::types::Log};
     use async_trait::async_trait;
     use std::sync::Arc;

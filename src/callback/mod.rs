@@ -8,4 +8,3 @@ pub trait EventCallback {
 }
 
 pub mod strategy;
-
