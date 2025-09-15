@@ -249,7 +249,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
 
                     if let Some(sender) = event_channels.get(&event_filter.event) {
                         for log in logs {
-                            if let Err(e) = sender.send(log.clone()).await {
+                            if let Err(e) = sender.send(log).await {
                                 warn!(event = %event_filter.event, error = %e, "failed to enqueue log for processing");
                             }
                         }
