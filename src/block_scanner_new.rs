@@ -105,6 +105,7 @@
 //!
 //! use tokio::time::Duration;
 //! use event_scanner::block_scanner_new::{SubscriptionService, SubscriptionClient, Config, ServiceStatus, SubscriptionError};
+//! use alloy::transports::http::reqwest::Url;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -113,7 +114,7 @@
 //!
 //!     // Configuration
 //!     let config = Config {
-//!         ws_url: "ws://localhost:8546".to_string(),
+//!         ws_url: Url::parse("ws://localhost:8546").unwrap(),
 //!         blocks_read_per_epoch: 1000,
 //!         reorg_rewind_depth: 5,
 //!         retry_interval: Duration::from_secs(12),
@@ -138,7 +139,7 @@
 //!     ).await?;
 //!
 //!     Ok(())
-//!     }
+//! }
 //! ```
 
 #![allow(unused)]
@@ -164,7 +165,7 @@ use alloy::{
     },
     transports::{
         RpcError, TransportError, TransportErrorKind,
-        http::reqwest,
+        http::reqwest::{self, Url},
         ipc::IpcConnect,
         ws::{self, WsConnect},
     },
@@ -258,7 +259,7 @@ impl BlockHashAndNumber {
 }
 
 pub struct Config {
-    pub ws_url: String,
+    pub ws_url: Url,
     pub blocks_read_per_epoch: usize,
     pub reorg_rewind_depth: u64,
     pub retry_interval: Duration,
@@ -443,14 +444,14 @@ impl SubscriptionService {
         while self.last_synced_block.as_ref().unwrap().number < to {
             self.ensure_current_not_reorged(provider).await?;
 
-            let batch_to = if self.last_synced_block.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64 >
-                to
+            let batch_to = if self.last_synced_block.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > to
             {
                 to
             } else {
-                self.last_synced_block.as_ref().unwrap().number +
-                    self.config.blocks_read_per_epoch as u64
+                self.last_synced_block.as_ref().unwrap().number
+                    + self.config.blocks_read_per_epoch as u64
             };
 
             let batch_end_block = provider
@@ -533,6 +534,7 @@ impl SubscriptionService {
                     retry_count = 0;
 
                     while let Some(value) = ws_stream.next().await {
+                        // TODO: handle reorgs
                         match value {
                             Ok(header_resp) => {
                                 if buffer_sender
@@ -575,14 +577,25 @@ impl SubscriptionService {
 
         // Process all buffered messages
         while let Ok(range) = buffer_rx.try_recv() {
-            if range.start >= cutoff {
+            let (start, end) = (range.start, range.end);
+            if start > cutoff {
                 if sender.send(Ok(range)).await.is_err() {
                     warn!("Subscriber channel closed, cleaning up");
                     return;
                 }
-                processed += 1;
+                processed += end - start;
+            } else if end > cutoff + 1 {
+                // TODO: verify the math
+                discarded += cutoff - start;
+
+                let start = cutoff + 1;
+                if sender.send(Ok((start..end))).await.is_err() {
+                    warn!("Subscriber channel closed, cleaning up");
+                    return;
+                }
+                processed += end - start;
             } else {
-                discarded += 1;
+                discarded += end - start;
             }
         }
 
@@ -689,5 +702,110 @@ impl SubscriptionClient {
         self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
 
         response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy::{providers::ProviderBuilder, sol};
+    use alloy_node_bindings::Anvil;
+    use tokio::time::sleep;
+
+    use super::*;
+
+    sol! {
+        #[allow(missing_docs)]
+        #[sol(rpc, bytecode="608080604052346015576101b0908161001a8239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c90816306661abd1461016157508063a87d942c14610145578063d732d955146100ad5763e8927fbc14610048575f80fd5b346100a9575f3660031901126100a9575f5460018101809111610095576020817f7ca2ca9527391044455246730762df008a6b47bbdb5d37a890ef78394535c040925f55604051908152a1005b634e487b7160e01b5f52601160045260245ffd5b5f80fd5b346100a9575f3660031901126100a9575f548015610100575f198101908111610095576020817f53a71f16f53e57416424d0d18ccbd98504d42a6f98fe47b09772d8f357c620ce925f55604051908152a1005b60405162461bcd60e51b815260206004820152601860248201527f436f756e742063616e6e6f74206265206e6567617469766500000000000000006044820152606490fd5b346100a9575f3660031901126100a95760205f54604051908152f35b346100a9575f3660031901126100a9576020905f548152f3fea2646970667358221220b846b706f79f5ae1fc4a4238319e723a092f47ce4051404186424739164ab02264736f6c634300081e0033")]
+        contract LiveTestCounter {
+            uint256 public count;
+
+            event CountIncreased(uint256 newCount);
+            event CountDecreased(uint256 newCount);
+
+            function increase() public {
+                count += 1;
+                emit CountIncreased(count);
+            }
+
+            function decrease() public {
+                require(count > 0, "Count cannot be negative");
+                count -= 1;
+                emit CountDecreased(count);
+            }
+
+            function getCount() public view returns (uint256) {
+                return count;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subscription_works() -> anyhow::Result<()> {
+        let anvil = Anvil::new().block_time_f64(0.05).try_spawn()?;
+        let wallet = anvil.wallet();
+        let provider = ProviderBuilder::new()
+            .wallet(wallet.unwrap())
+            .connect(anvil.endpoint().as_str())
+            .await?;
+
+        let contract = LiveTestCounter::deploy(provider.clone()).await?;
+        let contract_address = *contract.address();
+
+        let (sender, receiver) = mpsc::channel(1);
+        let sub_client = SubscriptionClient::new(sender);
+
+        let (subscription_service, cmd_tx) = SubscriptionService::new(Config {
+            ws_url: anvil.ws_endpoint_url(),
+            blocks_read_per_epoch: 3,
+            reorg_rewind_depth: 5,
+            retry_interval: Duration::from_secs(1),
+            block_confirmations: 1,
+        });
+
+        let handle = tokio::spawn(async move {
+            subscription_service.run::<alloy::network::Ethereum>().await;
+        });
+
+        let mut data_receiver =
+            sub_client.subscribe(BlockNumberOrTag::Latest, None, 1).await.unwrap();
+
+        let ctr_handle = tokio::spawn(async move {
+            for _ in 0..10 {
+                let tx = contract.increase().send().await;
+                assert!(tx.is_ok());
+
+                sleep(Duration::from_millis(100)).await;
+            }
+        });
+
+        while let Some(result) = data_receiver.recv().await {
+            match result {
+                Ok(range) => {
+                    // if let Err(e) = self.process_range(range).await {
+                    //     error!("Error processing block range: {}", e);
+                    // }
+                }
+                Err(e) => {
+                    error!("Received error from subscription: {}", e);
+
+                    // Decide whether to continue or break based on error type
+                    match e {
+                        SubscriptionError::ServiceShutdown => break,
+                        SubscriptionError::WebSocketConnectionFailed(_) => {
+                            // Maybe implement backoff and retry logic here
+                            warn!(
+                                "WebSocket connection failed, continuing to listen for reconnection"
+                            );
+                        }
+                        _ => {
+                            // Continue processing for other errors
+                            warn!("Non-fatal error, continuing: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
