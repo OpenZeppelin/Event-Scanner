@@ -8,14 +8,14 @@ use crate::callback::EventCallback;
 
 use super::CallbackStrategy;
 
+pub const BACK_OFF_MAX_RETRIES: u64 = 5;
+pub const BACK_OFF_MAX_DELAY_MS: u64 = 200;
+
 #[derive(Clone, Copy, Debug)]
 pub struct FixedRetryConfig {
     pub max_attempts: u64,
     pub delay_ms: u64,
 }
-
-pub const BACK_OFF_MAX_RETRIES: u64 = 5;
-pub const BACK_OFF_MAX_DELAY_MS: u64 = 200;
 
 impl Default for FixedRetryConfig {
     fn default() -> Self {

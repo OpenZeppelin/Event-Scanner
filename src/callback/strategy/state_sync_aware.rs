@@ -8,6 +8,11 @@ use crate::{FixedRetryConfig, callback::EventCallback};
 
 use super::{CallbackStrategy, fixed_retry::FixedRetryStrategy};
 
+pub const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+pub const STATE_SYNC_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(120);
+pub const STATE_SYNC_RETRY_MAX_ELAPSED: Duration = Duration::from_secs(600);
+pub const STATE_SYNC_RETRY_MULTIPLIER: f64 = 1.5;
+
 #[derive(Clone, Copy, Debug)]
 pub struct StateSyncConfig {
     pub initial_interval: Duration,
@@ -15,11 +20,6 @@ pub struct StateSyncConfig {
     pub max_elapsed: Duration,
     pub multiplier: f64,
 }
-
-pub const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
-pub const STATE_SYNC_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(120);
-pub const STATE_SYNC_RETRY_MAX_ELAPSED: Duration = Duration::from_secs(600);
-pub const STATE_SYNC_RETRY_MULTIPLIER: f64 = 1.5;
 
 impl Default for StateSyncConfig {
     fn default() -> Self {
