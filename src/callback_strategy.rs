@@ -4,14 +4,15 @@ use alloy::rpc::types::Log;
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use crate::{
-    block_scanner::{
-        STATE_SYNC_RETRY_INTERVAL, STATE_SYNC_RETRY_MAX_ELAPSED, STATE_SYNC_RETRY_MAX_INTERVAL,
-        STATE_SYNC_RETRY_MULTIPLIER,
-    },
-    callback::EventCallback,
-    types::CallbackConfig,
-};
+use crate::callback::EventCallback;
+
+// State sync aware retry settings
+pub const BACK_OFF_MAX_RETRIES: u64 = 5;
+pub const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+pub const STATE_SYNC_MAX_RETRIES: u64 = 12;
+pub const STATE_SYNC_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(120);
+pub const STATE_SYNC_RETRY_MAX_ELAPSED: Duration = Duration::from_secs(600);
+pub const STATE_SYNC_RETRY_MULTIPLIER: f64 = 1.5; // exponential growth factor
 
 #[async_trait]
 pub trait CallbackStrategy: Send + Sync {
@@ -22,12 +23,24 @@ pub trait CallbackStrategy: Send + Sync {
     ) -> anyhow::Result<()>;
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct FixedRetryConfig {
+    pub max_attempts: u64,
+    pub delay_ms: u64,
+}
+
+impl Default for FixedRetryConfig {
+    fn default() -> Self {
+        Self { max_attempts: BACK_OFF_MAX_RETRIES, delay_ms: 200 }
+    }
+}
+
 pub struct FixedRetryStrategy {
-    cfg: CallbackConfig,
+    cfg: FixedRetryConfig,
 }
 
 impl FixedRetryStrategy {
-    pub fn new(cfg: CallbackConfig) -> Self {
+    pub fn new(cfg: FixedRetryConfig) -> Self {
         Self { cfg }
     }
 }
@@ -61,13 +74,37 @@ impl CallbackStrategy for FixedRetryStrategy {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct StateSyncConfig {
+    pub initial_interval: Duration,
+    pub max_interval: Duration,
+    pub max_elapsed: Duration,
+    pub multiplier: f64,
+}
+
+impl Default for StateSyncConfig {
+    fn default() -> Self {
+        Self {
+            initial_interval: STATE_SYNC_RETRY_INTERVAL,
+            max_interval: STATE_SYNC_RETRY_MAX_INTERVAL,
+            max_elapsed: STATE_SYNC_RETRY_MAX_ELAPSED,
+            multiplier: STATE_SYNC_RETRY_MULTIPLIER,
+        }
+    }
+}
+
 pub struct StateSyncAwareStrategy<S: CallbackStrategy> {
     inner: S,
+    cfg: StateSyncConfig,
 }
 
 impl<S: CallbackStrategy> StateSyncAwareStrategy<S> {
     pub fn new(inner: S) -> Self {
-        Self { inner }
+        Self { inner, cfg: StateSyncConfig::default() }
+    }
+    pub fn with_config(mut self, cfg: StateSyncConfig) -> Self {
+        self.cfg = cfg;
+        self
     }
 }
 
@@ -83,17 +120,13 @@ impl<S: CallbackStrategy> CallbackStrategy for StateSyncAwareStrategy<S> {
             Err(first_err) => {
                 if is_missing_trie_node_error(&first_err) {
                     // state sync aware retry path
-                    let mut delay = STATE_SYNC_RETRY_INTERVAL;
+                    let mut delay = self.cfg.initial_interval;
                     let start = tokio::time::Instant::now();
-                    info!(
-                        initial_interval = ?STATE_SYNC_RETRY_INTERVAL,
-                        max_interval = ?STATE_SYNC_RETRY_MAX_INTERVAL,
-                        max_elapsed = ?STATE_SYNC_RETRY_MAX_ELAPSED,
-                        "Starting state-sync aware retry"
-                    );
+                    info!(initial_interval = ?self.cfg.initial_interval, max_interval = ?self.cfg.max_interval,
+                        max_elapsed = ?self.cfg.max_elapsed, "Starting state-sync aware retry");
                     let mut last_err: anyhow::Error = first_err;
                     loop {
-                        if start.elapsed() >= STATE_SYNC_RETRY_MAX_ELAPSED {
+                        if start.elapsed() >= self.cfg.max_elapsed {
                             return Err(last_err);
                         }
                         tokio::time::sleep(delay).await;
@@ -101,9 +134,9 @@ impl<S: CallbackStrategy> CallbackStrategy for StateSyncAwareStrategy<S> {
                             Ok(()) => return Ok(()),
                             Err(e) => {
                                 last_err = e;
-                                let next_secs = delay.as_secs_f64() * STATE_SYNC_RETRY_MULTIPLIER;
+                                let next_secs = delay.as_secs_f64() * self.cfg.multiplier;
                                 let next = Duration::from_secs_f64(next_secs);
-                                delay = cmp::min(STATE_SYNC_RETRY_MAX_INTERVAL, next);
+                                delay = cmp::min(self.cfg.max_interval, next);
                                 let elapsed = start.elapsed();
                                 warn!(next_delay = ?delay, elapsed = ?elapsed, error = %last_err,
                                     "State-sync retry operation failed: will retry");

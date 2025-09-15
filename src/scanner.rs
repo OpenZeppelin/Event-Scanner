@@ -8,10 +8,7 @@ use tokio::time::{Duration, sleep};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
-use crate::{
-    callback::EventCallback,
-    types::{CallbackConfig, EventFilter},
-};
+use crate::{callback::EventCallback, types::EventFilter};
 
 enum ProviderType {
     WebSocket,
@@ -77,8 +74,8 @@ impl Scanner {
             Ok(ProviderType::WebSocket)
         } else if std::path::Path::new(url)
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("ipc")) ||
-            url.contains("ipc")
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ipc"))
+            || url.contains("ipc")
         {
             Ok(ProviderType::Ipc)
         } else {

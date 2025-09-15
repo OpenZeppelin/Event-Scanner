@@ -2,12 +2,9 @@
 use std::{cmp, collections::HashMap, future, sync::Arc, time::Duration};
 
 use crate::{
-    block_scanner::{
-        BlockScanner, BlockScannerBuilder, OnBlocksFunc, STATE_SYNC_RETRY_INTERVAL,
-        STATE_SYNC_RETRY_MAX_ELAPSED, STATE_SYNC_RETRY_MAX_INTERVAL, STATE_SYNC_RETRY_MULTIPLIER,
-    },
+    block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
     callback_strategy::{CallbackStrategy, FixedRetryStrategy, StateSyncAwareStrategy},
-    types::{CallbackConfig, EventFilter},
+    types::EventFilter,
 };
 use alloy::{
     eips::BlockNumberOrTag,
@@ -29,6 +26,7 @@ pub struct EventScannerBuilder<N: Network> {
     tracked_events: Vec<EventFilter>,
     callback_config: CallbackConfig,
     callback_strategy: Option<Arc<dyn CallbackStrategy>>,
+    state_sync_config: Option<crate::callback_strategy::StateSyncConfig>,
 }
 
 impl<N: Network> Default for EventScannerBuilder<N> {
@@ -45,6 +43,7 @@ impl<N: Network> EventScannerBuilder<N> {
             tracked_events: Vec::new(),
             callback_config: CallbackConfig::default(),
             callback_strategy: None,
+            state_sync_config: None,
         }
     }
 
@@ -69,6 +68,15 @@ impl<N: Network> EventScannerBuilder<N> {
     #[must_use]
     pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
         self.callback_strategy = Some(strategy);
+        self
+    }
+
+    #[must_use]
+    pub fn with_state_sync_config(
+        mut self,
+        cfg: crate::callback_strategy::StateSyncConfig,
+    ) -> Self {
+        self.state_sync_config = Some(cfg);
         self
     }
 
@@ -124,9 +132,17 @@ impl<N: Network> EventScannerBuilder<N> {
         connect: WsConnect,
     ) -> Result<EventScanner<RootProvider<N>, N>, TransportError> {
         let block_scanner = self.block_scanner.connect_ws(connect).await?;
-        let strategy: Arc<dyn CallbackStrategy> = self
-            .callback_strategy
-            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
+        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
+            s
+        } else {
+            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
+                self.callback_config.clone(),
+            ));
+            let outer = StateSyncAwareStrategy::new(inner);
+            let outer =
+                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
+            Arc::new(outer)
+        };
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -148,9 +164,17 @@ impl<N: Network> EventScannerBuilder<N> {
         IpcConnect<T>: PubSubConnect,
     {
         let block_scanner = self.block_scanner.connect_ipc(connect).await?;
-        let strategy: Arc<dyn CallbackStrategy> = self
-            .callback_strategy
-            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
+        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
+            s
+        } else {
+            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
+                self.callback_config.clone(),
+            ));
+            let outer = StateSyncAwareStrategy::new(inner);
+            let outer =
+                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
+            Arc::new(outer)
+        };
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -162,9 +186,17 @@ impl<N: Network> EventScannerBuilder<N> {
     #[must_use]
     pub fn connect_client(self, client: RpcClient) -> EventScanner<RootProvider<N>, N> {
         let block_scanner = self.block_scanner.connect_client(client);
-        let strategy: Arc<dyn CallbackStrategy> = self
-            .callback_strategy
-            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
+        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
+            s
+        } else {
+            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
+                self.callback_config.clone(),
+            ));
+            let outer = StateSyncAwareStrategy::new(inner);
+            let outer =
+                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
+            Arc::new(outer)
+        };
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -176,9 +208,17 @@ impl<N: Network> EventScannerBuilder<N> {
     #[must_use]
     pub fn connect_provider(self, provider: RootProvider<N>) -> EventScanner<RootProvider<N>, N> {
         let block_scanner = self.block_scanner.connect_provider(provider);
-        let strategy: Arc<dyn CallbackStrategy> = self
-            .callback_strategy
-            .unwrap_or_else(|| Arc::new(StateSyncAwareStrategy::new(FixedRetryStrategy::new(self.callback_config.clone()))));
+        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
+            s
+        } else {
+            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
+                self.callback_config.clone(),
+            ));
+            let outer = StateSyncAwareStrategy::new(inner);
+            let outer =
+                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
+            Arc::new(outer)
+        };
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -217,7 +257,12 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
             let event_name_clone = event_name.clone();
             let callback = filter.callback.clone();
             let strategy = self.callback_strategy.clone();
-            Self::spawn_event_callback_task_executors(receiver, callback, strategy, event_name_clone);
+            Self::spawn_event_callback_task_executors(
+                receiver,
+                callback,
+                strategy,
+                event_name_clone,
+            );
 
             event_channels.insert(event_name, sender);
         }
@@ -312,5 +357,4 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
 
         Ok(())
     }
-
 }

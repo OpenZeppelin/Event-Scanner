@@ -21,17 +21,9 @@ use alloy::{
 const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
 const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(12);
 const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
-pub const BACK_OFF_MAX_RETRIES: u64 = 5;
 
 // TODO: determine check exact default value
 const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
-
-// State sync aware retry settings
-pub const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
-pub const STATE_SYNC_MAX_RETRIES: u64 = 12;
-pub const STATE_SYNC_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(120);
-pub const STATE_SYNC_RETRY_MAX_ELAPSED: Duration = Duration::from_secs(600);
-pub const STATE_SYNC_RETRY_MULTIPLIER: f64 = 1.5; // exponential growth factor
 
 #[derive(Debug)]
 pub enum BlockScannerError {

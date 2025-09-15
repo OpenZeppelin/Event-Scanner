@@ -2,19 +2,7 @@ use std::sync::Arc;
 
 use alloy::primitives::Address;
 
-use crate::{block_scanner::BACK_OFF_MAX_RETRIES, callback::EventCallback};
-
-#[derive(Clone, Debug)]
-pub struct CallbackConfig {
-    pub max_attempts: u64,
-    pub delay_ms: u64,
-}
-
-impl Default for CallbackConfig {
-    fn default() -> Self {
-        Self { max_attempts: BACK_OFF_MAX_RETRIES, delay_ms: 200 }
-    }
-}
+use crate::callback::EventCallback;
 
 #[derive(Clone)]
 pub struct EventFilter {
