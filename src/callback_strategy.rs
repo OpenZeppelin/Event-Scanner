@@ -13,6 +13,7 @@ pub const STATE_SYNC_MAX_RETRIES: u64 = 12;
 pub const STATE_SYNC_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(120);
 pub const STATE_SYNC_RETRY_MAX_ELAPSED: Duration = Duration::from_secs(600);
 pub const STATE_SYNC_RETRY_MULTIPLIER: f64 = 1.5; // exponential growth factor
+pub const FIXED_DELAY_MS: u64 = 200;
 
 #[async_trait]
 pub trait CallbackStrategy: Send + Sync {
@@ -31,7 +32,7 @@ pub struct FixedRetryConfig {
 
 impl Default for FixedRetryConfig {
     fn default() -> Self {
-        Self { max_attempts: BACK_OFF_MAX_RETRIES, delay_ms: 200 }
+        Self { max_attempts: BACK_OFF_MAX_RETRIES, delay_ms: FIXED_DELAY_MS }
     }
 }
 

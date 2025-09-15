@@ -2,6 +2,7 @@
 use std::{cmp, collections::HashMap, future, sync::Arc, time::Duration};
 
 use crate::{
+    FixedRetryConfig,
     block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
     callback_strategy::{CallbackStrategy, FixedRetryStrategy, StateSyncAwareStrategy},
     types::EventFilter,
@@ -24,9 +25,7 @@ use tracing::{error, info, warn};
 pub struct EventScannerBuilder<N: Network> {
     block_scanner: BlockScannerBuilder<N>,
     tracked_events: Vec<EventFilter>,
-    callback_config: CallbackConfig,
     callback_strategy: Option<Arc<dyn CallbackStrategy>>,
-    state_sync_config: Option<crate::callback_strategy::StateSyncConfig>,
 }
 
 impl<N: Network> Default for EventScannerBuilder<N> {
@@ -41,9 +40,7 @@ impl<N: Network> EventScannerBuilder<N> {
         Self {
             block_scanner: BlockScannerBuilder::new(),
             tracked_events: Vec::new(),
-            callback_config: CallbackConfig::default(),
             callback_strategy: None,
-            state_sync_config: None,
         }
     }
 
@@ -60,23 +57,8 @@ impl<N: Network> EventScannerBuilder<N> {
     }
 
     #[must_use]
-    pub fn with_callback_config(mut self, cfg: CallbackConfig) -> Self {
-        self.callback_config = cfg;
-        self
-    }
-
-    #[must_use]
     pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
         self.callback_strategy = Some(strategy);
-        self
-    }
-
-    #[must_use]
-    pub fn with_state_sync_config(
-        mut self,
-        cfg: crate::callback_strategy::StateSyncConfig,
-    ) -> Self {
-        self.state_sync_config = Some(cfg);
         self
     }
 
@@ -135,18 +117,13 @@ impl<N: Network> EventScannerBuilder<N> {
         let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
             s
         } else {
-            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
-                self.callback_config.clone(),
-            ));
+            let inner = FixedRetryStrategy::new(FixedRetryConfig::default());
             let outer = StateSyncAwareStrategy::new(inner);
-            let outer =
-                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
             Arc::new(outer)
         };
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
             callback_strategy: strategy,
         })
     }
@@ -178,7 +155,6 @@ impl<N: Network> EventScannerBuilder<N> {
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
             callback_strategy: strategy,
         })
     }
@@ -200,7 +176,6 @@ impl<N: Network> EventScannerBuilder<N> {
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
             callback_strategy: strategy,
         }
     }
@@ -222,7 +197,6 @@ impl<N: Network> EventScannerBuilder<N> {
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
             callback_strategy: strategy,
         }
     }
@@ -231,7 +205,6 @@ impl<N: Network> EventScannerBuilder<N> {
 pub struct EventScanner<P: Provider<N>, N: Network> {
     block_scanner: BlockScanner<P, N>,
     tracked_events: Vec<EventFilter>,
-    callback_config: CallbackConfig,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
