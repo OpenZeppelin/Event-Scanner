@@ -1,10 +1,8 @@
-#![allow(unused)]
-use std::{cmp, collections::HashMap, future, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
-    FixedRetryConfig,
     block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
-    callback_strategy::{CallbackStrategy, FixedRetryStrategy, StateSyncAwareStrategy},
+    callback_strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
 use alloy::{
@@ -117,9 +115,7 @@ impl<N: Network> EventScannerBuilder<N> {
         let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
             s
         } else {
-            let inner = FixedRetryStrategy::new(FixedRetryConfig::default());
-            let outer = StateSyncAwareStrategy::new(inner);
-            Arc::new(outer)
+            Self::get_default_callback_strategy()
         };
         Ok(EventScanner {
             block_scanner,
@@ -144,13 +140,7 @@ impl<N: Network> EventScannerBuilder<N> {
         let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
             s
         } else {
-            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
-                self.callback_config.clone(),
-            ));
-            let outer = StateSyncAwareStrategy::new(inner);
-            let outer =
-                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
-            Arc::new(outer)
+            Self::get_default_callback_strategy()
         };
         Ok(EventScanner {
             block_scanner,
@@ -165,13 +155,7 @@ impl<N: Network> EventScannerBuilder<N> {
         let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
             s
         } else {
-            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
-                self.callback_config.clone(),
-            ));
-            let outer = StateSyncAwareStrategy::new(inner);
-            let outer =
-                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
-            Arc::new(outer)
+            Self::get_default_callback_strategy()
         };
         EventScanner {
             block_scanner,
@@ -186,19 +170,18 @@ impl<N: Network> EventScannerBuilder<N> {
         let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
             s
         } else {
-            let inner = FixedRetryStrategy::new(crate::callback_strategy::FixedRetryConfig::from(
-                self.callback_config.clone(),
-            ));
-            let outer = StateSyncAwareStrategy::new(inner);
-            let outer =
-                if let Some(cfg) = self.state_sync_config { outer.with_config(cfg) } else { outer };
-            Arc::new(outer)
+            Self::get_default_callback_strategy()
         };
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
             callback_strategy: strategy,
         }
+    }
+
+    fn get_default_callback_strategy() -> Arc<dyn CallbackStrategy> {
+        let state_sync_aware_strategy = StateSyncAwareStrategy::new();
+        Arc::new(state_sync_aware_strategy)
     }
 }
 
@@ -225,7 +208,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
             }
 
             // TODO: configurable buffer size / smaller buffer ?
-            let (sender, mut receiver) = mpsc::channel::<Log>(1024);
+            let (sender, receiver) = mpsc::channel::<Log>(1024);
 
             let event_name_clone = event_name.clone();
             let callback = filter.callback.clone();

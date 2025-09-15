@@ -94,23 +94,31 @@ impl Default for StateSyncConfig {
     }
 }
 
-pub struct StateSyncAwareStrategy<S: CallbackStrategy> {
-    inner: S,
+pub struct StateSyncAwareStrategy {
+    inner: FixedRetryStrategy,
     cfg: StateSyncConfig,
 }
 
-impl<S: CallbackStrategy> StateSyncAwareStrategy<S> {
-    pub fn new(inner: S) -> Self {
-        Self { inner, cfg: StateSyncConfig::default() }
+impl StateSyncAwareStrategy {
+    pub fn new() -> Self {
+        Self {
+            inner: FixedRetryStrategy::new(FixedRetryConfig::default()),
+            cfg: StateSyncConfig::default(),
+        }
     }
-    pub fn with_config(mut self, cfg: StateSyncConfig) -> Self {
+    pub fn with_state_sync_config(mut self, cfg: StateSyncConfig) -> Self {
         self.cfg = cfg;
+        self
+    }
+
+    pub fn with_fixed_retry_config(mut self, cfg: FixedRetryConfig) -> Self {
+        self.inner = FixedRetryStrategy::new(cfg);
         self
     }
 }
 
 #[async_trait]
-impl<S: CallbackStrategy> CallbackStrategy for StateSyncAwareStrategy<S> {
+impl CallbackStrategy for StateSyncAwareStrategy {
     async fn execute(
         &self,
         callback: &Arc<dyn EventCallback + Send + Sync>,
@@ -145,7 +153,7 @@ impl<S: CallbackStrategy> CallbackStrategy for StateSyncAwareStrategy<S> {
                         }
                     }
                 } else {
-                    // delegate to inner strategy for regular errors
+                    // Fixed retry for regular errors
                     self.inner.execute(callback, log).await
                 }
             }
@@ -157,5 +165,3 @@ fn is_missing_trie_node_error(err: &anyhow::Error) -> bool {
     let s = err.to_string().to_lowercase();
     s.contains("missing trie node") && s.contains("state") && s.contains("not available")
 }
-
-pub type DefaultCallbackStrategy = StateSyncAwareStrategy<FixedRetryStrategy>;
