@@ -4,77 +4,9 @@ use alloy::rpc::types::Log;
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use crate::callback::EventCallback;
+use crate::{FixedRetryConfig, callback::EventCallback};
 
-// State sync aware retry settings
-pub const BACK_OFF_MAX_RETRIES: u64 = 5;
-pub const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
-pub const STATE_SYNC_MAX_RETRIES: u64 = 12;
-pub const STATE_SYNC_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(120);
-pub const STATE_SYNC_RETRY_MAX_ELAPSED: Duration = Duration::from_secs(600);
-pub const STATE_SYNC_RETRY_MULTIPLIER: f64 = 1.5; // exponential growth factor
-pub const FIXED_DELAY_MS: u64 = 200;
-
-#[async_trait]
-pub trait CallbackStrategy: Send + Sync {
-    async fn execute(
-        &self,
-        callback: &Arc<dyn EventCallback + Send + Sync>,
-        log: &Log,
-    ) -> anyhow::Result<()>;
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct FixedRetryConfig {
-    pub max_attempts: u64,
-    pub delay_ms: u64,
-}
-
-impl Default for FixedRetryConfig {
-    fn default() -> Self {
-        Self { max_attempts: BACK_OFF_MAX_RETRIES, delay_ms: FIXED_DELAY_MS }
-    }
-}
-
-pub struct FixedRetryStrategy {
-    cfg: FixedRetryConfig,
-}
-
-impl FixedRetryStrategy {
-    #[must_use]
-    pub fn new(cfg: FixedRetryConfig) -> Self {
-        Self { cfg }
-    }
-}
-
-#[async_trait]
-impl CallbackStrategy for FixedRetryStrategy {
-    async fn execute(
-        &self,
-        callback: &Arc<dyn EventCallback + Send + Sync>,
-        log: &Log,
-    ) -> anyhow::Result<()> {
-        match callback.on_event(log).await {
-            Ok(()) => Ok(()),
-            Err(mut last_err) => {
-                let attempts = self.cfg.max_attempts.max(1);
-                for _ in 1..attempts {
-                    warn!(
-                        delay_ms = self.cfg.delay_ms,
-                        max_attempts = attempts,
-                        "Callback failed: retrying after fixed delay"
-                    );
-                    tokio::time::sleep(Duration::from_millis(self.cfg.delay_ms)).await;
-                    match callback.on_event(log).await {
-                        Ok(()) => return Ok(()),
-                        Err(e) => last_err = e,
-                    }
-                }
-                Err(last_err)
-            }
-        }
-    }
-}
+use super::{CallbackStrategy, fixed_retry::FixedRetryStrategy};
 
 #[derive(Clone, Copy, Debug)]
 pub struct StateSyncConfig {
@@ -83,6 +15,11 @@ pub struct StateSyncConfig {
     pub max_elapsed: Duration,
     pub multiplier: f64,
 }
+
+pub const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+pub const STATE_SYNC_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(120);
+pub const STATE_SYNC_RETRY_MAX_ELAPSED: Duration = Duration::from_secs(600);
+pub const STATE_SYNC_RETRY_MULTIPLIER: f64 = 1.5;
 
 impl Default for StateSyncConfig {
     fn default() -> Self {
@@ -122,7 +59,7 @@ impl StateSyncAwareStrategy {
     }
 
     #[must_use]
-    pub fn with_fixed_retry_config(mut self, cfg: FixedRetryConfig) -> Self {
+    pub fn with_fixed_retry_config(mut self, cfg: super::fixed_retry::FixedRetryConfig) -> Self {
         self.inner = FixedRetryStrategy::new(cfg);
         self
     }

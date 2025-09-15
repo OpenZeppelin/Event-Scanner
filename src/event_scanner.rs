@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
     block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
-    callback_strategy::{CallbackStrategy, StateSyncAwareStrategy},
+    callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
 use alloy::{
