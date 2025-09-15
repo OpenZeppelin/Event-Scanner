@@ -443,14 +443,14 @@ impl SubscriptionService {
         while self.last_synced_block.as_ref().unwrap().number < to {
             self.ensure_current_not_reorged(provider).await?;
 
-            let batch_to = if self.last_synced_block.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64
-                > to
+            let batch_to = if self.last_synced_block.as_ref().unwrap().number +
+                self.config.blocks_read_per_epoch as u64 >
+                to
             {
                 to
             } else {
-                self.last_synced_block.as_ref().unwrap().number
-                    + self.config.blocks_read_per_epoch as u64
+                self.last_synced_block.as_ref().unwrap().number +
+                    self.config.blocks_read_per_epoch as u64
             };
 
             let batch_end_block = provider
