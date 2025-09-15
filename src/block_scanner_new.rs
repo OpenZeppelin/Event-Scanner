@@ -90,12 +90,25 @@ pub enum Command {
     Unsubscribe {
         response: oneshot::Sender<Result<(), SubscriptionError>>,
     },
+    GetStatus {
+        response: oneshot::Sender<ServiceStatus>,
+    },
     Shutdown {
         response: oneshot::Sender<()>,
     },
 }
 
-struct BlockHashAndNumber {
+#[derive(Debug, Clone)]
+pub struct ServiceStatus {
+    pub is_subscribed: bool,
+    pub last_synced_block: Option<BlockHashAndNumber>,
+    pub websocket_connected: bool,
+    pub processed_count: u64,
+    pub error_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockHashAndNumber {
     hash: BlockHash,
     number: BlockNumber,
 }
@@ -203,6 +216,10 @@ impl SubscriptionService {
                 let result = self.handle_unsubscribe().await;
                 let _ = response.send(result);
             }
+            Command::GetStatus { response } => {
+                let status = self.get_status();
+                let _ = response.send(status);
+            }
             Command::Shutdown { response } => {
                 self.shutdown = true;
                 self.handle_unsubscribe().await?;
@@ -283,8 +300,9 @@ impl SubscriptionService {
         );
 
         // TODO: invoke with smart retry mechanism with backoff
-        if let Err(e) =
-            self.sync_historical_data(start_block, sync_end_block.header().number()).await
+        if let Err(e) = self
+            .sync_historical_data(&provider, start_block, sync_end_block.header().number())
+            .await
         {
             ws_task.abort();
             return Err(SubscriptionError::HistoricalSyncError(e.to_string()));
@@ -304,22 +322,37 @@ impl SubscriptionService {
         Ok(())
     }
 
-    async fn sync_historical_data(
+    async fn sync_historical_data<P: Provider<N>, N: Network>(
         &mut self,
+        provider: &P,
         from: BlockNumber,
         to: BlockNumber,
     ) -> Result<(), SubscriptionError> {
-        let mut cursor = from;
         let mut batch_count = 0;
 
-        while cursor < to {
-            let batch_to = if cursor + self.config.blocks_read_per_epoch as u64 > to {
+        while self.last_synced_block.as_ref().unwrap().number < to {
+            self.ensure_current_not_reorged(provider).await?;
+
+            let batch_to = if self.last_synced_block.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > to
+            {
                 to
             } else {
-                cursor + self.config.blocks_read_per_epoch as u64
+                self.last_synced_block.as_ref().unwrap().number
+                    + self.config.blocks_read_per_epoch as u64
             };
-            self.send_to_subscriber(Ok(cursor..batch_to)).await;
-            cursor = batch_to;
+
+            let batch_end_block = provider
+                .get_block_by_number(batch_to.into())
+                .await?
+                .expect("TODO: check if really valid");
+
+            self.send_to_subscriber(Ok(self.last_synced_block.as_ref().unwrap().number..batch_to))
+                .await;
+
+            self.last_synced_block =
+                Some(BlockHashAndNumber::from_header::<N>(&batch_end_block.header()));
 
             batch_count += 1;
             if batch_count % 10 == 0 {
@@ -328,6 +361,52 @@ impl SubscriptionService {
         }
 
         info!("Historical sync completed: {} batches processed", batch_count);
+        Ok(())
+    }
+
+    async fn ensure_current_not_reorged<P: Provider<N>, N: Network>(
+        &mut self,
+        provider: &P,
+    ) -> Result<(), SubscriptionError> {
+        let current_block =
+            provider.get_block_by_hash(self.last_synced_block.as_ref().unwrap().hash).await?;
+        if current_block.is_some() {
+            return Ok(());
+        }
+
+        self.rewind_on_reorg_detected(provider).await
+    }
+
+    async fn rewind_on_reorg_detected<P: Provider<N>, N: Network>(
+        &mut self,
+        provider: P,
+    ) -> Result<(), SubscriptionError> {
+        let mut new_current_height =
+            if self.last_synced_block.as_ref().unwrap().number <= self.config.reorg_rewind_depth {
+                0
+            } else {
+                self.last_synced_block.as_ref().unwrap().number - self.config.reorg_rewind_depth
+            };
+
+        let head = provider.get_block_number().await?;
+        if head < new_current_height {
+            new_current_height = head;
+        }
+
+        let current = provider
+            .get_block_by_number(new_current_height.into())
+            .await?
+            .map(|block| BlockHashAndNumber::from_header::<N>(&block.header()))
+            .expect("block should exist");
+
+        println!(
+            "Rewind on reorg detected\noldCurrent: {}, newCurrent: {}",
+            self.last_synced_block.as_ref().unwrap().number,
+            current.number
+        );
+
+        self.last_synced_block = Some(current);
+
         Ok(())
     }
 
@@ -431,6 +510,16 @@ impl SubscriptionService {
         }
         Ok(())
     }
+
+    fn get_status(&self) -> ServiceStatus {
+        ServiceStatus {
+            is_subscribed: self.subscriber.is_some(),
+            last_synced_block: self.last_synced_block.clone(),
+            websocket_connected: self.websocket_connected,
+            processed_count: self.processed_count,
+            error_count: self.error_count,
+        }
+    }
 }
 
 pub struct SubscriptionClient {
@@ -484,6 +573,16 @@ impl SubscriptionClient {
         self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
 
         response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)?
+    }
+
+    pub async fn get_status(&self) -> Result<ServiceStatus, SubscriptionError> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::GetStatus { response: response_tx };
+
+        self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)
     }
 
     pub async fn shutdown(&self) -> Result<(), SubscriptionError> {
