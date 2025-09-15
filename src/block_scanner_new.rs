@@ -1,3 +1,146 @@
+//! Example usage:
+//!
+//! ```rust,no_run
+//! use alloy::primitives::BlockNumber;
+//! use alloy::eips::BlockNumberOrTag;
+//! use std::ops::Range;
+//! use tracing::{debug, error, info, warn};
+//!
+//! pub struct DataProcessor {
+//!     processed_count: u64,
+//!     last_range: Option<Range<BlockNumber>>,
+//!     client: SubscriptionClient,
+//! }
+//!
+//! impl DataProcessor {
+//!     pub fn new(client: SubscriptionClient) -> Self {
+//!         Self {
+//!             processed_count: 0,
+//!             last_range: None,
+//!             client,
+//!         }
+//!     }
+//!
+//!     pub async fn start_processing(
+//!         &mut self,
+//!         start_height: BlockNumberOrTag,
+//!         end_height: Option<BlockNumberOrTag>,
+//!         buffer_size: usize,
+//!     ) -> Result<(), SubscriptionError> {
+//!         info!("Starting data processing from point: {:?}", start_height);
+//!     
+//!         let mut data_receiver = self.client.subscribe(
+//!             start_height,
+//!             end_height,
+//!             buffer_size,
+//!         ).await?;
+//!     
+//!         while let Some(result) = data_receiver.recv().await {
+//!             match result {
+//!                 Ok(range) => {
+//!                     if let Err(e) = self.process_range(range).await {
+//!                         error!("Error processing block range: {}", e);
+//!                     }
+//!                 }
+//!                 Err(e) => {
+//!                     error!("Received error from subscription: {}", e);
+//!                 
+//!                     // Decide whether to continue or break based on error type
+//!                     match e {
+//!                         SubscriptionError::ServiceShutdown => break,
+//!                         SubscriptionError::WebSocketConnectionFailed(_) => {
+//!                             // Maybe implement backoff and retry logic here
+//!                             warn!("WebSocket connection failed, continuing to listen for reconnection");
+//!                         }
+//!                         _ => {
+//!                             // Continue processing for other errors
+//!                             warn!("Non-fatal error, continuing: {}", e);
+//!                         }
+//!                     }
+//!                 }
+//!             }
+//!         }
+//!     
+//!         info!("Data processing stopped. Processed {} values", self.processed_count);
+//!         Ok(())
+//!     }
+//!
+//!     async fn process_range(&mut self, range: Range<BlockNumber>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+//!         // Your application-specific processing logic here
+//!         debug!("Processing range: {} to {}", range.start, range.end);
+//!     
+//!         // Example processing: detect significant changes
+//!         if let Some(ref last) = self.last_range {
+//!             if range.end - last.end > 10 { // More than 10 blocks gap
+//!                 warn!("Large block gap detected: {} -> {}", last.end, range.end);
+//!             }
+//!         }
+//!     
+//!         // TODO: fetch events from range of blocks and process them
+//!     
+//!         self.processed_count += 1;
+//!         self.last_range = Some(range);
+//!     
+//!         // Periodic logging
+//!         if self.processed_count % 1000 == 0 {
+//!             info!("Processed {} ranges", self.processed_count);
+//!         }
+//!     
+//!         Ok(())
+//!     }
+//!
+//!     pub async fn stop(&self) -> Result<(), SubscriptionError> {
+//!         self.client.unsubscribe().await
+//!     }
+//!
+//!     pub async fn get_stats(&self) -> Result<(u64, ServiceStatus), SubscriptionError> {
+//!         let service_status = self.client.get_status().await?;
+//!         Ok((self.processed_count, service_status))
+//!     }
+//! }
+//!
+//! // ============================================================================
+//! // Example Usage
+//! // ============================================================================
+//!
+//! use tokio::time::Duration;
+//! use event_scanner::block_scanner_new::{SubscriptionService, SubscriptionClient, Config, ServiceStatus, SubscriptionError};
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Initialize logging
+//!     tracing_subscriber::fmt::init();
+//!
+//!     // Configuration
+//!     let config = Config {
+//!         ws_url: "ws://localhost:8546".to_string(),
+//!         blocks_read_per_epoch: 1000,
+//!         reorg_rewind_depth: 5,
+//!         retry_interval: Duration::from_secs(12),
+//!         block_confirmations: 5,
+//!     };
+//!
+//!     // Start the subscription service
+//!     let (service, command_sender) = SubscriptionService::new(config);
+//!     tokio::spawn(async move {
+//!         service.run::<alloy::network::Ethereum>().await;
+//!     });
+//!
+//!     // Create client and data processor
+//!     let client = SubscriptionClient::new(command_sender);
+//!     let mut processor = DataProcessor::new(client);
+//!
+//!     // Just subscribe
+//!     processor.start_processing(
+//!         BlockNumberOrTag::Latest,
+//!         None, // just subscribe to new blocks
+//!         1, // wait until current blocks are processed before processing next range
+//!     ).await?;
+//!
+//!     Ok(())
+//!     }
+//! ```
+
 #![allow(unused)]
 
 use std::{future, marker::PhantomData, ops::Range, time::Duration};
@@ -78,13 +221,8 @@ pub enum SubscriptionError {
 pub enum Command {
     Subscribe {
         sender: mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>,
-        ws_url: String,
-        blocks_read_per_epoch: usize,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-        reorg_rewind_depth: u64,
-        retry_interval: Duration,
-        block_confirmations: u64,
         response: oneshot::Sender<Result<(), SubscriptionError>>,
     },
     Unsubscribe {
@@ -120,12 +258,11 @@ impl BlockHashAndNumber {
 }
 
 pub struct Config {
-    blocks_read_per_epoch: usize,
-    start_height: BlockNumber,
-    end_height: Option<BlockNumber>,
-    reorg_rewind_depth: u64,
-    retry_interval: Duration,
-    block_confirmations: u64,
+    pub ws_url: String,
+    pub blocks_read_per_epoch: usize,
+    pub reorg_rewind_depth: u64,
+    pub retry_interval: Duration,
+    pub block_confirmations: u64,
 }
 
 pub struct SubscriptionService {
@@ -187,29 +324,8 @@ impl SubscriptionService {
         command: Command,
     ) -> Result<(), SubscriptionError> {
         match command {
-            Command::Subscribe {
-                sender,
-                ws_url,
-                blocks_read_per_epoch,
-                start_height,
-                end_height,
-                reorg_rewind_depth,
-                retry_interval,
-                block_confirmations,
-                response,
-            } => {
-                let result = self
-                    .handle_subscribe::<N>(
-                        sender,
-                        ws_url,
-                        blocks_read_per_epoch,
-                        start_height,
-                        end_height,
-                        reorg_rewind_depth,
-                        retry_interval,
-                        block_confirmations,
-                    )
-                    .await;
+            Command::Subscribe { sender, start_height, end_height, response } => {
+                let result = self.handle_subscribe::<N>(sender, start_height, end_height).await;
                 let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
@@ -232,13 +348,8 @@ impl SubscriptionService {
     async fn handle_subscribe<N: Network>(
         &mut self,
         sender: mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>,
-        ws_url: String,
-        blocks_read_per_epoch: usize,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-        reorg_rewind_depth: u64,
-        retry_interval: Duration,
-        block_confirmations: u64,
     ) -> Result<(), SubscriptionError> {
         if self.subscriber.is_some() {
             return Err(SubscriptionError::MultipleSubscribers);
@@ -249,21 +360,20 @@ impl SubscriptionService {
         info!("Starting subscription from point: {:?}", start_height);
         self.subscriber = Some(sender);
 
-        self.sync_with_transition::<N>(ws_url, start_height, end_height).await?;
+        self.sync_with_transition::<N>(start_height, end_height).await?;
 
         Ok(())
     }
 
     async fn sync_with_transition<N: Network>(
         &mut self,
-        ws_url: String,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
     ) -> Result<(), SubscriptionError> {
         // Step 1: Establish WebSocket connection and start buffering
         let (buffer_tx, buffer_rx) = mpsc::channel(MAX_BUFFERED_MESSAGES);
 
-        let connect = WsConnect::new(ws_url);
+        let connect = WsConnect::new(self.config.ws_url.clone());
         let provider = RootProvider::<N>::new(ClientBuilder::default().ws(connect).await?);
         let provider_clone = provider.clone();
         let ws_task =
@@ -533,30 +643,16 @@ impl SubscriptionClient {
 
     pub async fn subscribe(
         &self,
-        ws_url: String,
-        blocks_read_per_epoch: usize,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-        reorg_rewind_depth: u64,
-        retry_interval: Duration,
-        block_confirmations: u64,
         buffer_size: usize,
     ) -> Result<mpsc::Receiver<Result<Range<BlockNumber>, SubscriptionError>>, SubscriptionError>
     {
         let (data_tx, data_rx) = mpsc::channel(buffer_size);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command = Command::Subscribe {
-            sender: data_tx,
-            ws_url,
-            blocks_read_per_epoch,
-            start_height,
-            end_height,
-            reorg_rewind_depth,
-            retry_interval,
-            block_confirmations,
-            response: response_tx,
-        };
+        let command =
+            Command::Subscribe { sender: data_tx, start_height, end_height, response: response_tx };
 
         self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
 
