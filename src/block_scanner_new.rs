@@ -2,12 +2,12 @@
 //!
 //! ```rust,no_run
 //! use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::BlockNumber};
-//! use event_scanner::block_scanner_new::{ServiceStatus, SubscriptionError};
+//! use event_scanner::block_scanner_new::SubscriptionError;
 //! use std::ops::Range;
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
 //! use alloy::transports::http::reqwest::Url;
-//! use event_scanner::block_scanner_new::{BlockScanner, BlockScannerClient, Config};
+//! use event_scanner::block_scanner_new::{BlockScanner, BlockScannerClient};
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
 //!
@@ -507,9 +507,9 @@ impl<N: Network> BlockScannerService<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged(provider).await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64 >
-                end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > end.header().number()
             {
                 end.header().number()
             } else {
