@@ -207,7 +207,7 @@ impl<N: Network> BlockScannerBuilder<N> {
         self.connect_client(client).await
     }
 
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub async fn connect_client(
         self,
         client: RpcClient,
@@ -216,6 +216,9 @@ impl<N: Network> BlockScannerBuilder<N> {
         self.connect_provider(provider).await
     }
 
+    #[allow(clippy::single_match_else)]
+    #[allow(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_panics_doc)]
     pub async fn connect_provider<P>(
         self,
         provider: P,
@@ -227,10 +230,7 @@ impl<N: Network> BlockScannerBuilder<N> {
             match (self.start_height, end_height) {
                 (_, BlockNumberOrTag::Latest) => (),
                 (_, BlockNumberOrTag::Number(end))
-                    if end == provider.get_block_number().await? =>
-                {
-                    ()
-                }
+                    if end == provider.get_block_number().await? => {}
                 (_, BlockNumberOrTag::Number(end)) if end > provider.get_block_number().await? => {
                     return Err(BlockScannerError::NonExistentEndHeader(end_height));
                 }
@@ -249,7 +249,7 @@ impl<N: Network> BlockScannerBuilder<N> {
                 }
                 // TODO: handle other cases
                 _ => {}
-            };
+            }
         }
 
         let (start_block, end_height) = match (self.start_height, self.end_height) {
@@ -320,6 +320,7 @@ where
     P: Provider<N>,
     N: Network,
 {
+    #![allow(clippy::missing_errors_doc)]
     pub async fn start(
         &mut self,
     ) -> Result<ReceiverStream<Result<Range<u64>, BlockScannerError>>, StartError> {
@@ -328,14 +329,11 @@ where
 
         let receiver_stream = ReceiverStream::new(receiver);
 
-        match (self.start_height, self.end_height) {
-            (_, Some(end_height)) => {
-                self.ensure_current_not_reorged().await?;
+        if let Some(end_height) = self.end_height {
+            self.ensure_current_not_reorged().await?;
 
-                sender.send(Ok(self.start_height..end_height)).await?;
-                sender.send(Err(BlockScannerError::ErrEOF {})).await?;
-            }
-            _ => {}
+            sender.send(Ok(self.start_height..end_height)).await?;
+            sender.send(Err(BlockScannerError::ErrEOF {})).await?;
         }
 
         tokio::spawn(
@@ -355,11 +353,7 @@ where
     }
 
     async fn rewind_on_reorg_detected(&mut self) -> Result<(), BlockScannerError> {
-        let mut new_current_height = if self.current.number <= self.reorg_rewind_depth {
-            0
-        } else {
-            self.current.number - self.reorg_rewind_depth
-        };
+        let mut new_current_height = self.current.number.saturating_sub(self.reorg_rewind_depth);
 
         let head = self.provider.get_block_number().await?;
         if head < new_current_height {
@@ -370,7 +364,7 @@ where
             .provider
             .get_block_by_number(new_current_height.into())
             .await?
-            .map(|block| BlockHashAndNumber::from_header::<N>(&block.header()))
+            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
             .expect("block should exist");
 
         println!(

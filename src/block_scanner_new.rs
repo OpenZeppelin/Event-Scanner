@@ -11,6 +11,7 @@
 //! use tokio::time::Duration;
 //! use event_scanner::block_scanner_new::{BlockScanner, SubscriptionClient, Config};
 //! use alloy::transports::http::reqwest::Url;
+//! use tracing::{info, error};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +28,7 @@
 //!     };
 //!
 //!     // Create client and data processor
-//!     let subscription_client: SubscriptionClient = BlockScanner::run::<Ethereum>(config).await?;
+//!     let subscription_client: SubscriptionClient = BlockScanner::run::<Ethereum>(config)?;
 //!
 //!     let mut receiver: ReceiverStream<Result<Range<BlockNumber>, SubscriptionError>> = subscription_client.subscribe(
 //!         BlockNumberOrTag::Latest,
@@ -41,77 +42,65 @@
 //!                 // process range
 //!             }
 //!             Err(e) => {
-//!                 println!("Received error from subscription: {e}");
+//!                 error!("Received error from subscription: {e}");
 //!                 
 //!                 // Decide whether to continue or break based on error type
 //!                 match e {
 //!                     SubscriptionError::ServiceShutdown => break,
 //!                     SubscriptionError::WebSocketConnectionFailed(_) => {
 //!                         // Maybe implement backoff and retry logic here
-//!                         println!("WebSocket connection failed, continuing to listen for reconnection");
+//!                         error!("WebSocket connection failed, continuing to listen for reconnection");
 //!                     }
 //!                     _ => {
 //!                         // Continue processing for other errors
-//!                         println!("Non-fatal error, continuing: {e}");
+//!                         error!("Non-fatal error, continuing: {e}");
 //!                     }
 //!                 }
 //!             }
 //!         }
 //!     }
 //!     
-//!     println!("Data processing stopped.");
+//!     info!("Data processing stopped.");
 //!
 //!     Ok(())
 //! }
 //! ```
 
-#![allow(unused)]
+use std::{ops::Range, time::Duration};
 
-use std::{future, marker::PhantomData, ops::Range, time::Duration};
-
-use tokio::{
-    sync::{
-        mpsc::{self, Receiver, Sender, error::SendError},
-        oneshot,
-    },
-    time::sleep,
-};
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
 
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag, RpcBlockHash},
+    eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{BlockHash, BlockNumber},
     providers::{Provider, RootProvider},
-    pubsub::{PubSubConnect, SubResultStream, Subscription, SubscriptionStream},
-    rpc::{
-        client::{ClientBuilder, RpcClient},
-        types::Header,
-    },
+    pubsub::Subscription,
+    rpc::client::ClientBuilder,
     transports::{
-        RpcError, TransportError, TransportErrorKind,
         http::reqwest::{self, Url},
-        ipc::IpcConnect,
-        ws::{self, WsConnect},
+        ws::WsConnect,
     },
 };
 use thiserror::Error;
+use tracing::{debug, error, info, warn};
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
-const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
-const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(12);
-const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
-const BACK_OFF_MAX_RETRIES: u64 = 5;
+// const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
+// const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(12);
+// const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
+// const BACK_OFF_MAX_RETRIES: u64 = 5;
 
 const MAX_BUFFERED_MESSAGES: usize = 50000;
 
-// TODO: determine check exact default value
-const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
+// // TODO: determine check exact default value
+// const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 
-// State sync aware retry settings
-const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
-const STATE_SYNC_MAX_RETRIES: u64 = 12;
+// // State sync aware retry settings
+// const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+// const STATE_SYNC_MAX_RETRIES: u64 = 12;
 
 #[derive(Error, Debug)]
 pub enum SubscriptionError {
@@ -196,7 +185,12 @@ pub struct Config {
 pub struct BlockScanner;
 
 impl BlockScanner {
-    pub async fn run<N: Network>(config: Config) -> anyhow::Result<SubscriptionClient> {
+    /// Starts the subscription service and returns a client for sending commands.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscription service fails to start.
+    pub fn run<N: Network>(config: Config) -> anyhow::Result<SubscriptionClient> {
         let (service, cmd_tx) = SubscriptionService::new(config);
         tokio::spawn(async move {
             service.run::<N>().await;
@@ -235,28 +229,25 @@ impl SubscriptionService {
     }
 
     pub async fn run<N: Network>(mut self) {
-        println!("Starting subscription service");
+        info!("Starting subscription service");
 
         while !self.shutdown {
             tokio::select! {
                 cmd = self.command_receiver.recv() => {
-                    match cmd {
-                        Some(command) => {
-                            if let Err(e) = self.handle_command::<N>(command).await {
-                                println!("Command handling error: {}", e);
-                                self.error_count += 1;
-                            }
+                    if let Some(command) = cmd {
+                        if let Err(e) = self.handle_command::<N>(command).await {
+                            error!("Command handling error: {}", e);
+                            self.error_count += 1;
                         }
-                        None => {
-                            println!("Command channel closed, shutting down");
-                            break;
-                        }
+                    } else {
+                        info!("Command channel closed, shutting down");
+                        break;
                     }
                 }
             }
         }
 
-        println!("Subscription service stopped");
+        info!("Subscription service stopped");
     }
 
     async fn handle_command<N: Network>(
@@ -269,8 +260,8 @@ impl SubscriptionService {
                 let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
-                let result = self.handle_unsubscribe().await;
-                let _ = response.send(result);
+                self.handle_unsubscribe();
+                let _ = response.send(Ok(()));
             }
             Command::GetStatus { response } => {
                 let status = self.get_status();
@@ -278,8 +269,8 @@ impl SubscriptionService {
             }
             Command::Shutdown { response } => {
                 self.shutdown = true;
-                let result = self.handle_unsubscribe().await;
-                let _ = response.send(result);
+                self.handle_unsubscribe();
+                let _ = response.send(Ok(()));
             }
         }
         Ok(())
@@ -297,7 +288,7 @@ impl SubscriptionService {
 
         // TODO: update local state relate to reorg and validate data
 
-        println!("Starting subscription from point: {:?}", start_height);
+        info!("Starting subscription from point: {start_height:?}");
         self.subscriber = Some(sender);
 
         self.sync_with_transition::<N>(start_height, end_height).await?;
@@ -317,28 +308,23 @@ impl SubscriptionService {
         let provider = RootProvider::<N>::new(ClientBuilder::default().ws(connect).await?);
 
         // Step 2: Perform historical sync
-        let (start_block, sync_end_block) = match (start_height, end_height) {
-            (_, Some(end_height)) => {
-                let start_block =
-                    provider.get_block_by_number(start_height).await?.expect("already checked");
-                let end_block = provider
-                    .get_block(end_height.into())
-                    .await?
-                    .expect("TODO: check if really valid");
-                (start_block, end_block)
-            }
-            (_, None) => {
-                let start_block =
-                    provider.get_block_by_number(start_height).await?.expect("already checked");
-                let end_block = provider
-                    .get_block(BlockId::Number(BlockNumberOrTag::Latest))
-                    .await?
-                    .expect("TODO: check if really valid");
-                (start_block, end_block)
-            }
+        let (start_block, sync_end_block) = if let Some(end_height) = end_height {
+            let start_block =
+                provider.get_block_by_number(start_height).await?.expect("already checked");
+            let end_block =
+                provider.get_block(end_height.into()).await?.expect("TODO: check if really valid");
+            (start_block, end_block)
+        } else {
+            let start_block =
+                provider.get_block_by_number(start_height).await?.expect("already checked");
+            let end_block = provider
+                .get_block(BlockId::Number(BlockNumberOrTag::Latest))
+                .await?
+                .expect("TODO: check if really valid");
+            (start_block, end_block)
         };
 
-        println!(
+        info!(
             "Syncing historical data from {} to {}",
             start_block.header().number(),
             sync_end_block.header().number()
@@ -349,13 +335,13 @@ impl SubscriptionService {
         let cutoff = sync_end_block.header().number();
         let ws_task = tokio::spawn(async move {
             if end_height.is_none() {
-                Self::websocket_buffer_task(cutoff, provider_clone, buffer_tx).await
+                Self::websocket_buffer_task(cutoff, provider_clone, buffer_tx).await;
             }
         });
 
         // TODO: invoke with smart retry mechanism with backoff
         if let Err(e) = self.sync_historical_data(&provider, start_block, sync_end_block).await {
-            println!("aborting ws_task");
+            warn!("aborting ws_task");
             ws_task.abort();
             return Err(SubscriptionError::HistoricalSyncError(e.to_string()));
         }
@@ -365,17 +351,15 @@ impl SubscriptionService {
         tokio::spawn(async move {
             if end_height.is_none() {
                 Self::process_buffered_messages(buffer_rx, sender, cutoff).await;
-            } else {
-                if sender.send(Err(SubscriptionError::Eof)).await.is_err() {
-                    println!("Subscriber channel closed, cleaning up");
-                }
+            } else if sender.send(Err(SubscriptionError::Eof)).await.is_err() {
+                warn!("Subscriber channel closed, cleaning up");
             }
         });
 
         if end_height.is_none() {
-            println!("Successfully transitioned from historical to live data");
+            info!("Successfully transitioned from historical to live data");
         } else {
-            println!("Successfully synced historical data");
+            info!("Successfully synced historical data");
         }
 
         Ok(())
@@ -410,15 +394,15 @@ impl SubscriptionService {
 
             self.send_to_subscriber(Ok(self.current.as_ref().unwrap().number..batch_to)).await;
 
-            self.current = Some(BlockHashAndNumber::from_header::<N>(&batch_end_block.header()));
+            self.current = Some(BlockHashAndNumber::from_header::<N>(batch_end_block.header()));
 
             batch_count += 1;
             if batch_count % 10 == 0 {
-                println!("Processed {} historical batches", batch_count);
+                debug!("Processed {batch_count} historical batches");
             }
         }
 
-        println!("Historical sync completed: {} batches processed", batch_count);
+        info!("Historical sync completed: {batch_count} batches processed");
         Ok(())
     }
 
@@ -453,10 +437,10 @@ impl SubscriptionService {
         let current = provider
             .get_block_by_number(new_current_height.into())
             .await?
-            .map(|block| BlockHashAndNumber::from_header::<N>(&block.header()))
+            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
             .expect("block should exist");
 
-        println!(
+        info!(
             "Rewind on reorg detected\noldCurrent: {}, newCurrent: {}",
             self.current.as_ref().unwrap().number,
             current.number
@@ -472,23 +456,22 @@ impl SubscriptionService {
         provider: P,
         buffer_sender: mpsc::Sender<Range<BlockNumber>>,
     ) {
-        let mut retry_count = 0;
-
+        // TODO: use smart retry mechanism
         match Self::connect_websocket(&provider).await {
             Ok(mut ws_stream) => {
-                println!("WebSocket connected for buffering");
-                retry_count = 0;
+                info!("WebSocket connected for buffering");
 
                 while let Ok(header_resp) = ws_stream.recv().await {
-                    println!("Received block header: {}", header_resp.number());
+                    info!("Received block header: {}", header_resp.number());
                     // TODO: handle reorgs
                     if current == header_resp.number() {
                         continue;
                     }
 
                     // we add 1 to include the latest block
-                    if let Err(e) = buffer_sender.send((current..header_resp.number() + 1)).await {
-                        println!("Buffer channel closed, stopping buffer task: {e}");
+                    #[allow(clippy::range_plus_one)]
+                    if let Err(e) = buffer_sender.send(current..header_resp.number() + 1).await {
+                        error!("Buffer channel closed, stopping buffer task: {e}");
 
                         return;
                     }
@@ -498,12 +481,7 @@ impl SubscriptionService {
                 }
             }
             Err(e) => {
-                println!("Failed to connect WebSocket for buffering: {}", e);
-                retry_count += 1;
-                if retry_count >= 3 {
-                    println!("Max retries reached for WebSocket buffering");
-                    return;
-                }
+                error!("Failed to connect WebSocket for buffering: {e}");
             }
         }
     }
@@ -521,7 +499,7 @@ impl SubscriptionService {
             let (start, end) = (range.start, range.end);
             if start >= cutoff {
                 if sender.send(Ok(range)).await.is_err() {
-                    println!("Subscriber channel closed, cleaning up");
+                    warn!("Subscriber channel closed, cleaning up");
                     return;
                 }
                 processed += end - start;
@@ -530,8 +508,8 @@ impl SubscriptionService {
                 discarded += cutoff - start;
 
                 let start = cutoff;
-                if sender.send(Ok((start..end))).await.is_err() {
-                    println!("Subscriber channel closed, cleaning up");
+                if sender.send(Ok(start..end)).await.is_err() {
+                    warn!("Subscriber channel closed, cleaning up");
                     return;
                 }
                 processed += end - start;
@@ -540,7 +518,7 @@ impl SubscriptionService {
             }
         }
 
-        println!("Processed buffered messages: {} forwarded, {} discarded", processed, discarded);
+        info!("Processed buffered messages: {processed} forwarded, {discarded} discarded");
     }
 
     async fn connect_websocket<P: Provider<N>, N: Network>(
@@ -565,12 +543,11 @@ impl SubscriptionService {
         }
     }
 
-    async fn handle_unsubscribe(&mut self) -> Result<(), SubscriptionError> {
-        if let Some(_) = self.subscriber.take() {
-            println!("Unsubscribing current subscriber");
+    fn handle_unsubscribe(&mut self) {
+        if self.subscriber.take().is_some() {
+            info!("Unsubscribing current subscriber");
             self.websocket_connected = false;
         }
-        Ok(())
     }
 
     fn get_status(&self) -> ServiceStatus {
@@ -589,10 +566,27 @@ pub struct SubscriptionClient {
 }
 
 impl SubscriptionClient {
+    /// Creates a new subscription client.
+    ///
+    /// # Arguments
+    ///
+    /// * `command_sender` - The sender for sending commands to the subscription service.
+    #[must_use]
     pub fn new(command_sender: mpsc::Sender<Command>) -> Self {
         Self { command_sender }
     }
 
+    /// Subscribes to new blocks.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The block number to start from.
+    /// * `end_height` - The block number to end at.
+    /// * `buffer_size` - The size of the buffer.
+    ///
+    /// # Errors
+    ///
+    /// * `SubscriptionError::ServiceShutdown` - if the service is already shutting down.
     pub async fn subscribe(
         &self,
         start_height: BlockNumberOrTag,
@@ -619,6 +613,11 @@ impl SubscriptionClient {
         Ok(stream)
     }
 
+    /// Unsubscribes the current subscriber.
+    ///
+    /// # Errors
+    ///
+    /// * `SubscriptionError::ServiceShutdown` - if the service is already shutting down.
     pub async fn unsubscribe(&self) -> Result<(), SubscriptionError> {
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -629,6 +628,11 @@ impl SubscriptionClient {
         response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)?
     }
 
+    /// Returns the current status of the subscription service.
+    ///
+    /// # Errors
+    ///
+    /// * `SubscriptionError::ServiceShutdown` - if the service is already shutting down.
     pub async fn get_status(&self) -> Result<ServiceStatus, SubscriptionError> {
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -639,6 +643,11 @@ impl SubscriptionClient {
         response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)
     }
 
+    /// Shuts down the subscription service and unsubscribes the current subscriber.
+    ///
+    /// # Errors
+    ///
+    /// * `SubscriptionError::ServiceShutdown` - if the service is already shutting down.
     pub async fn shutdown(&self) -> Result<(), SubscriptionError> {
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -652,14 +661,10 @@ impl SubscriptionClient {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
-    };
-
     use alloy::{network::Ethereum, providers::ProviderBuilder, sol};
     use alloy_node_bindings::Anvil;
-    use tokio::{sync::Mutex, time::sleep};
+
+    use tokio_stream::StreamExt;
 
     use super::*;
 
@@ -698,7 +703,7 @@ mod tests {
             .connect(anvil.endpoint().as_str())
             .await?;
 
-        let contract = LiveTestCounter::deploy(provider.clone()).await?;
+        let _ = LiveTestCounter::deploy(provider.clone()).await?;
 
         let sub_client = BlockScanner::run::<Ethereum>(Config {
             ws_url: anvil.ws_endpoint_url(),
@@ -706,8 +711,7 @@ mod tests {
             reorg_rewind_depth: 5,
             retry_interval: Duration::from_secs(1),
             block_confirmations: 1,
-        })
-        .await?;
+        })?;
 
         let expected_blocks = 10;
 
