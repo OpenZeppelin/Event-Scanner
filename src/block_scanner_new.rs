@@ -316,6 +316,7 @@ impl<N: Network> ConnectedBlockScanner<N> {
     pub async fn provider(&self) -> TransportResult<impl Provider<N>> {
         self.config.connection.provider().await
     }
+
     /// Starts the subscription service and returns a client for sending commands.
     ///
     /// # Errors
