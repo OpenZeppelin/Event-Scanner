@@ -254,7 +254,11 @@ pub struct ConnectedBlockScanner {
 
 impl ConnectedBlockScanner {
     // TODO: use wrapper errors
-    #[must_use]
+    /// Returns the underlying Provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails.
     pub async fn provider<N: Network>(&self) -> TransportResult<impl Provider<N>> {
         Ok(RootProvider::<N>::new(
             ClientBuilder::default().ws(WsConnect::new(self.config.ws_url.clone())).await?,
@@ -453,9 +457,9 @@ impl BlockScannerService {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged(provider).await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64 >
-                end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > end.header().number()
             {
                 end.header().number()
             } else {
