@@ -9,7 +9,7 @@
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
 //! use tokio::time::Duration;
-//! use event_scanner::block_scanner_new::{BlockScanner, SubscriptionClient, Config};
+//! use event_scanner::block_scanner_new::{BlockScanner, BlockScannerClient, Config};
 //! use alloy::transports::http::reqwest::Url;
 //! use tracing::{info, error};
 //!
@@ -19,22 +19,24 @@
 //!     tracing_subscriber::fmt::init();
 //!
 //!     // Configuration
-//!     let config = Config {
-//!         ws_url: Url::parse("ws://localhost:8546").unwrap(),
-//!         blocks_read_per_epoch: 1000,
-//!         reorg_rewind_depth: 5,
-//!         retry_interval: Duration::from_secs(12),
-//!         block_confirmations: 5,
-//!     };
+//!     let block_scanner = BlockScanner::new()
+//!         .with_blocks_read_per_epoch(1000)
+//!         .with_reorg_rewind_depth(5)
+//!         .with_retry_interval(Duration::from_secs(12))
+//!         .with_block_confirmations(5)
+//!         .connect_ws(Url::parse("ws://localhost:8546").unwrap());
 //!
-//!     // Create client and data processor
-//!     let subscription_client: SubscriptionClient = BlockScanner::run::<Ethereum>(config)?;
+//!     // Create client to send subscribe command to block scanner
+//!     let subscription_client: BlockScannerClient = block_scanner.run::<Ethereum>()?;
 //!
-//!     let mut receiver: ReceiverStream<Result<Range<BlockNumber>, SubscriptionError>> = subscription_client.subscribe(
-//!         BlockNumberOrTag::Latest,
-//!         None, // just subscribe to new blocks
-//!         1, // wait until current blocks are processed before processing next range
-//!     ).await?;
+//!     let mut receiver: ReceiverStream<Result<Range<BlockNumber>, SubscriptionError>> =
+//!         subscription_client
+//!             .subscribe(
+//!                 BlockNumberOrTag::Latest,
+//!                 None, // just subscribe to new blocks
+//!                 1,    // wait until current blocks are processed before processing next range
+//!             )
+//!             .await?;
 //!
 //!     while let Some(result) = receiver.next().await {
 //!         match result {
@@ -88,15 +90,15 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
-// const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
-// const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(12);
-// const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
+const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
+const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(12);
+const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 // const BACK_OFF_MAX_RETRIES: u64 = 5;
 
 const MAX_BUFFERED_MESSAGES: usize = 50000;
 
-// // TODO: determine check exact default value
-// const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
+// TODO: determine check exact default value
+const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 
 // // State sync aware retry settings
 // const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -174,6 +176,7 @@ impl BlockHashAndNumber {
     }
 }
 
+#[derive(Clone)]
 pub struct Config {
     pub ws_url: Url,
     pub blocks_read_per_epoch: usize,
@@ -182,20 +185,84 @@ pub struct Config {
     pub block_confirmations: u64,
 }
 
-pub struct BlockScanner;
+pub struct BlockScanner {
+    blocks_read_per_epoch: usize,
+    reorg_rewind_depth: u64,
+    retry_interval: Duration,
+    block_confirmations: u64,
+}
+
+impl Default for BlockScanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl BlockScanner {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
+            reorg_rewind_depth: DEFAULT_REORG_REWIND_DEPTH,
+            retry_interval: DEFAULT_RETRY_INTERVAL,
+            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+        }
+    }
+
+    #[must_use]
+    pub fn with_blocks_read_per_epoch(&mut self, blocks_read_per_epoch: usize) -> &mut Self {
+        self.blocks_read_per_epoch = blocks_read_per_epoch;
+        self
+    }
+
+    #[must_use]
+    pub fn with_reorg_rewind_depth(&mut self, reorg_rewind_depth: u64) -> &mut Self {
+        self.reorg_rewind_depth = reorg_rewind_depth;
+        self
+    }
+
+    #[must_use]
+    pub fn with_retry_interval(&mut self, retry_interval: Duration) -> &mut Self {
+        self.retry_interval = retry_interval;
+        self
+    }
+
+    #[must_use]
+    pub fn with_block_confirmations(&mut self, block_confirmations: u64) -> &mut Self {
+        self.block_confirmations = block_confirmations;
+        self
+    }
+
+    #[must_use]
+    pub fn connect_ws(&self, ws_url: Url) -> ConnectedBlockScanner {
+        ConnectedBlockScanner {
+            config: Config {
+                ws_url,
+                blocks_read_per_epoch: self.blocks_read_per_epoch,
+                reorg_rewind_depth: self.reorg_rewind_depth,
+                retry_interval: self.retry_interval,
+                block_confirmations: self.block_confirmations,
+            },
+        }
+    }
+}
+
+pub struct ConnectedBlockScanner {
+    config: Config,
+}
+
+impl ConnectedBlockScanner {
     /// Starts the subscription service and returns a client for sending commands.
     ///
     /// # Errors
     ///
     /// Returns an error if the subscription service fails to start.
-    pub fn run<N: Network>(config: Config) -> anyhow::Result<SubscriptionClient> {
-        let (service, cmd_tx) = SubscriptionService::new(config);
+    pub fn run<N: Network>(&self) -> anyhow::Result<BlockScannerClient> {
+        let (service, cmd_tx) = SubscriptionService::new(self.config.clone());
         tokio::spawn(async move {
             service.run::<N>().await;
         });
-        Ok(SubscriptionClient::new(cmd_tx))
+        Ok(BlockScannerClient::new(cmd_tx))
     }
 }
 
@@ -561,11 +628,11 @@ impl SubscriptionService {
     }
 }
 
-pub struct SubscriptionClient {
+pub struct BlockScannerClient {
     command_sender: mpsc::Sender<Command>,
 }
 
-impl SubscriptionClient {
+impl BlockScannerClient {
     /// Creates a new subscription client.
     ///
     /// # Arguments
@@ -705,13 +772,13 @@ mod tests {
 
         let _ = LiveTestCounter::deploy(provider.clone()).await?;
 
-        let sub_client = BlockScanner::run::<Ethereum>(Config {
-            ws_url: anvil.ws_endpoint_url(),
-            blocks_read_per_epoch: 3,
-            reorg_rewind_depth: 5,
-            retry_interval: Duration::from_secs(1),
-            block_confirmations: 1,
-        })?;
+        let sub_client = BlockScanner::new()
+            .with_blocks_read_per_epoch(3)
+            .with_reorg_rewind_depth(5)
+            .with_retry_interval(Duration::from_secs(1))
+            .with_block_confirmations(1)
+            .connect_ws(anvil.ws_endpoint_url())
+            .run::<Ethereum>()?;
 
         let expected_blocks = 10;
 
