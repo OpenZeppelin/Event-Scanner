@@ -599,6 +599,7 @@ impl<N: Network> BlockScannerService<N> {
             Ok(mut ws_stream) => {
                 info!("WebSocket connected for buffering");
 
+                // TODO: if latest != ws_stream.next(), then return latest.number and empty the ws_stream backlog 
                 while let Ok(header_resp) = ws_stream.recv().await {
                     info!("Received block header: {}", header_resp.number());
                     // TODO: handle reorgs
