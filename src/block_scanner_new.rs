@@ -585,8 +585,17 @@ impl<N: Network> BlockScannerService<N> {
         connection: ConnectionType<N>,
         buffer_sender: mpsc::Sender<Range<BlockNumber>>,
     ) {
+        // TODO: consider passing errors to the caller for handling
+        let provider = match connection.provider().await {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to instantiate provider: {e}");
+                return;
+            }
+        };
+
         // TODO: use smart retry mechanism
-        match Self::connect_websocket(&connection).await {
+        match Self::connect_websocket(&provider).await {
             Ok(mut ws_stream) => {
                 info!("WebSocket connected for buffering");
 
@@ -651,11 +660,9 @@ impl<N: Network> BlockScannerService<N> {
     }
 
     async fn connect_websocket(
-        connection: &ConnectionType<N>,
+        provider: &impl Provider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, SubscriptionError> {
-        let ws_stream = connection
-            .provider()
-            .await?
+        let ws_stream = provider
             .subscribe_blocks()
             .await
             .map_err(|_| SubscriptionError::WebSocketConnectionFailed(1))?;
