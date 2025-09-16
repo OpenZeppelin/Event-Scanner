@@ -134,7 +134,11 @@ impl<N: Network> EventScannerBuilder<N> {
         })
     }
 
-    #[must_use]
+    /// Connects to the provider via RPC client
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
     pub async fn connect_client(
         self,
         client: RpcClient,
@@ -147,7 +151,11 @@ impl<N: Network> EventScannerBuilder<N> {
         })
     }
 
-    #[must_use]
+    /// Connects to the provider
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
     pub async fn connect_provider(
         self,
         provider: RootProvider<N>,
