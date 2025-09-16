@@ -258,7 +258,7 @@ impl ConnectedBlockScanner {
     ///
     /// Returns an error if the subscription service fails to start.
     pub fn run<N: Network>(&self) -> anyhow::Result<BlockScannerClient> {
-        let (service, cmd_tx) = SubscriptionService::new(self.config.clone());
+        let (service, cmd_tx) = BlockScannerService::new(self.config.clone());
         tokio::spawn(async move {
             service.run::<N>().await;
         });
@@ -266,7 +266,7 @@ impl ConnectedBlockScanner {
     }
 }
 
-struct SubscriptionService {
+struct BlockScannerService {
     config: Config,
     subscriber: Option<mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>>,
     current: Option<BlockHashAndNumber>,
@@ -277,7 +277,7 @@ struct SubscriptionService {
     shutdown: bool,
 }
 
-impl SubscriptionService {
+impl BlockScannerService {
     pub fn new(config: Config) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
