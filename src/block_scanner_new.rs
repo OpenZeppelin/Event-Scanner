@@ -82,6 +82,7 @@ use alloy::{
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
+        TransportResult,
         http::reqwest::{self, Url},
         ws::WsConnect,
     },
@@ -252,6 +253,13 @@ pub struct ConnectedBlockScanner {
 }
 
 impl ConnectedBlockScanner {
+    // TODO: use wrapper errors
+    #[must_use]
+    pub async fn provider<N: Network>(&self) -> TransportResult<impl Provider<N>> {
+        Ok(RootProvider::<N>::new(
+            ClientBuilder::default().ws(WsConnect::new(self.config.ws_url.clone())).await?,
+        ))
+    }
     /// Starts the subscription service and returns a client for sending commands.
     ///
     /// # Errors
