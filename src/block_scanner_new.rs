@@ -1,17 +1,15 @@
 //! Example usage:
 //!
 //! ```rust,no_run
-//! use alloy::primitives::BlockNumber;
-//! use alloy::network::Ethereum;
-//! use alloy::eips::BlockNumberOrTag;
+//! use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::BlockNumber};
 //! use event_scanner::block_scanner_new::{ServiceStatus, SubscriptionError};
 //! use std::ops::Range;
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
-//! use tokio::time::Duration;
-//! use event_scanner::block_scanner_new::{BlockScanner, BlockScannerClient, Config};
 //! use alloy::transports::http::reqwest::Url;
-//! use tracing::{info, error};
+//! use event_scanner::block_scanner_new::{BlockScanner, BlockScannerClient, Config};
+//! use tokio::time::Duration;
+//! use tracing::{error, info};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,13 +43,15 @@
 //!             }
 //!             Err(e) => {
 //!                 error!("Received error from subscription: {e}");
-//!                 
+//!
 //!                 // Decide whether to continue or break based on error type
 //!                 match e {
 //!                     SubscriptionError::ServiceShutdown => break,
 //!                     SubscriptionError::WebSocketConnectionFailed(_) => {
 //!                         // Maybe implement backoff and retry logic here
-//!                         error!("WebSocket connection failed, continuing to listen for reconnection");
+//!                         error!(
+//!                             "WebSocket connection failed, continuing to listen for reconnection"
+//!                         );
 //!                     }
 //!                     _ => {
 //!                         // Continue processing for other errors
@@ -61,7 +61,7 @@
 //!             }
 //!         }
 //!     }
-//!     
+//!
 //!     info!("Data processing stopped.");
 //!
 //!     Ok(())
@@ -453,9 +453,9 @@ impl BlockScannerService {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged(provider).await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64
-                > end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number +
+                self.config.blocks_read_per_epoch as u64 >
+                end.header().number()
             {
                 end.header().number()
             } else {
