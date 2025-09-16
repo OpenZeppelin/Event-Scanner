@@ -2,108 +2,14 @@
 //!
 //! ```rust,no_run
 //! use alloy::primitives::BlockNumber;
+//! use alloy::network::Ethereum;
 //! use alloy::eips::BlockNumberOrTag;
+//! use event_scanner::block_scanner_new::{ServiceStatus, SubscriptionError};
 //! use std::ops::Range;
-//!
-//! pub struct DataProcessor {
-//!     processed_count: u64,
-//!     last_range: Option<Range<BlockNumber>>,
-//!     client: SubscriptionClient,
-//! }
-//!
-//! impl DataProcessor {
-//!     pub fn new(client: SubscriptionClient) -> Self {
-//!         Self {
-//!             processed_count: 0,
-//!             last_range: None,
-//!             client,
-//!         }
-//!     }
-//!
-//!     pub async fn start_processing(
-//!         &mut self,
-//!         start_height: BlockNumberOrTag,
-//!         end_height: Option<BlockNumberOrTag>,
-//!         buffer_size: usize,
-//!     ) -> Result<(), SubscriptionError> {
-//!         println!("Starting data processing from point: {:?}", start_height);
-//!     
-//!         let mut data_receiver = self.client.subscribe(
-//!             start_height,
-//!             end_height,
-//!             buffer_size,
-//!         ).await?;
-//!     
-//!         while let Some(result) = data_receiver.recv().await {
-//!             match result {
-//!                 Ok(range) => {
-//!                     if let Err(e) = self.process_range(range).await {
-//!                         println!("Error processing block range: {}", e);
-//!                     }
-//!                 }
-//!                 Err(e) => {
-//!                     println!("Received error from subscription: {}", e);
-//!                 
-//!                     // Decide whether to continue or break based on error type
-//!                     match e {
-//!                         SubscriptionError::ServiceShutdown => break,
-//!                         SubscriptionError::WebSocketConnectionFailed(_) => {
-//!                             // Maybe implement backoff and retry logic here
-//!                             println!("WebSocket connection failed, continuing to listen for reconnection");
-//!                         }
-//!                         _ => {
-//!                             // Continue processing for other errors
-//!                             println!("Non-fatal error, continuing: {}", e);
-//!                         }
-//!                     }
-//!                 }
-//!             }
-//!         }
-//!     
-//!         println!("Data processing stopped. Processed {} values", self.processed_count);
-//!         Ok(())
-//!     }
-//!
-//!     async fn process_range(&mut self, range: Range<BlockNumber>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//!         // Your application-specific processing logic here
-//!         println!("Processing range: {} to {}", range.start, range.end);
-//!     
-//!         // Example processing: detect significant changes
-//!         if let Some(ref last) = self.last_range {
-//!             if range.end - last.end > 10 { // More than 10 blocks gap
-//!                 println!("Large block gap detected: {} -> {}", last.end, range.end);
-//!             }
-//!         }
-//!     
-//!         // TODO: fetch events from range of blocks and process them
-//!     
-//!         self.processed_count += 1;
-//!         self.last_range = Some(range);
-//!     
-//!         // Periodic logging
-//!         if self.processed_count % 1000 == 0 {
-//!             println!("Processed {} ranges", self.processed_count);
-//!         }
-//!     
-//!         Ok(())
-//!     }
-//!
-//!     pub async fn stop(&self) -> Result<(), SubscriptionError> {
-//!         self.client.unsubscribe().await
-//!     }
-//!
-//!     pub async fn get_stats(&self) -> Result<(u64, ServiceStatus), SubscriptionError> {
-//!         let service_status = self.client.get_status().await?;
-//!         Ok((self.processed_count, service_status))
-//!     }
-//! }
-//!
-//! // ============================================================================
-//! // Example Usage
-//! // ============================================================================
+//! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
 //! use tokio::time::Duration;
-//! use event_scanner::block_scanner_new::{SubscriptionService, SubscriptionClient, Config, ServiceStatus, SubscriptionError};
+//! use event_scanner::block_scanner_new::{BlockScanner, SubscriptionClient, Config};
 //! use alloy::transports::http::reqwest::Url;
 //!
 //! #[tokio::main]
@@ -121,20 +27,39 @@
 //!     };
 //!
 //!     // Create client and data processor
-//!     let subscription_client = SubscriptionService::new().with_blocks_read_per_epoch()....run();
+//!     let subscription_client: SubscriptionClient = BlockScanner::run::<Ethereum>(config).await?;
 //!
-//!     subscription_client.subscribe({
+//!     let mut receiver: ReceiverStream<Result<Range<BlockNumber>, SubscriptionError>> = subscription_client.subscribe(
 //!         BlockNumberOrTag::Latest,
 //!         None, // just subscribe to new blocks
 //!         1, // wait until current blocks are processed before processing next range
-//!     }).await?;
-//!
-//!     let mut processor = DataProcessor::new(subscription_client);
-//!
-//!     // Just subscribe
-//!     processor.start_processing(
-//!         
 //!     ).await?;
+//!
+//!     while let Some(result) = receiver.next().await {
+//!         match result {
+//!             Ok(range) => {
+//!                 // process range
+//!             }
+//!             Err(e) => {
+//!                 println!("Received error from subscription: {e}");
+//!                 
+//!                 // Decide whether to continue or break based on error type
+//!                 match e {
+//!                     SubscriptionError::ServiceShutdown => break,
+//!                     SubscriptionError::WebSocketConnectionFailed(_) => {
+//!                         // Maybe implement backoff and retry logic here
+//!                         println!("WebSocket connection failed, continuing to listen for reconnection");
+//!                     }
+//!                     _ => {
+//!                         // Continue processing for other errors
+//!                         println!("Non-fatal error, continuing: {e}");
+//!                     }
+//!                 }
+//!             }
+//!         }
+//!     }
+//!     
+//!     println!("Data processing stopped.");
 //!
 //!     Ok(())
 //! }
@@ -268,7 +193,19 @@ pub struct Config {
     pub block_confirmations: u64,
 }
 
-pub struct SubscriptionService {
+pub struct BlockScanner;
+
+impl BlockScanner {
+    pub async fn run<N: Network>(config: Config) -> anyhow::Result<SubscriptionClient> {
+        let (service, cmd_tx) = SubscriptionService::new(config);
+        tokio::spawn(async move {
+            service.run::<N>().await;
+        });
+        Ok(SubscriptionClient::new(cmd_tx))
+    }
+}
+
+struct SubscriptionService {
     config: Config,
     subscriber: Option<mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>>,
     current: Option<BlockHashAndNumber>,
@@ -720,7 +657,7 @@ mod tests {
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
     };
 
-    use alloy::{providers::ProviderBuilder, sol};
+    use alloy::{network::Ethereum, providers::ProviderBuilder, sol};
     use alloy_node_bindings::Anvil;
     use tokio::{sync::Mutex, time::sleep};
 
@@ -763,19 +700,14 @@ mod tests {
 
         let contract = LiveTestCounter::deploy(provider.clone()).await?;
 
-        let (subscription_service, cmd_tx) = SubscriptionService::new(Config {
+        let sub_client = BlockScanner::run::<Ethereum>(Config {
             ws_url: anvil.ws_endpoint_url(),
             blocks_read_per_epoch: 3,
             reorg_rewind_depth: 5,
             retry_interval: Duration::from_secs(1),
             block_confirmations: 1,
-        });
-
-        tokio::spawn(async move {
-            subscription_service.run::<alloy::network::Ethereum>().await;
-        });
-
-        let sub_client = SubscriptionClient::new(cmd_tx);
+        })
+        .await?;
 
         let expected_blocks = 10;
 
@@ -783,12 +715,11 @@ mod tests {
             sub_client.subscribe(BlockNumberOrTag::Latest, None, 10).await?.take(expected_blocks);
 
         let mut block_range_start = 0;
+        let mut processed_blocks = 0;
 
         while let Some(result) = receiver.next().await {
             match result {
                 Ok(range) => {
-                    println!("Received block header range: {range:?}");
-
                     if block_range_start == 0 {
                         block_range_start = range.start;
                     }
@@ -796,12 +727,15 @@ mod tests {
                     assert_eq!(block_range_start, range.start);
                     assert!(range.end >= range.start);
                     block_range_start = range.end;
+                    processed_blocks += range.end - range.start - 1; // end is not included
                 }
                 Err(e) => {
                     panic!("Received error from subscription: {e}");
                 }
             }
         }
+
+        assert_eq!(processed_blocks, expected_blocks as u64);
 
         Ok(())
     }
