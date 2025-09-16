@@ -22,10 +22,10 @@
 //!         .with_reorg_rewind_depth(5)
 //!         .with_retry_interval(Duration::from_secs(12))
 //!         .with_block_confirmations(5)
-//!         .connect_ws(Url::parse("ws://localhost:8546").unwrap());
+//!         .connect_ws::<Ethereum>(Url::parse("ws://localhost:8546").unwrap());
 //!
 //!     // Create client to send subscribe command to block scanner
-//!     let subscription_client: BlockScannerClient = block_scanner.run::<Ethereum>()?;
+//!     let subscription_client: BlockScannerClient = block_scanner.run()?;
 //!
 //!     let mut receiver: ReceiverStream<Result<Range<BlockNumber>, SubscriptionError>> =
 //!         subscription_client
@@ -68,7 +68,7 @@
 //! }
 //! ```
 
-use std::{ops::Range, time::Duration};
+use std::{marker::PhantomData, ops::Range, time::Duration};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
@@ -178,12 +178,50 @@ impl BlockHashAndNumber {
 }
 
 #[derive(Clone)]
-pub struct Config {
-    pub ws_url: Url,
-    pub blocks_read_per_epoch: usize,
-    pub reorg_rewind_depth: u64,
-    pub retry_interval: Duration,
-    pub block_confirmations: u64,
+struct WsConnection<N: Network> {
+    url: Url,
+    network: PhantomData<N>,
+}
+
+#[derive(Clone)]
+struct IpcConnection<N: Network> {
+    path: String,
+    network: PhantomData<N>,
+}
+
+#[derive(Clone)]
+enum ConnectionType<N: Network> {
+    Ws(WsConnection<N>),
+    Ipc(IpcConnection<N>),
+}
+
+impl<N: Network> Connection<N> for ConnectionType<N> {
+    async fn provider(&self) -> TransportResult<impl Provider<N> + Clone> {
+        let client = match self {
+            ConnectionType::Ws(ws) => {
+                ClientBuilder::default().ws(WsConnect::new(ws.url.clone())).await?
+            }
+            ConnectionType::Ipc(ipc) => {
+                ClientBuilder::default().ipc(ipc.path.clone().into()).await?
+            }
+        };
+        Ok(RootProvider::<N>::new(client))
+    }
+}
+
+trait Connection<N: Network>: Clone {
+    async fn provider(&self) -> TransportResult<impl Provider<N> + Clone>;
+}
+
+#[derive(Clone)]
+struct Config<N: Network> {
+    connection: ConnectionType<N>,
+    blocks_read_per_epoch: usize,
+    reorg_rewind_depth: u64,
+    #[allow(dead_code, reason = "TODO: will be used in smart retry mechanism")]
+    retry_interval: Duration,
+    #[allow(dead_code, reason = "TODO: will be used in reorg mechanism")]
+    block_confirmations: u64,
 }
 
 pub struct BlockScanner {
@@ -235,10 +273,26 @@ impl BlockScanner {
     }
 
     #[must_use]
-    pub fn connect_ws(&self, ws_url: Url) -> ConnectedBlockScanner {
+    pub fn connect_ws<N: Network>(&self, ws_url: Url) -> ConnectedBlockScanner<N> {
         ConnectedBlockScanner {
             config: Config {
-                ws_url,
+                connection: ConnectionType::Ws(WsConnection { url: ws_url, network: PhantomData }),
+                blocks_read_per_epoch: self.blocks_read_per_epoch,
+                reorg_rewind_depth: self.reorg_rewind_depth,
+                retry_interval: self.retry_interval,
+                block_confirmations: self.block_confirmations,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn connect_ipc<N: Network>(&self, ipc_path: String) -> ConnectedBlockScanner<N> {
+        ConnectedBlockScanner {
+            config: Config {
+                connection: ConnectionType::Ipc(IpcConnection {
+                    path: ipc_path,
+                    network: PhantomData,
+                }),
                 blocks_read_per_epoch: self.blocks_read_per_epoch,
                 reorg_rewind_depth: self.reorg_rewind_depth,
                 retry_interval: self.retry_interval,
@@ -248,38 +302,36 @@ impl BlockScanner {
     }
 }
 
-pub struct ConnectedBlockScanner {
-    config: Config,
+pub struct ConnectedBlockScanner<N: Network> {
+    config: Config<N>,
 }
 
-impl ConnectedBlockScanner {
+impl<N: Network> ConnectedBlockScanner<N> {
     // TODO: use wrapper errors
     /// Returns the underlying Provider.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection fails.
-    pub async fn provider<N: Network>(&self) -> TransportResult<impl Provider<N>> {
-        Ok(RootProvider::<N>::new(
-            ClientBuilder::default().ws(WsConnect::new(self.config.ws_url.clone())).await?,
-        ))
+    pub async fn provider(&self) -> TransportResult<impl Provider<N>> {
+        self.config.connection.provider().await
     }
     /// Starts the subscription service and returns a client for sending commands.
     ///
     /// # Errors
     ///
     /// Returns an error if the subscription service fails to start.
-    pub fn run<N: Network>(&self) -> anyhow::Result<BlockScannerClient> {
+    pub fn run(&self) -> anyhow::Result<BlockScannerClient> {
         let (service, cmd_tx) = BlockScannerService::new(self.config.clone());
         tokio::spawn(async move {
-            service.run::<N>().await;
+            service.run().await;
         });
         Ok(BlockScannerClient::new(cmd_tx))
     }
 }
 
-struct BlockScannerService {
-    config: Config,
+struct BlockScannerService<N: Network> {
+    config: Config<N>,
     subscriber: Option<mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>>,
     current: Option<BlockHashAndNumber>,
     websocket_connected: bool,
@@ -289,8 +341,8 @@ struct BlockScannerService {
     shutdown: bool,
 }
 
-impl BlockScannerService {
-    pub fn new(config: Config) -> (Self, mpsc::Sender<Command>) {
+impl<N: Network> BlockScannerService<N> {
+    pub fn new(config: Config<N>) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
@@ -307,14 +359,14 @@ impl BlockScannerService {
         (service, cmd_tx)
     }
 
-    pub async fn run<N: Network>(mut self) {
+    pub async fn run(mut self) {
         info!("Starting subscription service");
 
         while !self.shutdown {
             tokio::select! {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
-                        if let Err(e) = self.handle_command::<N>(command).await {
+                        if let Err(e) = self.handle_command(command).await {
                             error!("Command handling error: {}", e);
                             self.error_count += 1;
                         }
@@ -329,13 +381,10 @@ impl BlockScannerService {
         info!("Subscription service stopped");
     }
 
-    async fn handle_command<N: Network>(
-        &mut self,
-        command: Command,
-    ) -> Result<(), SubscriptionError> {
+    async fn handle_command(&mut self, command: Command) -> Result<(), SubscriptionError> {
         match command {
             Command::Subscribe { sender, start_height, end_height, response } => {
-                let result = self.handle_subscribe::<N>(sender, start_height, end_height).await;
+                let result = self.handle_subscribe(sender, start_height, end_height).await;
                 let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
@@ -355,7 +404,7 @@ impl BlockScannerService {
         Ok(())
     }
 
-    async fn handle_subscribe<N: Network>(
+    async fn handle_subscribe(
         &mut self,
         sender: mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>,
         start_height: BlockNumberOrTag,
@@ -370,12 +419,12 @@ impl BlockScannerService {
         info!("Starting subscription from point: {start_height:?}");
         self.subscriber = Some(sender);
 
-        self.sync_with_transition::<N>(start_height, end_height).await?;
+        self.sync_with_transition(start_height, end_height).await?;
 
         Ok(())
     }
 
-    async fn sync_with_transition<N: Network>(
+    async fn sync_with_transition(
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
@@ -383,8 +432,8 @@ impl BlockScannerService {
         // Step 1: Establish WebSocket connection
         let (buffer_tx, buffer_rx) = mpsc::channel(MAX_BUFFERED_MESSAGES);
 
-        let connect = WsConnect::new(self.config.ws_url.clone());
-        let provider = RootProvider::<N>::new(ClientBuilder::default().ws(connect).await?);
+        let config = self.config.clone();
+        let provider = config.connection.provider().await?;
 
         // Step 2: Perform historical sync
         let (start_block, sync_end_block) = if let Some(end_height) = end_height {
@@ -410,11 +459,11 @@ impl BlockScannerService {
         );
 
         // start buffering the subscription data
-        let provider_clone = provider.clone();
+        let connection_clone = self.config.connection.clone();
         let cutoff = sync_end_block.header().number();
         let ws_task = tokio::spawn(async move {
             if end_height.is_none() {
-                Self::websocket_buffer_task(cutoff, provider_clone, buffer_tx).await;
+                Self::websocket_buffer_task(cutoff, connection_clone, buffer_tx).await;
             }
         });
 
@@ -444,7 +493,7 @@ impl BlockScannerService {
         Ok(())
     }
 
-    async fn sync_historical_data<P: Provider<N>, N: Network>(
+    async fn sync_historical_data<P: Provider<N>>(
         &mut self,
         provider: &P,
         start: N::BlockResponse,
@@ -485,7 +534,7 @@ impl BlockScannerService {
         Ok(())
     }
 
-    async fn ensure_current_not_reorged<P: Provider<N>, N: Network>(
+    async fn ensure_current_not_reorged<P: Provider<N>>(
         &mut self,
         provider: &P,
     ) -> Result<(), SubscriptionError> {
@@ -497,7 +546,7 @@ impl BlockScannerService {
         self.rewind_on_reorg_detected(provider).await
     }
 
-    async fn rewind_on_reorg_detected<P: Provider<N>, N: Network>(
+    async fn rewind_on_reorg_detected<P: Provider<N>>(
         &mut self,
         provider: P,
     ) -> Result<(), SubscriptionError> {
@@ -530,13 +579,13 @@ impl BlockScannerService {
         Ok(())
     }
 
-    async fn websocket_buffer_task<P: Provider<N> + Clone, N: Network>(
+    async fn websocket_buffer_task(
         mut current: BlockNumber,
-        provider: P,
+        connection: ConnectionType<N>,
         buffer_sender: mpsc::Sender<Range<BlockNumber>>,
     ) {
         // TODO: use smart retry mechanism
-        match Self::connect_websocket(&provider).await {
+        match Self::connect_websocket(&connection).await {
             Ok(mut ws_stream) => {
                 info!("WebSocket connected for buffering");
 
@@ -600,10 +649,12 @@ impl BlockScannerService {
         info!("Processed buffered messages: {processed} forwarded, {discarded} discarded");
     }
 
-    async fn connect_websocket<P: Provider<N>, N: Network>(
-        provider: &P,
-    ) -> Result<Subscription<<N as Network>::HeaderResponse>, SubscriptionError> {
-        let ws_stream = provider
+    async fn connect_websocket(
+        connection: &ConnectionType<N>,
+    ) -> Result<Subscription<N::HeaderResponse>, SubscriptionError> {
+        let ws_stream = connection
+            .provider()
+            .await?
             .subscribe_blocks()
             .await
             .map_err(|_| SubscriptionError::WebSocketConnectionFailed(1))?;
@@ -789,8 +840,8 @@ mod tests {
             .with_reorg_rewind_depth(5)
             .with_retry_interval(Duration::from_secs(1))
             .with_block_confirmations(1)
-            .connect_ws(anvil.ws_endpoint_url())
-            .run::<Ethereum>()?;
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .run()?;
 
         let expected_blocks = 10;
 
