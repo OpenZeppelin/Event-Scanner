@@ -595,7 +595,7 @@ impl<N: Network> BlockScannerService<N> {
         };
 
         // TODO: use smart retry mechanism
-        match Self::connect_websocket(&provider).await {
+        match Self::get_block_subscription(&provider).await {
             Ok(mut ws_stream) => {
                 info!("WebSocket connected for buffering");
 
@@ -660,7 +660,7 @@ impl<N: Network> BlockScannerService<N> {
         info!("Processed buffered messages: {processed} forwarded, {discarded} discarded");
     }
 
-    async fn connect_websocket(
+    async fn get_block_subscription(
         provider: &impl Provider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, BlockScannerError> {
         let ws_stream = provider
