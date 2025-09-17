@@ -1,13 +1,13 @@
 #![allow(unused)]
 
-use std::{future, marker::PhantomData, ops::Range, time::Duration};
+use std::{marker::PhantomData, ops::Range, time::Duration};
 
-use tokio::sync::mpsc::{self, Receiver, Sender, error::SendError};
+use tokio::sync::mpsc::{self, error::SendError};
 use tokio_stream::wrappers::ReceiverStream;
 
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag, RpcBlockHash},
+    eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{BlockHash, BlockNumber},
     providers::{Provider, RootProvider},
@@ -16,13 +16,16 @@ use alloy::{
         client::{ClientBuilder, RpcClient},
         types::Header,
     },
-    transports::{RpcError, TransportError, TransportErrorKind, ipc::IpcConnect, ws::WsConnect},
+    transports::{RpcError, TransportErrorKind, ipc::IpcConnect, ws::WsConnect},
 };
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
 const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(12);
 const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
+
+const CHANNEL_BUFFER_SIZE: usize = 10000;
+const MAX_BUFFERED_MESSAGES: usize = 50000;
 
 // TODO: determine check exact default value
 const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
@@ -199,7 +202,7 @@ impl<N: Network> BlockScannerBuilder<N> {
         self.connect_client(client).await
     }
 
-    #[must_use]
+    #[allow(clippy::missing_errors_doc)]
     pub async fn connect_client(
         self,
         client: RpcClient,
@@ -208,6 +211,9 @@ impl<N: Network> BlockScannerBuilder<N> {
         self.connect_provider(provider).await
     }
 
+    #[allow(clippy::single_match_else)]
+    #[allow(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_panics_doc)]
     pub async fn connect_provider<P>(
         self,
         provider: P,
@@ -219,10 +225,7 @@ impl<N: Network> BlockScannerBuilder<N> {
             match (self.start_height, end_height) {
                 (_, BlockNumberOrTag::Latest) => (),
                 (_, BlockNumberOrTag::Number(end))
-                    if end == provider.get_block_number().await? =>
-                {
-                    ()
-                }
+                    if end == provider.get_block_number().await? => {}
                 (_, BlockNumberOrTag::Number(end)) if end > provider.get_block_number().await? => {
                     return Err(BlockScannerError::NonExistentEndHeader(end_height));
                 }
@@ -241,7 +244,7 @@ impl<N: Network> BlockScannerBuilder<N> {
                 }
                 // TODO: handle other cases
                 _ => {}
-            };
+            }
         }
 
         let (start_block, end_height) = match (self.start_height, self.end_height) {
@@ -286,8 +289,8 @@ struct BlockHashAndNumber {
 }
 
 impl BlockHashAndNumber {
-    fn from_header<N: Network>(block: &N::HeaderResponse) -> Self {
-        Self { hash: block.hash(), number: block.number() }
+    fn from_header<N: Network>(header: &N::HeaderResponse) -> Self {
+        Self { hash: header.hash(), number: header.number() }
     }
 }
 
@@ -316,19 +319,20 @@ where
         &self.provider
     }
 
-    pub async fn start(&self) -> ReceiverStream<Result<Range<u64>, BlockScannerError>> {
-        let (sender, receiver) = mpsc::channel(self.blocks_read_per_epoch);
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn start(
+        &mut self,
+    ) -> Result<ReceiverStream<Result<Range<u64>, BlockScannerError>>, StartError> {
+        let (sender, receiver) =
+            mpsc::channel::<Result<Range<u64>, BlockScannerError>>(self.blocks_read_per_epoch);
 
         let receiver_stream = ReceiverStream::new(receiver);
 
-        match (self.start_height, self.end_height) {
-            (_, Some(end_height)) => {
-                self.ensure_current_not_reorged().await?;
+        if let Some(end_height) = self.end_height {
+            self.ensure_current_not_reorged().await?;
 
-                sender.send(Ok(self.start_height..end_height)).await?;
-                sender.send(Err(BlockScannerError::ErrEOF {})).await?;
-            }
-            _ => {}
+            sender.send(Ok(self.start_height..end_height)).await?;
+            sender.send(Err(BlockScannerError::ErrEOF {})).await?;
         }
 
         tokio::spawn(
@@ -348,11 +352,7 @@ where
     }
 
     async fn rewind_on_reorg_detected(&mut self) -> Result<(), BlockScannerError> {
-        let mut new_current_height = if self.current.number <= self.reorg_rewind_depth {
-            0
-        } else {
-            self.current.number - self.reorg_rewind_depth
-        };
+        let mut new_current_height = self.current.number.saturating_sub(self.reorg_rewind_depth);
 
         let head = self.provider.get_block_number().await?;
         if head < new_current_height {
@@ -363,7 +363,7 @@ where
             .provider
             .get_block_by_number(new_current_height.into())
             .await?
-            .map(|block| BlockHashAndNumber::from_header::<N>(&block.header()))
+            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
             .expect("block should exist");
 
         println!(
