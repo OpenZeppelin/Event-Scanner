@@ -1,9 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use alloy::{providers::ProviderBuilder, rpc::types::Log, sol, sol_types::SolEvent};
+use alloy::{
+    eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol,
+    sol_types::SolEvent,
+};
 use alloy_node_bindings::Anvil;
 use async_trait::async_trait;
-use event_scanner::{EventCallback, EventFilter, FixedRetryConfig, ScannerBuilder};
+use event_scanner::{EventCallback, EventFilter, event_scanner::EventScannerBuilder};
 
 use tokio::time::sleep;
 use tracing::info;
@@ -62,14 +65,15 @@ async fn main() -> anyhow::Result<()> {
         callback: Arc::new(CounterCallback),
     };
 
-    let mut scanner = ScannerBuilder::new(anvil.ws_endpoint_url())
-        .add_event_filter(increase_filter)
-        .callback_config(FixedRetryConfig { max_attempts: 3, delay_ms: 200 })
-        .build()
-        .await?;
+    let mut builder = EventScannerBuilder::new();
+
+    builder.with_event_filter(increase_filter);
+
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let task_1 = tokio::spawn(async move {
-        scanner.start().await.expect("failed to start scanner");
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await.expect("failed to start scanner");
     });
 
     let task_2 = tokio::spawn(async move {
