@@ -1,7 +1,4 @@
-use crate::{
-    scanner::Scanner,
-    types::{CallbackConfig, EventFilter},
-};
+use crate::{FixedRetryConfig, scanner::Scanner, types::EventFilter};
 
 pub struct ScannerBuilder {
     rpc_url: String,
@@ -9,7 +6,7 @@ pub struct ScannerBuilder {
     end_block: Option<u64>,
     max_blocks_per_filter: u64,
     tracked_events: Vec<EventFilter>,
-    callback_config: CallbackConfig,
+    callback_config: FixedRetryConfig,
 }
 
 impl ScannerBuilder {
@@ -20,7 +17,7 @@ impl ScannerBuilder {
             end_block: None,
             max_blocks_per_filter: 1000,
             tracked_events: Vec::new(),
-            callback_config: CallbackConfig::default(),
+            callback_config: FixedRetryConfig::default(),
         }
     }
 
@@ -55,7 +52,7 @@ impl ScannerBuilder {
     }
 
     #[must_use]
-    pub fn callback_config(mut self, cfg: CallbackConfig) -> Self {
+    pub fn callback_config(mut self, cfg: FixedRetryConfig) -> Self {
         self.callback_config = cfg;
         self
     }
@@ -81,7 +78,9 @@ impl ScannerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::callback::EventCallback;
+    use crate::{
+        FixedRetryConfig, callback::EventCallback, callback_strategy::BACK_OFF_MAX_RETRIES,
+    };
     use alloy::{primitives::address, rpc::types::Log};
     use async_trait::async_trait;
     use std::sync::Arc;
@@ -141,9 +140,9 @@ mod tests {
     fn test_builder_callback_config() {
         let max_attempts = 5;
         let delay_ms = 500;
-        let config = CallbackConfig { max_attempts, delay_ms };
+        let config = FixedRetryConfig { max_attempts, delay_ms };
 
-        let builder = ScannerBuilder::new(WS_URL).callback_config(config.clone());
+        let builder = ScannerBuilder::new(WS_URL).callback_config(config);
 
         assert_eq!(builder.callback_config.max_attempts, max_attempts);
         assert_eq!(builder.callback_config.delay_ms, delay_ms);
@@ -153,7 +152,7 @@ mod tests {
     fn test_builder_default_callback_config() {
         let builder = ScannerBuilder::new(WS_URL);
 
-        assert_eq!(builder.callback_config.max_attempts, 3);
+        assert_eq!(builder.callback_config.max_attempts, BACK_OFF_MAX_RETRIES);
         assert_eq!(builder.callback_config.delay_ms, 200);
     }
 
@@ -260,7 +259,7 @@ mod tests {
 
         let max_attempts = 5;
         let delay_ms = 500;
-        let config = CallbackConfig { max_attempts, delay_ms };
+        let config = FixedRetryConfig { max_attempts, delay_ms };
 
         let max_blocks_per_filter = 2000;
         let builder = ScannerBuilder::new(WS_URL)
@@ -268,7 +267,7 @@ mod tests {
             .end_block(end_block)
             .max_blocks_per_filter(max_blocks_per_filter)
             .add_event_filter(filter.clone())
-            .callback_config(config.clone());
+            .callback_config(config);
 
         assert_eq!(builder.start_block, Some(start_block));
         assert_eq!(builder.end_block, Some(end_block));
