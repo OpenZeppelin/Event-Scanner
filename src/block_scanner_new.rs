@@ -507,9 +507,9 @@ impl<N: Network> BlockScannerService<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged(provider).await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64
-                > end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number +
+                self.config.blocks_read_per_epoch as u64 >
+                end.header().number()
             {
                 end.header().number()
             } else {
@@ -599,7 +599,8 @@ impl<N: Network> BlockScannerService<N> {
             Ok(mut ws_stream) => {
                 info!("WebSocket connected for buffering");
 
-                // TODO: if latest != ws_stream.next(), then return latest.number and empty the ws_stream backlog
+                // TODO: if latest != ws_stream.next(), then return latest.number and empty the
+                // ws_stream backlog
                 while let Ok(header_resp) = ws_stream.recv().await {
                     info!("Received block header: {}", header_resp.number());
                     // TODO: handle reorgs
