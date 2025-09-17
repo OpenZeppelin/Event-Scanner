@@ -1,26 +1,31 @@
 #![allow(unused)]
 
-use std::{future, marker::PhantomData, ops::Range, time::Duration};
+use std::{marker::PhantomData, ops::Range, time::Duration};
 
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, error::SendError};
 use tokio_stream::wrappers::ReceiverStream;
 
 use alloy::{
+    consensus::BlockHeader,
     eips::BlockNumberOrTag,
-    network::Network,
+    network::{BlockResponse, Network, primitives::HeaderResponse},
+    primitives::{BlockHash, BlockNumber},
     providers::{Provider, RootProvider},
     pubsub::PubSubConnect,
     rpc::{
         client::{ClientBuilder, RpcClient},
         types::Header,
     },
-    transports::{TransportError, ipc::IpcConnect, ws::WsConnect},
+    transports::{RpcError, TransportErrorKind, ipc::IpcConnect, ws::WsConnect},
 };
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
 const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(12);
 const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
+
+const CHANNEL_BUFFER_SIZE: usize = 10000;
+const MAX_BUFFERED_MESSAGES: usize = 50000;
 
 // TODO: determine check exact default value
 const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
@@ -30,6 +35,16 @@ pub enum BlockScannerError {
     ErrEOF,
     ErrContinue,
     TerminalError(u64),
+    EndHeightSmallerThanStartHeight(BlockNumberOrTag, BlockNumberOrTag),
+    NonExistentStartHeader(BlockNumberOrTag),
+    NonExistentEndHeader(BlockNumberOrTag),
+    Rpc(RpcError<TransportErrorKind>),
+}
+
+impl From<RpcError<TransportErrorKind>> for BlockScannerError {
+    fn from(value: RpcError<TransportErrorKind>) -> Self {
+        BlockScannerError::Rpc(value)
+    }
 }
 
 impl std::fmt::Display for BlockScannerError {
@@ -40,6 +55,43 @@ impl std::fmt::Display for BlockScannerError {
             BlockScannerError::TerminalError(height) => {
                 write!(f, "terminal error at block height {height}")
             }
+            BlockScannerError::EndHeightSmallerThanStartHeight(start, end) => {
+                write!(f, "start height ({start}) > end height ({end})")
+            }
+            BlockScannerError::NonExistentStartHeader(height) => {
+                write!(f, "failed to get start header, height: {height}")
+            }
+            BlockScannerError::NonExistentEndHeader(height) => {
+                write!(f, "failed to get end header, height: {height}")
+            }
+            BlockScannerError::Rpc(err) => err.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum StartError {
+    BlockScannerError(BlockScannerError),
+    SendError(SendError<Result<Range<BlockNumber>, BlockScannerError>>),
+}
+
+impl From<SendError<Result<Range<BlockNumber>, BlockScannerError>>> for StartError {
+    fn from(value: SendError<Result<Range<BlockNumber>, BlockScannerError>>) -> Self {
+        StartError::SendError(value)
+    }
+}
+
+impl From<BlockScannerError> for StartError {
+    fn from(value: BlockScannerError) -> Self {
+        StartError::BlockScannerError(value)
+    }
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StartError::BlockScannerError(err) => err.fmt(f),
+            StartError::SendError(err) => err.fmt(f),
         }
     }
 }
@@ -129,9 +181,9 @@ impl<N: Network> BlockScannerBuilder<N> {
     pub async fn connect_ws(
         self,
         connect: WsConnect,
-    ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError> {
+    ) -> Result<BlockScanner<RootProvider<N>, N>, BlockScannerError> {
         let client = ClientBuilder::default().ws(connect).await?;
-        Ok(self.connect_client(client))
+        self.connect_client(client).await
     }
 
     /// Connects to the provider via IPC
@@ -142,37 +194,103 @@ impl<N: Network> BlockScannerBuilder<N> {
     pub async fn connect_ipc<T>(
         self,
         connect: IpcConnect<T>,
-    ) -> Result<BlockScanner<RootProvider<N>, N>, TransportError>
+    ) -> Result<BlockScanner<RootProvider<N>, N>, BlockScannerError>
     where
         IpcConnect<T>: PubSubConnect,
     {
         let client = ClientBuilder::default().ipc(connect).await?;
-        Ok(self.connect_client(client))
+        self.connect_client(client).await
     }
 
-    #[must_use]
-    pub fn connect_client(self, client: RpcClient) -> BlockScanner<RootProvider<N>, N> {
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn connect_client(
+        self,
+        client: RpcClient,
+    ) -> Result<BlockScanner<RootProvider<N>, N>, BlockScannerError> {
         let provider = RootProvider::new(client);
-        self.connect_provider(provider)
+        self.connect_provider(provider).await
     }
 
-    pub fn connect_provider<P>(self, provider: P) -> BlockScanner<P, N>
+    #[allow(clippy::single_match_else)]
+    #[allow(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_panics_doc)]
+    pub async fn connect_provider<P>(
+        self,
+        provider: P,
+    ) -> Result<BlockScanner<P, N>, BlockScannerError>
     where
         P: Provider<N>,
     {
-        BlockScanner {
+        if let Some(end_height) = self.end_height {
+            match (self.start_height, end_height) {
+                (_, BlockNumberOrTag::Latest) => (),
+                (_, BlockNumberOrTag::Number(end))
+                    if end == provider.get_block_number().await? => {}
+                (_, BlockNumberOrTag::Number(end)) if end > provider.get_block_number().await? => {
+                    return Err(BlockScannerError::NonExistentEndHeader(end_height));
+                }
+                (BlockNumberOrTag::Number(start), BlockNumberOrTag::Number(end)) => {
+                    if start > end {
+                        return Err(BlockScannerError::EndHeightSmallerThanStartHeight(
+                            self.start_height,
+                            end_height,
+                        ));
+                    }
+                    let start_block_number =
+                        provider.get_block_number_by_id(self.start_height.into()).await?;
+                    if start_block_number.is_none() {
+                        return Err(BlockScannerError::NonExistentStartHeader(self.start_height));
+                    }
+                }
+                // TODO: handle other cases
+                _ => {}
+            }
+        }
+
+        let (start_block, end_height) = match (self.start_height, self.end_height) {
+            (_, Some(end_height)) => {
+                let start_block = provider
+                    .get_block_by_number(self.start_height)
+                    .await?
+                    .expect("already checked");
+                let end_height_number = provider.get_block_number_by_id(end_height.into()).await?;
+                (start_block, end_height_number)
+            }
+            (_, None) => {
+                let start_block = provider
+                    .get_block_by_number(self.start_height)
+                    .await?
+                    .expect("already checked");
+                (start_block, None)
+            }
+        };
+
+        let start_header = start_block.header();
+
+        Ok(BlockScanner {
             provider,
-            current: Header::default(),
+            current: BlockHashAndNumber::from_header::<N>(start_header),
             is_end: false,
             blocks_read_per_epoch: self.blocks_read_per_epoch,
-            start_height: self.start_height,
-            end_height: self.end_height,
+            start_height: start_header.number(),
+            end_height,
             on_blocks: self.on_blocks,
             reorg_rewind_depth: self.reorg_rewind_depth,
             retry_interval: self.retry_interval,
             block_confirmations: self.block_confirmations,
             network: PhantomData,
-        }
+        })
+    }
+}
+
+struct BlockHashAndNumber {
+    hash: BlockHash,
+    number: BlockNumber,
+}
+
+impl BlockHashAndNumber {
+    fn from_header<N: Network>(header: &N::HeaderResponse) -> Self {
+        Self { hash: header.hash(), number: header.number() }
     }
 }
 
@@ -181,9 +299,9 @@ impl<N: Network> BlockScannerBuilder<N> {
 pub struct BlockScanner<P: Provider<N>, N: Network> {
     provider: P,
     blocks_read_per_epoch: usize,
-    start_height: BlockNumberOrTag,
-    end_height: Option<BlockNumberOrTag>,
-    current: Header,
+    start_height: BlockNumber,
+    end_height: Option<BlockNumber>,
+    current: BlockHashAndNumber,
     on_blocks: OnBlocksFunc<N>,
     is_end: bool,
     reorg_rewind_depth: u64,
@@ -201,18 +319,61 @@ where
         &self.provider
     }
 
-    pub async fn start(&self) -> ReceiverStream<Result<Range<u64>, BlockScannerError>> {
-        let (sender, receiver) = mpsc::channel(self.blocks_read_per_epoch);
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn start(
+        &mut self,
+    ) -> Result<ReceiverStream<Result<Range<u64>, BlockScannerError>>, StartError> {
+        let (sender, receiver) =
+            mpsc::channel::<Result<Range<u64>, BlockScannerError>>(self.blocks_read_per_epoch);
 
         let receiver_stream = ReceiverStream::new(receiver);
 
-        future::ready(()).await;
+        if let Some(end_height) = self.end_height {
+            self.ensure_current_not_reorged().await?;
+
+            sender.send(Ok(self.start_height..end_height)).await?;
+            sender.send(Err(BlockScannerError::ErrEOF {})).await?;
+        }
 
         tokio::spawn(
             async move { if sender.send(Err(BlockScannerError::ErrEOF {})).await.is_err() {} },
         );
 
-        receiver_stream
+        Ok(receiver_stream)
+    }
+
+    async fn ensure_current_not_reorged(&mut self) -> Result<(), BlockScannerError> {
+        let current_block = self.provider.get_block_by_hash(self.current.hash).await?;
+        if current_block.is_some() {
+            return Ok(());
+        }
+
+        self.rewind_on_reorg_detected().await
+    }
+
+    async fn rewind_on_reorg_detected(&mut self) -> Result<(), BlockScannerError> {
+        let mut new_current_height = self.current.number.saturating_sub(self.reorg_rewind_depth);
+
+        let head = self.provider.get_block_number().await?;
+        if head < new_current_height {
+            new_current_height = head;
+        }
+
+        let current = self
+            .provider
+            .get_block_by_number(new_current_height.into())
+            .await?
+            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
+            .expect("block should exist");
+
+        println!(
+            "Rewind on reorg detected\noldCurrent: {}, newCurrent: {}",
+            self.current.number, current.number
+        );
+
+        self.current = current;
+
+        Ok(())
     }
 }
 
@@ -279,9 +440,9 @@ mod tests {
         let ws = WsConnect::new(anvil.ws_endpoint_url());
 
         let builder = BlockScannerBuilder::<Ethereum>::new();
-        let scanner = builder.connect_ws(ws).await.expect("failed to connect ws");
+        let mut scanner = builder.connect_ws(ws).await.expect("failed to connect ws");
 
-        let mut stream = scanner.start().await;
+        let mut stream = scanner.start().await.unwrap();
         let first = stream.next().await;
         match first {
             Some(Err(BlockScannerError::ErrEOF)) => {}

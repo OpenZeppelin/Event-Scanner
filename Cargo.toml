@@ -1,9 +1,5 @@
 [workspace]
-members = [
-    ".",
-    "examples/historical_scanning",
-    "examples/simple_counter",
-]
+members = [".", "examples/historical_scanning", "examples/simple_counter"]
 resolver = "2"
 
 [lints.clippy]
