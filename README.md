@@ -78,10 +78,11 @@ async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: al
         callback: Arc::new(CounterCallback { processed: Arc::new(AtomicUsize::new(0)) }),
     };
 
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .connect_ws::<Ethereum>(ws_url)
+        .await?;
 
-    let mut scanner = builder.connect_ws::<Ethereum>(ws_url).await?;
     scanner.start(BlockNumberOrTag::Latest, None).await?;
     Ok(())
 }
