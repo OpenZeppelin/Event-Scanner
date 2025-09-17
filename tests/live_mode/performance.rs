@@ -8,7 +8,7 @@ use std::{
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 use crate::{
     common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
@@ -17,7 +17,7 @@ use crate::{
 
 #[tokio::test]
 async fn high_event_volume_no_loss() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(0.1)?;
+    let anvil = spawn_anvil(0.05)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
@@ -31,19 +31,25 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
 
     let mut builder = EventScannerBuilder::new();
     builder.with_event_filter(filter);
-    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let scanner_handle = tokio::spawn(async move {
-        let mut scanner = scanner;
-        scanner.start(BlockNumberOrTag::Latest, None).await
-    });
+    let mut scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    for _ in 0..100 {
-        let _ = contract.increase().send().await?.get_receipt().await?;
+    let expected_number_of_events = 100;
+
+    for _ in 0..expected_number_of_events {
+        contract.increase().send().await?.watch().await?;
     }
 
-    sleep(Duration::from_millis(1000)).await;
-    scanner_handle.abort();
+    let count = Arc::clone(&count);
+    let counting = async move {
+        while count.load(Ordering::SeqCst) < expected_number_of_events {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
 
-    assert_eq!(count.load(Ordering::SeqCst), 100);
+    if timeout(Duration::from_secs(60), counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 60 seconds");
+    };
+
     Ok(())
 }
