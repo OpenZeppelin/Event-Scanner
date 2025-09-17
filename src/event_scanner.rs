@@ -1,9 +1,9 @@
-#![allow(unused)]
-use std::{collections::HashMap, future, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
     block_scanner::{BlockScanner, BlockScannerBuilder, OnBlocksFunc},
-    types::{CallbackConfig, EventFilter},
+    callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
+    types::EventFilter,
 };
 use alloy::{
     eips::BlockNumberOrTag,
@@ -16,14 +16,14 @@ use alloy::{
     },
     transports::TransportError,
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Receiver};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
 pub struct EventScannerBuilder<N: Network> {
     block_scanner: BlockScannerBuilder<N>,
     tracked_events: Vec<EventFilter>,
-    callback_config: CallbackConfig,
+    callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
 impl<N: Network> Default for EventScannerBuilder<N> {
@@ -38,67 +38,57 @@ impl<N: Network> EventScannerBuilder<N> {
         Self {
             block_scanner: BlockScannerBuilder::new(),
             tracked_events: Vec::new(),
-            callback_config: CallbackConfig::default(),
+            callback_strategy: Self::get_default_callback_strategy(),
         }
     }
 
-    #[must_use]
-    pub fn with_event_filter(mut self, filter: EventFilter) -> Self {
+    pub fn with_event_filter(&mut self, filter: EventFilter) -> &mut Self {
         self.tracked_events.push(filter);
         self
     }
 
-    #[must_use]
-    pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
+    pub fn with_event_filters(&mut self, filters: Vec<EventFilter>) -> &mut Self {
         self.tracked_events.extend(filters);
         self
     }
 
-    #[must_use]
-    pub fn with_callback_config(mut self, cfg: CallbackConfig) -> Self {
-        self.callback_config = cfg;
+    pub fn with_callback_strategy(&mut self, strategy: Arc<dyn CallbackStrategy>) -> &mut Self {
+        self.callback_strategy = strategy;
         self
     }
 
-    #[must_use]
     pub fn with_blocks_read_per_epoch(&mut self, blocks_read_per_epoch: usize) -> &mut Self {
-        self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
+        let _ = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
     }
 
-    #[must_use]
     pub fn with_start_height(&mut self, start_height: BlockNumberOrTag) -> &mut Self {
-        self.block_scanner.with_start_height(start_height);
+        let _ = self.block_scanner.with_start_height(start_height);
         self
     }
 
-    #[must_use]
     pub fn with_end_height(&mut self, end_height: BlockNumberOrTag) -> &mut Self {
-        self.block_scanner.with_end_height(end_height);
+        let _ = self.block_scanner.with_end_height(end_height);
         self
     }
 
-    #[must_use]
     pub fn with_on_blocks(&mut self, on_blocks: OnBlocksFunc<N>) -> &mut Self {
-        self.block_scanner.with_on_blocks(on_blocks);
+        let _ = self.block_scanner.with_on_blocks(on_blocks);
         self
     }
 
-    #[must_use]
     pub fn with_reorg_rewind_depth(&mut self, reorg_rewind_depth: u64) -> &mut Self {
-        self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
+        let _ = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
     }
 
-    #[must_use]
     pub fn with_retry_interval(&mut self, retry_interval: Duration) -> &mut Self {
-        self.block_scanner.with_retry_interval(retry_interval);
+        let _ = self.block_scanner.with_retry_interval(retry_interval);
         self
     }
 
-    #[must_use]
     pub fn with_block_confirmations(&mut self, block_confirmations: u64) -> &mut Self {
-        self.block_scanner.with_block_confirmations(block_confirmations);
+        let _ = self.block_scanner.with_block_confirmations(block_confirmations);
         self
     }
 
@@ -115,7 +105,7 @@ impl<N: Network> EventScannerBuilder<N> {
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
+            callback_strategy: self.callback_strategy,
         })
     }
 
@@ -135,7 +125,7 @@ impl<N: Network> EventScannerBuilder<N> {
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
+            callback_strategy: self.callback_strategy,
         })
     }
 
@@ -145,7 +135,7 @@ impl<N: Network> EventScannerBuilder<N> {
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
+            callback_strategy: self.callback_strategy,
         }
     }
 
@@ -155,15 +145,20 @@ impl<N: Network> EventScannerBuilder<N> {
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_config: self.callback_config,
+            callback_strategy: self.callback_strategy,
         }
+    }
+
+    fn get_default_callback_strategy() -> Arc<dyn CallbackStrategy> {
+        let state_sync_aware_strategy = StateSyncAwareStrategy::new();
+        Arc::new(state_sync_aware_strategy)
     }
 }
 
 pub struct EventScanner<P: Provider<N>, N: Network> {
     block_scanner: BlockScanner<P, N>,
     tracked_events: Vec<EventFilter>,
-    callback_config: CallbackConfig,
+    callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
 impl<P: Provider<N>, N: Network> EventScanner<P, N> {
@@ -177,25 +172,24 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
 
         for filter in &self.tracked_events {
             let event_name = filter.event.clone();
+
             if event_channels.contains_key(&event_name) {
                 continue;
             }
-            let (sender, mut receiver) = mpsc::channel::<Log>(1024); // TODO: configurable buffer size / smaller buffer ? 
-            let cfg = self.callback_config.clone();
+
+            // TODO: configurable buffer size / smaller buffer ?
+            let (sender, receiver) = mpsc::channel::<Log>(1024);
+
             let event_name_clone = event_name.clone();
             let callback = filter.callback.clone();
-            tokio::spawn(async move {
-                while let Some(log) = receiver.recv().await {
-                    if let Err(e) = Self::invoke_with_retry_static(&callback, &log, &cfg).await {
-                        error!(
-                            event = %event_name_clone,
-                            at_block = &log.block_number,
-                            error = %e,
-                            "failed to invoke callback after retries"
-                        );
-                    }
-                }
-            });
+            let strategy = self.callback_strategy.clone();
+            Self::spawn_event_callback_task_executors(
+                receiver,
+                callback,
+                strategy,
+                event_name_clone,
+            );
+
             event_channels.insert(event_name, sender);
         }
 
@@ -215,6 +209,26 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
         }
 
         Ok(())
+    }
+
+    fn spawn_event_callback_task_executors(
+        mut receiver: Receiver<Log>,
+        callback: Arc<dyn crate::callback::EventCallback + Send + Sync>,
+        strategy: Arc<dyn CallbackStrategy>,
+        event_name: String,
+    ) {
+        tokio::spawn(async move {
+            while let Some(log) = receiver.recv().await {
+                if let Err(e) = strategy.execute(&callback, &log).await {
+                    error!(
+                        event = %event_name,
+                        at_block = &log.block_number,
+                        error = %e,
+                        "failed to invoke callback after retries"
+                    );
+                }
+            }
+        });
     }
 
     async fn process_block_range(
@@ -246,7 +260,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
 
                     if let Some(sender) = event_channels.get(&event_filter.event) {
                         for log in logs {
-                            if let Err(e) = sender.send(log.clone()).await {
+                            if let Err(e) = sender.send(log).await {
                                 warn!(event = %event_filter.event, error = %e, "failed to enqueue log for processing");
                             }
                         }
@@ -269,32 +283,4 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
 
         Ok(())
     }
-
-    async fn invoke_with_retry_static(
-        callback: &Arc<dyn crate::callback::EventCallback + Send + Sync>,
-        log: &Log,
-        config: &CallbackConfig,
-    ) -> anyhow::Result<()> {
-        let attempts = config.max_attempts.max(1);
-        let mut last_err: Option<anyhow::Error> = None;
-        for attempt in 1..=attempts {
-            match callback.on_event(log).await {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    last_err = Some(e);
-                    if attempt < attempts {
-                        warn!(
-                            attempt,
-                            max_attempts = attempts,
-                            "callback failed; retrying after fixed delay"
-                        );
-                        tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
-                    }
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("callback failed with unknown error")))
-    }
 }
-
-// TODO: implement max channel buffer size test
