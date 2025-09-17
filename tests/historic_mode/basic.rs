@@ -47,12 +47,12 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     let start_block = first_block.expect("at least one historical event");
     let end_block = last_block;
 
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
-    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
 
     tokio::spawn(async move {
-        let mut scanner = scanner;
         let _ = scanner
             .start(BlockNumberOrTag::Number(start_block), Some(BlockNumberOrTag::Number(end_block)))
             .await;

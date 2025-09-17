@@ -23,16 +23,15 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
-    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let scanner_handle = tokio::spawn(async move {
-        let mut scanner = scanner;
-        scanner.start(BlockNumberOrTag::Latest, None).await
-    });
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let scanner_handle =
+        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     for _ in 0..5 {
-        let _ = contract.increase().send().await?.get_receipt().await?;
+        contract.increase().send().await?.watch().await?;
     }
 
     sleep(Duration::from_millis(400)).await;
@@ -58,13 +57,12 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
-    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let scanner_handle = tokio::spawn(async move {
-        let mut scanner = scanner;
-        scanner.start(BlockNumberOrTag::Latest, None).await
-    });
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let scanner_handle =
+        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     for _ in 0..5 {
         let _pending = contract.increase().send().await?;

@@ -17,21 +17,22 @@ use crate::{
 
 #[tokio::test]
 async fn high_event_volume_no_loss() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(0.05)?;
+    let anvil = spawn_anvil(0.01)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
     let count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: count.clone() });
+    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&count) });
     let filter = EventFilter {
         contract_address: *contract.address(),
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
 
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
-    let mut scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
     tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     let expected_number_of_events = 100;
@@ -40,7 +41,6 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let count = Arc::clone(&count);
     let counting = async move {
         while count.load(Ordering::SeqCst) < expected_number_of_events {
             sleep(Duration::from_millis(100)).await;

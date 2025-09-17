@@ -33,17 +33,16 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
-    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
 
-    let scanner_handle = tokio::spawn(async move {
-        let mut scanner = scanner;
-        scanner.start(BlockNumberOrTag::Latest, None).await
-    });
+    let scanner_handle =
+        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     for _ in 0..3 {
-        let _ = contract.increase().send().await?.get_receipt().await?;
+        contract.increase().send().await?.watch().await?;
         // emit faster than processing to simulate backlog
         sleep(Duration::from_millis(50)).await;
     }
@@ -76,17 +75,17 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
     };
     let cfg = FixedRetryConfig { max_attempts: 3, delay_ms: 50 };
 
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
     let strategy: Arc<dyn CallbackStrategy> = Arc::new(FixedRetryStrategy::new(cfg));
-    builder.with_callback_strategy(strategy);
-    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let scanner_handle = tokio::spawn(async move {
-        let mut scanner = scanner;
-        scanner.start(BlockNumberOrTag::Latest, None).await
-    });
 
-    let _ = contract.increase().send().await?.get_receipt().await?;
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .with_callback_strategy(strategy)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let scanner_handle =
+        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    contract.increase().send().await?.watch().await?;
     sleep(Duration::from_millis(300)).await;
     scanner_handle.abort();
 
@@ -110,17 +109,18 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
         callback,
     };
     let cfg = FixedRetryConfig { max_attempts: 2, delay_ms: 20 };
-    let mut builder = EventScannerBuilder::new();
-    builder.with_event_filter(filter);
-    let strategy: Arc<dyn CallbackStrategy> = Arc::new(FixedRetryStrategy::new(cfg));
-    builder.with_callback_strategy(strategy);
-    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let scanner_handle = tokio::spawn(async move {
-        let mut scanner = scanner;
-        scanner.start(BlockNumberOrTag::Latest, None).await
-    });
 
-    let _ = contract.increase().send().await?.get_receipt().await?;
+    let strategy: Arc<dyn CallbackStrategy> = Arc::new(FixedRetryStrategy::new(cfg));
+
+    let mut scanner = EventScannerBuilder::new()
+        .with_event_filter(filter)
+        .with_callback_strategy(strategy)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let scanner_handle =
+        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    contract.increase().send().await?.watch().await?;
     sleep(Duration::from_millis(200)).await;
     scanner_handle.abort();
 
