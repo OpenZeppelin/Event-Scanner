@@ -4,7 +4,7 @@
 >
 > This project is under active development and likely contains bugs. APIs and behaviour may change without notice. Use at your own risk.
 
-Event Scanner is a Rust library for monitoring Ethereum L1 smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters and callback implementations; the scanner takes care of subscribing to historical ranges, bridging into live mode, and delivering events with retry-aware execution strategies.
+Event Scanner is a Rust library for monitoring EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters and callback implementations; the scanner takes care of subscribing to historical ranges, bridging into live mode, and delivering events with retry-aware execution strategies.
 
 ---
 
@@ -25,7 +25,7 @@ Event Scanner is a Rust library for monitoring Ethereum L1 smart contract events
 
 ## Features
 
-- **Historical replay** – scan from any block range with optional end height.
+- **Historical replay** – scan block ranges.
 - **Live subscriptions** – stay up to date with latest blocks via WebSocket or IPC transports.
 - **Hybrid flow** – automatically transition from historical catch-up into streaming mode.
 - **Composable filters** – register one or many contract + event signature pairs with their own callbacks.
@@ -53,9 +53,6 @@ Add `event-scanner` to your `Cargo.toml`:
 [dependencies]
 event-scanner = { path = "../event-scanner" }
 ```
-
-Note: This will be published to crates.io soon.
-
 Create a callback implementing `EventCallback` and register it with the builder:
 
 ```rust
@@ -129,7 +126,7 @@ Register multiple filters by calling either `with_event_filter` repeatedly or `w
 - **Historical mode** – `start(BlockNumberOrTag::Number(start, Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range.
 - **Historical → Live** – `start(BlockNumberOrTag::Number(start, None)` replays from `start` to current head, then streams future blocks.
 
-For now modes are deduced from the `start` and `end` parameters. In the future, we will explicit commands to select a mode.
+For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
 
 See the integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
 
