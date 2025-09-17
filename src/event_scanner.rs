@@ -23,7 +23,7 @@ use tracing::{error, info, warn};
 pub struct EventScannerBuilder<N: Network> {
     block_scanner: BlockScannerBuilder<N>,
     tracked_events: Vec<EventFilter>,
-    callback_strategy: Option<Arc<dyn CallbackStrategy>>,
+    callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
 impl<N: Network> Default for EventScannerBuilder<N> {
@@ -38,7 +38,7 @@ impl<N: Network> EventScannerBuilder<N> {
         Self {
             block_scanner: BlockScannerBuilder::new(),
             tracked_events: Vec::new(),
-            callback_strategy: None,
+            callback_strategy: Self::get_default_callback_strategy(),
         }
     }
 
@@ -53,7 +53,7 @@ impl<N: Network> EventScannerBuilder<N> {
     }
 
     pub fn with_callback_strategy(&mut self, strategy: Arc<dyn CallbackStrategy>) -> &mut Self {
-        self.callback_strategy = Some(strategy);
+        self.callback_strategy = strategy;
         self
     }
 
@@ -102,15 +102,10 @@ impl<N: Network> EventScannerBuilder<N> {
         connect: WsConnect,
     ) -> Result<EventScanner<RootProvider<N>, N>, TransportError> {
         let block_scanner = self.block_scanner.connect_ws(connect).await?;
-        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
-            s
-        } else {
-            Self::get_default_callback_strategy()
-        };
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_strategy: strategy,
+            callback_strategy: self.callback_strategy,
         })
     }
 
@@ -127,45 +122,30 @@ impl<N: Network> EventScannerBuilder<N> {
         IpcConnect<T>: PubSubConnect,
     {
         let block_scanner = self.block_scanner.connect_ipc(connect).await?;
-        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
-            s
-        } else {
-            Self::get_default_callback_strategy()
-        };
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_strategy: strategy,
+            callback_strategy: self.callback_strategy,
         })
     }
 
     #[must_use]
     pub fn connect_client(self, client: RpcClient) -> EventScanner<RootProvider<N>, N> {
         let block_scanner = self.block_scanner.connect_client(client);
-        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
-            s
-        } else {
-            Self::get_default_callback_strategy()
-        };
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_strategy: strategy,
+            callback_strategy: self.callback_strategy,
         }
     }
 
     #[must_use]
     pub fn connect_provider(self, provider: RootProvider<N>) -> EventScanner<RootProvider<N>, N> {
         let block_scanner = self.block_scanner.connect_provider(provider);
-        let strategy: Arc<dyn CallbackStrategy> = if let Some(s) = self.callback_strategy {
-            s
-        } else {
-            Self::get_default_callback_strategy()
-        };
         EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
-            callback_strategy: strategy,
+            callback_strategy: self.callback_strategy,
         }
     }
 
