@@ -182,6 +182,7 @@ Both examples spin up a local `anvil` instance and deploy a demo counter contrac
 ## Testing
 
 Integration tests cover live, historical, and hybrid flows:
+(We recommend using nextest to run the tests)
 
 ```bash
 cargo nextest run
