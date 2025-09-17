@@ -8,7 +8,7 @@ use std::{
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 use crate::{
     common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
@@ -23,7 +23,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     let contract_address = *contract.address();
 
     let event_count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: event_count.clone() });
+    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
 
     let filter = EventFilter {
         contract_address,
@@ -51,16 +51,23 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     builder.with_event_filter(filter);
     let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let scanner_handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         let mut scanner = scanner;
         let _ = scanner
             .start(BlockNumberOrTag::Number(start_block), Some(BlockNumberOrTag::Number(end_block)))
             .await;
     });
 
-    sleep(Duration::from_millis(1000)).await;
-    scanner_handle.abort();
+    let event_count = Arc::clone(&event_count);
+    let event_counting = async move {
+        while event_count.load(Ordering::SeqCst) < 4 {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
 
-    assert_eq!(event_count.load(Ordering::SeqCst), 4);
+    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 1 second");
+    };
+
     Ok(())
 }
