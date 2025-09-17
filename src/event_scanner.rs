@@ -82,7 +82,7 @@ impl EventScannerBuilder {
         self,
         ws_url: Url,
     ) -> Result<EventScanner<N>, BlockScannerError> {
-        let block_scanner = self.block_scanner.connect_ws(ws_url);
+        let block_scanner = self.block_scanner.connect_ws(ws_url).await?;
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -99,7 +99,7 @@ impl EventScannerBuilder {
         self,
         ipc_path: impl Into<String>,
     ) -> Result<EventScanner<N>, BlockScannerError> {
-        let block_scanner = self.block_scanner.connect_ipc(ipc_path.into());
+        let block_scanner = self.block_scanner.connect_ipc(ipc_path.into()).await?;
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -208,7 +208,7 @@ impl<N: Network> EventScanner<N> {
                 .from_block(from_block)
                 .to_block(to_block);
 
-            match self.block_scanner.provider().await?.get_logs(&filter).await {
+            match self.block_scanner.provider().get_logs(&filter).await {
                 Ok(logs) => {
                     if logs.is_empty() {
                         continue;
