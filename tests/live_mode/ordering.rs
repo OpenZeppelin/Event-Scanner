@@ -11,7 +11,7 @@ use tokio::time::sleep;
 
 #[tokio::test]
 async fn callback_occurs_in_order() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1.0)?;
+    let anvil = spawn_anvil(0.1)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
@@ -46,7 +46,7 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1.0)?;
+    let anvil = spawn_anvil(0.1)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider.clone()).await?;
 
