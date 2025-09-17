@@ -1,41 +1,38 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
-    block_scanner::{BlockScanner, BlockScannerBuilder, BlockScannerError, OnBlocksFunc},
+    block_scanner_new::{BlockScanner, BlockScannerError, ConnectedBlockScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
-    providers::{IpcConnect, Provider, RootProvider, WsConnect},
-    pubsub::PubSubConnect,
-    rpc::{
-        client::RpcClient,
-        types::{Filter, Log},
-    },
+    providers::Provider,
+    rpc::types::{Filter, Log},
+    transports::http::reqwest::Url,
 };
 use tokio::sync::mpsc::{self, Receiver};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
-pub struct EventScannerBuilder<N: Network> {
-    block_scanner: BlockScannerBuilder<N>,
+pub struct EventScannerBuilder {
+    block_scanner: BlockScanner,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
-impl<N: Network> Default for EventScannerBuilder<N> {
+impl Default for EventScannerBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N: Network> EventScannerBuilder<N> {
+impl EventScannerBuilder {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            block_scanner: BlockScannerBuilder::new(),
+            block_scanner: BlockScanner::new(),
             tracked_events: Vec::new(),
             callback_strategy: Self::get_default_callback_strategy(),
         }
@@ -61,21 +58,6 @@ impl<N: Network> EventScannerBuilder<N> {
         self
     }
 
-    pub fn with_start_height(&mut self, start_height: BlockNumberOrTag) -> &mut Self {
-        let _ = self.block_scanner.with_start_height(start_height);
-        self
-    }
-
-    pub fn with_end_height(&mut self, end_height: BlockNumberOrTag) -> &mut Self {
-        let _ = self.block_scanner.with_end_height(end_height);
-        self
-    }
-
-    pub fn with_on_blocks(&mut self, on_blocks: OnBlocksFunc<N>) -> &mut Self {
-        let _ = self.block_scanner.with_on_blocks(on_blocks);
-        self
-    }
-
     pub fn with_reorg_rewind_depth(&mut self, reorg_rewind_depth: u64) -> &mut Self {
         let _ = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
@@ -96,11 +78,11 @@ impl<N: Network> EventScannerBuilder<N> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws(
+    pub async fn connect_ws<N: Network>(
         self,
-        connect: WsConnect,
-    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError> {
-        let block_scanner = self.block_scanner.connect_ws(connect).await?;
+        ws_url: Url,
+    ) -> Result<EventScanner<N>, BlockScannerError> {
+        let block_scanner = self.block_scanner.connect_ws(ws_url);
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -113,48 +95,11 @@ impl<N: Network> EventScannerBuilder<N> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ipc<T>(
+    pub async fn connect_ipc<N: Network>(
         self,
-        connect: IpcConnect<T>,
-    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError>
-    where
-        IpcConnect<T>: PubSubConnect,
-    {
-        let block_scanner = self.block_scanner.connect_ipc(connect).await?;
-        Ok(EventScanner {
-            block_scanner,
-            tracked_events: self.tracked_events,
-            callback_strategy: self.callback_strategy,
-        })
-    }
-
-    /// Connects to the provider via RPC client
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_client(
-        self,
-        client: RpcClient,
-    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError> {
-        let block_scanner = self.block_scanner.connect_client(client).await?;
-        Ok(EventScanner {
-            block_scanner,
-            tracked_events: self.tracked_events,
-            callback_strategy: self.callback_strategy,
-        })
-    }
-
-    /// Connects to the provider
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_provider(
-        self,
-        provider: RootProvider<N>,
-    ) -> Result<EventScanner<RootProvider<N>, N>, BlockScannerError> {
-        let block_scanner = self.block_scanner.connect_provider(provider).await?;
+        ipc_path: impl Into<String>,
+    ) -> Result<EventScanner<N>, BlockScannerError> {
+        let block_scanner = self.block_scanner.connect_ipc(ipc_path.into());
         Ok(EventScanner {
             block_scanner,
             tracked_events: self.tracked_events,
@@ -168,19 +113,23 @@ impl<N: Network> EventScannerBuilder<N> {
     }
 }
 
-pub struct EventScanner<P: Provider<N>, N: Network> {
-    block_scanner: BlockScanner<P, N>,
+pub struct EventScanner<N: Network> {
+    block_scanner: ConnectedBlockScanner<N>,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
-impl<P: Provider<N>, N: Network> EventScanner<P, N> {
+impl<N: Network> EventScanner<N> {
     /// Starts the scanner
     ///
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
-    pub async fn start(&mut self) -> anyhow::Result<()> {
+    pub async fn start(
+        &mut self,
+        start_height: BlockNumberOrTag,
+        end_height: Option<BlockNumberOrTag>,
+    ) -> anyhow::Result<()> {
         let mut event_channels: HashMap<String, mpsc::Sender<Log>> = HashMap::new();
 
         for filter in &self.tracked_events {
@@ -206,7 +155,9 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
             event_channels.insert(event_name, sender);
         }
 
-        let mut stream = self.block_scanner.start().await.unwrap();
+        let client = self.block_scanner.run()?;
+        let mut stream = client.subscribe(start_height, end_height).await?;
+
         while let Some(range) = stream.next().await {
             match range {
                 Ok(range) => {
@@ -257,7 +208,7 @@ impl<P: Provider<N>, N: Network> EventScanner<P, N> {
                 .from_block(from_block)
                 .to_block(to_block);
 
-            match self.block_scanner.provider().get_logs(&filter).await {
+            match self.block_scanner.provider().await?.get_logs(&filter).await {
                 Ok(logs) => {
                     if logs.is_empty() {
                         continue;
