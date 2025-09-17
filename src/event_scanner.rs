@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
-    block_scanner_new::{BlockScanner, BlockScannerError, ConnectedBlockScanner},
+    block_scanner::{BlockScanner, BlockScannerError, ConnectedBlockScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };

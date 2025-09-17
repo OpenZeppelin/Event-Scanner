@@ -1,9 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use alloy::{providers::ProviderBuilder, rpc::types::Log, sol, sol_types::SolEvent};
+use alloy::{
+    eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol,
+    sol_types::SolEvent,
+};
 use alloy_node_bindings::Anvil;
 use async_trait::async_trait;
-use event_scanner::{EventCallback, EventFilter, FixedRetryConfig, ScannerBuilder};
+use event_scanner::{EventCallback, EventFilter, event_scanner::EventScannerBuilder};
 
 use tokio::time::sleep;
 use tracing::info;
@@ -64,15 +67,14 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let mut scanner = ScannerBuilder::new(anvil.ws_endpoint_url())
-        .add_event_filter(increase_filter)
-        .callback_config(FixedRetryConfig { max_attempts: 3, delay_ms: 200 })
-        .start_block(0)
-        .build()
-        .await?;
+    let mut builder = EventScannerBuilder::new();
+
+    builder.with_event_filter(increase_filter);
+
+    let mut scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     sleep(Duration::from_secs(10)).await;
-    scanner.start().await.expect("failed to start scanner");
+    scanner.start(BlockNumberOrTag::Number(0), None).await.expect("failed to start scanner");
 
     Ok(())
 }
