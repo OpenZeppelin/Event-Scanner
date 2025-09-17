@@ -721,7 +721,6 @@ impl BlockScannerClient {
     ///
     /// * `start_height` - The block number to start from.
     /// * `end_height` - The block number to end at.
-    /// * `buffer_size` - The size of the buffer.
     ///
     /// # Errors
     ///
@@ -730,10 +729,9 @@ impl BlockScannerClient {
         &self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-        buffer_size: usize,
     ) -> Result<ReceiverStream<Result<Range<BlockNumber>, BlockScannerError>>, BlockScannerError>
     {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(buffer_size);
+        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Subscribe {
@@ -822,7 +820,7 @@ mod tests {
         let expected_blocks = 10;
 
         let mut receiver =
-            sub_client.subscribe(BlockNumberOrTag::Latest, None, 10).await?.take(expected_blocks);
+            sub_client.subscribe(BlockNumberOrTag::Latest, None).await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
