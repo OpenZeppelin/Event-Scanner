@@ -20,7 +20,7 @@ use tokio::time::sleep;
 
 #[tokio::test]
 async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
@@ -57,7 +57,7 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
 
 #[tokio::test]
 async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
@@ -97,7 +97,7 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 

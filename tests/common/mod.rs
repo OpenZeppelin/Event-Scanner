@@ -31,8 +31,8 @@ sol! {
 }
 
 #[allow(clippy::missing_errors_doc)]
-pub fn spawn_anvil(block_time_secs: u64) -> anyhow::Result<AnvilInstance> {
-    Ok(Anvil::new().block_time(block_time_secs).try_spawn()?)
+pub fn spawn_anvil(block_time_secs: f64) -> anyhow::Result<AnvilInstance> {
+    Ok(Anvil::new().block_time_f64(block_time_secs).try_spawn()?)
 }
 
 #[allow(clippy::missing_errors_doc)]

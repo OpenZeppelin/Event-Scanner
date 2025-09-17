@@ -16,7 +16,7 @@ use tokio::time::sleep;
 
 #[tokio::test]
 async fn basic_single_event_scanning() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
@@ -52,7 +52,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let a = deploy_counter(provider.clone()).await?;
     let b = deploy_counter(provider.clone()).await?;
@@ -99,7 +99,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
 
 #[tokio::test]
 async fn multiple_events_same_contract() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
     let contract_address = *contract.address();
@@ -146,7 +146,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
@@ -181,7 +181,7 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 

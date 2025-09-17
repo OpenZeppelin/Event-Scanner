@@ -17,7 +17,7 @@ use crate::{
 
 #[tokio::test]
 async fn processes_events_within_specified_historical_range() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();

@@ -14,7 +14,7 @@ use crate::{
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
