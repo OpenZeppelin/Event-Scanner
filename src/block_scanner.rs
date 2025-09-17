@@ -212,25 +212,25 @@ impl BlockScanner {
     }
 
     #[must_use]
-    pub fn with_blocks_read_per_epoch(&mut self, blocks_read_per_epoch: usize) -> &mut Self {
+    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
         self.blocks_read_per_epoch = blocks_read_per_epoch;
         self
     }
 
     #[must_use]
-    pub fn with_reorg_rewind_depth(&mut self, reorg_rewind_depth: u64) -> &mut Self {
+    pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
         self.reorg_rewind_depth = reorg_rewind_depth;
         self
     }
 
     #[must_use]
-    pub fn with_retry_interval(&mut self, retry_interval: Duration) -> &mut Self {
+    pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
         self.retry_interval = retry_interval;
         self
     }
 
     #[must_use]
-    pub fn with_block_confirmations(&mut self, block_confirmations: u64) -> &mut Self {
+    pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
         self.block_confirmations = block_confirmations;
         self
     }
@@ -241,7 +241,7 @@ impl BlockScanner {
     ///
     /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(
-        &self,
+        self,
         ws_url: Url,
     ) -> TransportResult<ConnectedBlockScanner<N>> {
         let provider =
@@ -263,7 +263,7 @@ impl BlockScanner {
     ///
     /// Returns an error if the connection fails
     pub async fn connect_ipc<N: Network>(
-        &self,
+        self,
         ipc_path: String,
     ) -> TransportResult<ConnectedBlockScanner<N>> {
         let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
@@ -485,9 +485,9 @@ impl<N: Network> BlockScannerService<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64 >
-                end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > end.header().number()
             {
                 end.header().number()
             } else {

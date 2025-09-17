@@ -55,22 +55,22 @@ impl EventScannerBuilder {
     }
 
     pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
-        let _ = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
+        self.block_scanner = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
     }
 
     pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
-        let _ = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
+        self.block_scanner = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
     }
 
     pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
-        let _ = self.block_scanner.with_retry_interval(retry_interval);
+        self.block_scanner = self.block_scanner.with_retry_interval(retry_interval);
         self
     }
 
     pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
-        let _ = self.block_scanner.with_block_confirmations(block_confirmations);
+        self.block_scanner = self.block_scanner.with_block_confirmations(block_confirmations);
         self
     }
 
