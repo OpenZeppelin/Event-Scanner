@@ -4,7 +4,7 @@ use crate::{
     common,
     mock_callbacks::{BlockOrderingCallback, EventOrderingCallback},
 };
-use alloy::{network::Ethereum, providers::WsConnect, sol_types::SolEvent};
+use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
 use tokio::time::sleep;
@@ -23,9 +23,13 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filter(filter);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
     for _ in 0..5 {
         let _ = contract.increase().send().await?.get_receipt().await?;
@@ -42,12 +46,10 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
-    // Mine a block every second and batch 5 txs per block
     let anvil = spawn_anvil(1)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider.clone()).await?;
 
-    // Capture block numbers in callback order
     let blocks = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
     let callback = Arc::new(BlockOrderingCallback { blocks: blocks.clone() });
 
@@ -56,18 +58,19 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filter(filter);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
-    // 5 blocks, 5 events per block
     for _ in 0..5 {
         let _pending = contract.increase().send().await?;
-        // Wait for the next block to be mined (block_time = 1s)
         sleep(Duration::from_millis(1200)).await;
     }
 
-    // Give scanner time to drain channel
     sleep(Duration::from_millis(800)).await;
     scanner_handle.abort();
 

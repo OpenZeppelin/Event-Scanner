@@ -10,7 +10,7 @@ use crate::{
     common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
     mock_callbacks::BasicCounterCallback,
 };
-use alloy::{network::Ethereum, providers::WsConnect, sol_types::SolEvent};
+use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
 use tokio::time::sleep;
 
@@ -30,10 +30,14 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         callback,
     };
 
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filter(filter);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
     for _ in 0..5 {
         let _ = contract.increase().send().await?.get_receipt().await?;
@@ -69,15 +73,18 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         callback: b_cb,
     };
 
-    let builder = EventScannerBuilder::<Ethereum>::new()
-        .with_event_filter(a_filter)
-        .with_event_filter(b_filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filters(vec![a_filter, b_filter]);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
     for _ in 0..3 {
         let _ = a.increase().send().await?.get_receipt().await?;
     }
+
     for _ in 0..2 {
         let _ = b.increase().send().await?.get_receipt().await?;
     }
@@ -113,12 +120,14 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         callback: decrease_cb,
     };
 
-    let builder = EventScannerBuilder::<Ethereum>::new()
-        .with_event_filter(increase_filter)
-        .with_event_filter(decrease_filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filters(vec![increase_filter, decrease_filter]);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
     for i in 0..6 {
         let _ = contract.increase().send().await?.get_receipt().await?;
@@ -127,7 +136,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         }
     }
 
-    sleep(Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(1500)).await;
     scanner_handle.abort();
 
     assert_eq!(increase_count.load(Ordering::SeqCst), 6);
@@ -151,9 +160,13 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
         callback,
     };
 
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filter(filter);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
     for _ in 0..3 {
         let _ = contract.increase().send().await?.get_receipt().await?;
@@ -180,9 +193,13 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
         callback,
     };
 
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filter(filter);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
     for _ in 0..3 {
         let _ = contract.increase().send().await?.get_receipt().await?;

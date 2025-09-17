@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use alloy::{network::Ethereum, providers::WsConnect, sol_types::SolEvent};
+use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
 use tokio::time::sleep;
 
@@ -29,15 +29,19 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         callback,
     };
 
-    let builder = EventScannerBuilder::<Ethereum>::new().with_event_filter(filter);
-    let mut scanner = builder.connect_ws(WsConnect::new(anvil.ws_endpoint_url())).await?;
-    let scanner_handle = tokio::spawn(async move { scanner.start().await });
+    let mut builder = EventScannerBuilder::new();
+    builder.with_event_filter(filter);
+    let scanner = builder.connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let scanner_handle = tokio::spawn(async move {
+        let mut scanner = scanner;
+        scanner.start(BlockNumberOrTag::Latest, None).await
+    });
 
     for _ in 0..100 {
         let _ = contract.increase().send().await?.get_receipt().await?;
     }
 
-    sleep(Duration::from_millis(800)).await;
+    sleep(Duration::from_millis(1000)).await;
     scanner_handle.abort();
 
     assert_eq!(count.load(Ordering::SeqCst), 100);
