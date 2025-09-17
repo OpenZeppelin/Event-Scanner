@@ -26,7 +26,8 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
     let contract_address = *contract.address();
 
     let processed = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(SlowProcessorCallback { delay_ms: 100, processed: processed.clone() });
+    let callback =
+        Arc::new(SlowProcessorCallback { delay_ms: 100, processed: Arc::clone(&processed) });
 
     let filter = EventFilter {
         contract_address,
@@ -101,7 +102,7 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
     let contract = deploy_counter(provider).await?;
 
     let attempts = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(AlwaysFailingCallback { attempts: attempts.clone() });
+    let callback = Arc::new(AlwaysFailingCallback { attempts: Arc::clone(&attempts) });
 
     let filter = EventFilter {
         contract_address: *contract.address(),

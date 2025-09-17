@@ -16,7 +16,7 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
     let contract = deploy_counter(provider).await?;
 
     let counts = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
-    let callback = Arc::new(EventOrderingCallback { counts: counts.clone() });
+    let callback = Arc::new(EventOrderingCallback { counts: Arc::clone(&counts) });
 
     let filter = EventFilter {
         contract_address: *contract.address(),
@@ -50,7 +50,7 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
 
     let blocks = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
-    let callback = Arc::new(BlockOrderingCallback { blocks: blocks.clone() });
+    let callback = Arc::new(BlockOrderingCallback { blocks: Arc::clone(&blocks) });
 
     let filter = EventFilter {
         contract_address: *contract.address(),
