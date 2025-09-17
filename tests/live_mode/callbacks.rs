@@ -66,7 +66,7 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
     let callback = Arc::new(FlakyCallback {
         attempts: attempts.clone(),
         successes: successes.clone(),
-        fail_times: 2,
+        max_ fail_times: 2,
     });
 
     let filter = EventFilter {
