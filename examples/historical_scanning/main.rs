@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use alloy::{providers::ProviderBuilder, rpc::types::Log, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 use async_trait::async_trait;
-use event_scanner::{CallbackConfig, EventCallback, EventFilter, ScannerBuilder};
+use event_scanner::{EventCallback, EventFilter, FixedRetryConfig, ScannerBuilder};
 
 use tokio::time::sleep;
 use tracing::info;
@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut scanner = ScannerBuilder::new(anvil.ws_endpoint_url())
         .add_event_filter(increase_filter)
-        .callback_config(CallbackConfig { max_attempts: 3, delay_ms: 200 })
+        .callback_config(FixedRetryConfig { max_attempts: 3, delay_ms: 200 })
         .start_block(0)
         .build()
         .await?;
