@@ -39,18 +39,18 @@ impl EventCallback for SlowProcessorCallback {
     }
 }
 
-/// A callback that fails `max_ fail_times` attempts before succeeding once.
+/// A callback that fails `max_fail_times` attempts before succeeding once.
 pub struct FlakyCallback {
     pub attempts: Arc<AtomicUsize>,
     pub successes: Arc<AtomicUsize>,
-    pub max_ fail_times: usize,
+    pub max_fail_times: usize,
 }
 
 #[async_trait]
 impl EventCallback for FlakyCallback {
     async fn on_event(&self, _log: &Log) -> anyhow::Result<()> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
-        if attempt <= self.max_ fail_times {
+        if attempt <= self.max_fail_times {
             anyhow::bail!("intentional failure on attempt {attempt}");
         }
         self.successes.fetch_add(1, Ordering::SeqCst);
