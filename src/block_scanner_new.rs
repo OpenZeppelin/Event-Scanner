@@ -106,7 +106,7 @@ const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 // const STATE_SYNC_MAX_RETRIES: u64 = 12;
 
 #[derive(Error, Debug)]
-pub enum SubscriptionError {
+pub enum BlockScannerError {
     #[error("HTTP request failed: {0}")]
     HttpError(#[from] reqwest::Error),
 
@@ -140,19 +140,19 @@ pub enum SubscriptionError {
 #[derive(Debug)]
 pub enum Command {
     Subscribe {
-        sender: mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>,
+        sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-        response: oneshot::Sender<Result<(), SubscriptionError>>,
+        response: oneshot::Sender<Result<(), BlockScannerError>>,
     },
     Unsubscribe {
-        response: oneshot::Sender<Result<(), SubscriptionError>>,
+        response: oneshot::Sender<Result<(), BlockScannerError>>,
     },
     GetStatus {
         response: oneshot::Sender<ServiceStatus>,
     },
     Shutdown {
-        response: oneshot::Sender<Result<(), SubscriptionError>>,
+        response: oneshot::Sender<Result<(), BlockScannerError>>,
     },
 }
 
@@ -333,7 +333,7 @@ impl<N: Network> ConnectedBlockScanner<N> {
 
 struct BlockScannerService<N: Network> {
     config: Config<N>,
-    subscriber: Option<mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>>,
+    subscriber: Option<mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>>,
     current: Option<BlockHashAndNumber>,
     websocket_connected: bool,
     processed_count: u64,
@@ -382,7 +382,7 @@ impl<N: Network> BlockScannerService<N> {
         info!("Subscription service stopped");
     }
 
-    async fn handle_command(&mut self, command: Command) -> Result<(), SubscriptionError> {
+    async fn handle_command(&mut self, command: Command) -> Result<(), BlockScannerError> {
         match command {
             Command::Subscribe { sender, start_height, end_height, response } => {
                 let result = self.handle_subscribe(sender, start_height, end_height).await;
@@ -407,12 +407,12 @@ impl<N: Network> BlockScannerService<N> {
 
     async fn handle_subscribe(
         &mut self,
-        sender: mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>,
+        sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), SubscriptionError> {
+    ) -> Result<(), BlockScannerError> {
         if self.subscriber.is_some() {
-            return Err(SubscriptionError::MultipleSubscribers);
+            return Err(BlockScannerError::MultipleSubscribers);
         }
 
         // TODO: update local state relate to reorg and validate data
@@ -429,7 +429,7 @@ impl<N: Network> BlockScannerService<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), SubscriptionError> {
+    ) -> Result<(), BlockScannerError> {
         // Step 1: Establish WebSocket connection
         let (buffer_tx, buffer_rx) = mpsc::channel(MAX_BUFFERED_MESSAGES);
 
@@ -472,7 +472,7 @@ impl<N: Network> BlockScannerService<N> {
         if let Err(e) = self.sync_historical_data(&provider, start_block, sync_end_block).await {
             warn!("aborting ws_task");
             ws_task.abort();
-            return Err(SubscriptionError::HistoricalSyncError(e.to_string()));
+            return Err(BlockScannerError::HistoricalSyncError(e.to_string()));
         }
 
         // Step 3: Process buffered WebSocket messages
@@ -480,7 +480,7 @@ impl<N: Network> BlockScannerService<N> {
         tokio::spawn(async move {
             if end_height.is_none() {
                 Self::process_buffered_messages(buffer_rx, sender, cutoff).await;
-            } else if sender.send(Err(SubscriptionError::Eof)).await.is_err() {
+            } else if sender.send(Err(BlockScannerError::Eof)).await.is_err() {
                 warn!("Subscriber channel closed, cleaning up");
             }
         });
@@ -499,7 +499,7 @@ impl<N: Network> BlockScannerService<N> {
         provider: &P,
         start: N::BlockResponse,
         end: N::BlockResponse,
-    ) -> Result<(), SubscriptionError> {
+    ) -> Result<(), BlockScannerError> {
         let mut batch_count = 0;
 
         self.current = Some(BlockHashAndNumber::from_header::<N>(start.header()));
@@ -507,9 +507,9 @@ impl<N: Network> BlockScannerService<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged(provider).await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64 >
-                end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > end.header().number()
             {
                 end.header().number()
             } else {
@@ -538,7 +538,7 @@ impl<N: Network> BlockScannerService<N> {
     async fn ensure_current_not_reorged<P: Provider<N>>(
         &mut self,
         provider: &P,
-    ) -> Result<(), SubscriptionError> {
+    ) -> Result<(), BlockScannerError> {
         let current_block = provider.get_block_by_hash(self.current.as_ref().unwrap().hash).await?;
         if current_block.is_some() {
             return Ok(());
@@ -550,7 +550,7 @@ impl<N: Network> BlockScannerService<N> {
     async fn rewind_on_reorg_detected<P: Provider<N>>(
         &mut self,
         provider: P,
-    ) -> Result<(), SubscriptionError> {
+    ) -> Result<(), BlockScannerError> {
         let mut new_current_height =
             if self.current.as_ref().unwrap().number <= self.config.reorg_rewind_depth {
                 0
@@ -599,7 +599,7 @@ impl<N: Network> BlockScannerService<N> {
             Ok(mut ws_stream) => {
                 info!("WebSocket connected for buffering");
 
-                // TODO: if latest != ws_stream.next(), then return latest.number and empty the ws_stream backlog 
+                // TODO: if latest != ws_stream.next(), then return latest.number and empty the ws_stream backlog
                 while let Ok(header_resp) = ws_stream.recv().await {
                     info!("Received block header: {}", header_resp.number());
                     // TODO: handle reorgs
@@ -627,7 +627,7 @@ impl<N: Network> BlockScannerService<N> {
 
     async fn process_buffered_messages(
         mut buffer_rx: mpsc::Receiver<Range<BlockNumber>>,
-        sender: mpsc::Sender<Result<Range<BlockNumber>, SubscriptionError>>,
+        sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
         cutoff: BlockNumber,
     ) {
         let mut processed = 0;
@@ -662,16 +662,16 @@ impl<N: Network> BlockScannerService<N> {
 
     async fn connect_websocket(
         provider: &impl Provider<N>,
-    ) -> Result<Subscription<N::HeaderResponse>, SubscriptionError> {
+    ) -> Result<Subscription<N::HeaderResponse>, BlockScannerError> {
         let ws_stream = provider
             .subscribe_blocks()
             .await
-            .map_err(|_| SubscriptionError::WebSocketConnectionFailed(1))?;
+            .map_err(|_| BlockScannerError::WebSocketConnectionFailed(1))?;
 
         Ok(ws_stream)
     }
 
-    async fn send_to_subscriber(&mut self, result: Result<Range<BlockNumber>, SubscriptionError>) {
+    async fn send_to_subscriber(&mut self, result: Result<Range<BlockNumber>, BlockScannerError>) {
         if let Some(ref sender) = self.subscriber {
             if sender.send(result).await.is_err() {
                 self.subscriber = None;
@@ -731,7 +731,7 @@ impl BlockScannerClient {
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
         buffer_size: usize,
-    ) -> Result<ReceiverStream<Result<Range<BlockNumber>, SubscriptionError>>, SubscriptionError>
+    ) -> Result<ReceiverStream<Result<Range<BlockNumber>, BlockScannerError>>, BlockScannerError>
     {
         let (blocks_sender, blocks_receiver) = mpsc::channel(buffer_size);
         let (response_tx, response_rx) = oneshot::channel();
@@ -743,9 +743,9 @@ impl BlockScannerClient {
             response: response_tx,
         };
 
-        self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| BlockScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)??;
+        response_rx.await.map_err(|_| BlockScannerError::ServiceShutdown)??;
 
         let stream = ReceiverStream::new(blocks_receiver);
 
@@ -757,14 +757,14 @@ impl BlockScannerClient {
     /// # Errors
     ///
     /// * `SubscriptionError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn unsubscribe(&self) -> Result<(), SubscriptionError> {
+    pub async fn unsubscribe(&self) -> Result<(), BlockScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Unsubscribe { response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| BlockScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)?
+        response_rx.await.map_err(|_| BlockScannerError::ServiceShutdown)?
     }
 
     /// Returns the current status of the subscription service.
@@ -772,14 +772,14 @@ impl BlockScannerClient {
     /// # Errors
     ///
     /// * `SubscriptionError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn get_status(&self) -> Result<ServiceStatus, SubscriptionError> {
+    pub async fn get_status(&self) -> Result<ServiceStatus, BlockScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::GetStatus { response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| BlockScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)
+        response_rx.await.map_err(|_| BlockScannerError::ServiceShutdown)
     }
 
     /// Shuts down the subscription service and unsubscribes the current subscriber.
@@ -787,14 +787,14 @@ impl BlockScannerClient {
     /// # Errors
     ///
     /// * `SubscriptionError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn shutdown(&self) -> Result<(), SubscriptionError> {
+    pub async fn shutdown(&self) -> Result<(), BlockScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Shutdown { response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| SubscriptionError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| BlockScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| SubscriptionError::ServiceShutdown)?
+        response_rx.await.map_err(|_| BlockScannerError::ServiceShutdown)?
     }
 }
 
