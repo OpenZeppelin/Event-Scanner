@@ -2,12 +2,12 @@
 //!
 //! ```rust,no_run
 //! use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::BlockNumber};
-//! use event_scanner::block_scanner_new::BlockScannerError;
+//! use event_scanner::block_scanner::BlockScannerError;
 //! use std::ops::Range;
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
 //! use alloy::transports::http::reqwest::Url;
-//! use event_scanner::block_scanner_new::{BlockScanner, BlockScannerClient};
+//! use event_scanner::block_scanner::{BlockScanner, BlockScannerClient};
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
 //!
