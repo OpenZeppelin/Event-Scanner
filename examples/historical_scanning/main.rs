@@ -6,7 +6,7 @@ use alloy::{
 };
 use alloy_node_bindings::Anvil;
 use async_trait::async_trait;
-use event_scanner::{EventCallback, EventFilter, event_scanner::EventScannerBuilder};
+use event_scanner::{EventCallback, EventFilter, event_scanner::EventScanner};
 
 use tokio::time::sleep;
 use tracing::info;
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(increase_filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;

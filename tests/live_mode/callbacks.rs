@@ -14,7 +14,7 @@ use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{
     CallbackStrategy, EventFilter,
     callback_strategy::{FixedRetryConfig, FixedRetryStrategy},
-    event_scanner::EventScannerBuilder,
+    event_scanner::EventScanner,
 };
 use tokio::time::{sleep, timeout};
 
@@ -34,7 +34,7 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -85,7 +85,7 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
 
     let strategy: Arc<dyn CallbackStrategy> = Arc::new(FixedRetryStrategy::new(cfg));
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .with_callback_strategy(strategy)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
@@ -135,7 +135,7 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
 
     let strategy: Arc<dyn CallbackStrategy> = Arc::new(FixedRetryStrategy::new(cfg));
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .with_callback_strategy(strategy)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())

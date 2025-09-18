@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
+use event_scanner::{event_scanner::EventScanner, types::EventFilter};
 use tokio::time::{sleep, timeout};
 
 use crate::{
@@ -29,7 +29,7 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;

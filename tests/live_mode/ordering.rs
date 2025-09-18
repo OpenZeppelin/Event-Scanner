@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
+use event_scanner::{event_scanner::EventScanner, types::EventFilter};
 use tokio::time::{sleep, timeout};
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -68,7 +68,7 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;

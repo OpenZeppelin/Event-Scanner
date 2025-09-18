@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
+use event_scanner::{event_scanner::EventScanner, types::EventFilter};
 use tokio::time::{sleep, timeout};
 
 use crate::{
@@ -42,7 +42,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         end_block = receipt.block_number.expect("receipt should contain block number");
     }
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;

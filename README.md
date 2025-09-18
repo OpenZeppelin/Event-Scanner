@@ -40,7 +40,7 @@ Event Scanner is a Rust library for monitoring EVM-based smart contract events. 
 
 The library exposes two primary layers:
 
-- `EventScannerBuilder` / `EventScanner` – the main module the application will interact with. 
+- `EventScanner` / `EventScanner` – the main module the application will interact with. 
 - `BlockRangeScanner` – lower-level component that streams block ranges, handles reorg, batching, and provider subscriptions.
 
 Callbacks implement the `EventCallback` trait. They are executed through a `CallbackStrategy` that performs retries when necessary before reporting failures.
@@ -61,7 +61,7 @@ Create a callback implementing `EventCallback` and register it with the builder:
 use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, rpc::types::Log, sol_types::SolEvent};
 use async_trait::async_trait;
-use event_scanner::{event_scanner::EventScannerBuilder, EventCallback, EventFilter};
+use event_scanner::{event_scanner::EventScanner, EventCallback, EventFilter};
 
 struct CounterCallback { processed: Arc<AtomicUsize> }
 
@@ -80,7 +80,7 @@ async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: al
         callback: Arc::new(CounterCallback { processed: Arc::new(AtomicUsize::new(0)) }),
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(ws_url)
         .await?;
@@ -96,7 +96,7 @@ async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: al
 
 ### Building a Scanner
 
-`EventScannerBuilder` supports:
+`EventScanner` supports:
 
 - `with_event_filter(s)` – attach [filters](#defining-event-filters).
 - `with_callback_strategy(strategy)` – override retry behaviour (`StateSyncAwareStrategy` by default).

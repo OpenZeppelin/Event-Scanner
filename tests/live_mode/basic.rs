@@ -11,7 +11,7 @@ use crate::{
     mock_callbacks::BasicCounterCallback,
 };
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
+use event_scanner::{event_scanner::EventScanner, types::EventFilter};
 use tokio::time::{sleep, timeout};
 
 #[tokio::test]
@@ -30,7 +30,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -80,7 +80,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         callback: b_cb,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filters(vec![a_filter, b_filter])
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -139,7 +139,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         callback: decrease_cb,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filters(vec![increase_filter, decrease_filter])
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -190,7 +190,7 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -229,7 +229,7 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;

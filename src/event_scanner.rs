@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::{
     block_range_scanner::{BlockRangeScanner, BlockScannerError, ConnectedBlockScanner},
@@ -8,28 +8,47 @@ use crate::{
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
-    primitives::Address,
+    primitives::{Address, BlockNumber},
     providers::Provider,
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::{
+    mpsc::{self, Receiver},
+    oneshot,
+};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
-pub struct EventScannerBuilder {
+#[derive(Debug)]
+pub enum Command {
+    Subscribe {
+        sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
+        start_height: BlockNumberOrTag,
+        end_height: Option<BlockNumberOrTag>,
+        response: oneshot::Sender<Result<(), BlockScannerError>>,
+    },
+    Unsubscribe {
+        response: oneshot::Sender<Result<(), BlockScannerError>>,
+    },
+    Shutdown {
+        response: oneshot::Sender<Result<(), BlockScannerError>>,
+    },
+}
+
+pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
-impl Default for EventScannerBuilder {
+impl Default for EventScanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl EventScannerBuilder {
+impl EventScanner {
     #[must_use]
     /// Creates a new builder with default block scanner and callback strategy.
     pub fn new() -> Self {
@@ -100,9 +119,9 @@ impl EventScannerBuilder {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> Result<EventScanner<N>, BlockScannerError> {
+    ) -> Result<ConnectedEventScanner<N>, BlockScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
-        Ok(EventScanner {
+        Ok(ConnectedEventScanner {
             block_range_scanner,
             tracked_events: self.tracked_events,
             callback_strategy: self.callback_strategy,
@@ -117,9 +136,9 @@ impl EventScannerBuilder {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<EventScanner<N>, BlockScannerError> {
+    ) -> Result<ConnectedEventScanner<N>, BlockScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
-        Ok(EventScanner {
+        Ok(ConnectedEventScanner {
             block_range_scanner,
             tracked_events: self.tracked_events,
             callback_strategy: self.callback_strategy,
@@ -133,7 +152,7 @@ impl EventScannerBuilder {
     }
 }
 
-pub struct EventScanner<N: Network> {
+pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockScanner<N>,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
@@ -145,7 +164,7 @@ struct EventIdentifier {
     event: String,
 }
 
-impl<N: Network> EventScanner<N> {
+impl<N: Network> ConnectedEventScanner<N> {
     /// Starts the scanner
     ///
     /// # Errors
