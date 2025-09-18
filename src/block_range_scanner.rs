@@ -769,9 +769,10 @@ impl BlockScannerClient {
 mod tests {
     use alloy::eips::BlockNumberOrTag;
     use alloy::network::Ethereum;
+    use alloy::primitives::keccak256;
     use alloy::providers::ext::AnvilApi;
-    use alloy::rpc::types::anvil::ReorgOptions;
     use alloy::rpc::client::RpcClient;
+    use alloy::rpc::types::anvil::ReorgOptions;
     use alloy::transports::mock::Asserter;
     use alloy_node_bindings::Anvil;
     use tokio::sync::mpsc;
@@ -790,6 +791,120 @@ mod tests {
 
     fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
         RootProvider::new(RpcClient::mocked(asserter))
+    }
+
+    #[test]
+    fn block_range_scanner_defaults_match_constants() {
+        let scanner = BlockRangeScanner::new();
+
+        assert_eq!(scanner.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        assert_eq!(scanner.reorg_rewind_depth, DEFAULT_REORG_REWIND_DEPTH);
+        assert_eq!(scanner.retry_interval, DEFAULT_RETRY_INTERVAL);
+        assert_eq!(scanner.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn builder_methods_update_configuration() {
+        let blocks_read_per_epoch = 42;
+        let reorg_rewind_depth = 12;
+        let retry_interval = Duration::from_secs(33);
+        let block_confirmations = 7;
+
+        let scanner = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(blocks_read_per_epoch)
+            .with_reorg_rewind_depth(reorg_rewind_depth)
+            .with_retry_interval(retry_interval)
+            .with_block_confirmations(block_confirmations);
+
+        assert_eq!(scanner.blocks_read_per_epoch, blocks_read_per_epoch);
+        assert_eq!(scanner.reorg_rewind_depth, reorg_rewind_depth);
+        assert_eq!(scanner.retry_interval, retry_interval);
+        assert_eq!(scanner.block_confirmations, block_confirmations);
+    }
+
+    #[test]
+    fn service_status_reflects_internal_state() {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+
+        let processed_count = 7;
+        let error_count = 2;
+        service.processed_count = processed_count;
+        service.error_count = error_count;
+        let hash = keccak256(b"random");
+        let block_number = 99;
+        service.current = Some(BlockHashAndNumber { hash, number: block_number });
+        service.websocket_connected = true;
+        service.subscriber = Some(mpsc::channel(1).0);
+
+        let status = service.get_status();
+
+        assert!(status.is_subscribed);
+        assert!(status.websocket_connected);
+        assert_eq!(status.processed_count, processed_count);
+        assert_eq!(status.error_count, error_count);
+        let last = status.last_synced_block.expect("last synced block is set");
+        assert_eq!(last.number, block_number);
+        assert_eq!(last.hash, hash);
+    }
+
+    #[tokio::test]
+    async fn send_to_subscriber_increments_processed_count() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+
+        let (tx, mut rx) = mpsc::channel(1);
+        service.subscriber = Some(tx);
+
+        let expected_range = 10..12;
+        service.send_to_subscriber(Ok(expected_range.clone())).await;
+
+        assert_eq!(service.processed_count, 1);
+        assert!(service.subscriber.is_some());
+
+        let received = rx.recv().await.expect("range received")?;
+        assert_eq!(received, expected_range);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_to_subscriber_removes_closed_channel() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+
+        let (tx, rx) = mpsc::channel(1);
+        service.websocket_connected = true;
+        service.subscriber = Some(tx);
+        // channel is closed
+        drop(rx);
+
+        service.send_to_subscriber(Ok(15..16)).await;
+
+        assert!(service.subscriber.is_none());
+        assert!(!service.websocket_connected);
+        assert_eq!(service.processed_count, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn handle_unsubscribe_clears_subscriber() {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+
+        let (tx, _rx) = mpsc::channel(1);
+        service.websocket_connected = true;
+        service.subscriber = Some(tx);
+
+        service.handle_unsubscribe();
+
+        assert!(service.subscriber.is_none());
+        assert!(!service.websocket_connected);
     }
 
     #[tokio::test]
@@ -835,9 +950,10 @@ mod tests {
 
     #[tokio::test]
     async fn rewinds_on_detected_reorg() -> anyhow::Result<()> {
-        let anvil = Anvil::new().block_time_f64(0.1).try_spawn()?;
+        let anvil = Anvil::new().try_spawn()?;
         let provider: RootProvider<Ethereum> =
             RootProvider::connect(anvil.endpoint().as_str()).await?;
+        provider.anvil_set_auto_mine(false).await?;
 
         let mut config = test_config();
         config.reorg_rewind_depth = 3;
@@ -849,13 +965,14 @@ mod tests {
 
         let (mut service, _cmd) = BlockScannerService::new(config.clone(), provider.clone());
 
-        let tracked_block = provider
+        let tracked_current_block = provider
             .get_block_by_number(BlockNumberOrTag::Number(head_before))
             .await?
             .expect("tracked block exists");
-        let tracked_hash = tracked_block.header().hash();
+        let tracked_current_hash = tracked_current_block.header().hash();
 
-        service.current = Some(BlockHashAndNumber::from_header::<Ethereum>(tracked_block.header()));
+        service.current =
+            Some(BlockHashAndNumber::from_header::<Ethereum>(tracked_current_block.header()));
 
         let reorg_depth = 4;
         provider
@@ -863,13 +980,16 @@ mod tests {
             .await?;
         provider.anvil_mine(Some(reorg_depth), None).await?;
 
-        assert!(provider.get_block_by_hash(tracked_hash).await?.is_none());
+        let block_hash =
+            provider.get_block_by_number(head_before.into()).await?.unwrap().header().hash();
+
+        assert!(provider.get_block_by_hash(tracked_current_hash).await?.is_none());
 
         service.ensure_current_not_reorged().await?;
 
         let current = service.current.expect("current should be set after rewind");
         assert_eq!(current.number, head_before - config.reorg_rewind_depth);
-        assert_ne!(current.hash, tracked_hash);
+        assert_ne!(current.hash, tracked_current_hash);
 
         Ok(())
     }
