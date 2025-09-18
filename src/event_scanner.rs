@@ -31,6 +31,7 @@ impl Default for EventScannerBuilder {
 
 impl EventScannerBuilder {
     #[must_use]
+    /// Creates a new builder with default block scanner and callback strategy.
     pub fn new() -> Self {
         Self {
             block_scanner: BlockScanner::new(),
@@ -39,42 +40,49 @@ impl EventScannerBuilder {
         }
     }
 
+    /// Registers a single event filter for scanning.
     #[must_use]
     pub fn with_event_filter(mut self, filter: EventFilter) -> Self {
         self.tracked_events.push(filter);
         self
     }
 
+    /// Registers a collection of event filters for scanning.
     #[must_use]
     pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
         self.tracked_events.extend(filters);
         self
     }
 
+    /// Overrides the callback execution strategy used by the scanner.
     #[must_use]
     pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
         self.callback_strategy = strategy;
         self
     }
 
+    /// Configures how many blocks are read per epoch during a historical sync.
     #[must_use]
     pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
         self.block_scanner = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
     }
 
+    /// Sets the depth to rewind when a reorg is detected.
     #[must_use]
     pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
         self.block_scanner = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
     }
 
+    /// Adjusts the retry interval when reconnecting to the provider.
     #[must_use]
     pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
         self.block_scanner = self.block_scanner.with_retry_interval(retry_interval);
         self
     }
 
+    /// Configures how many confirmations are required before processing a block (used for reorgs).
     #[must_use]
     pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
         self.block_scanner = self.block_scanner.with_block_confirmations(block_confirmations);
@@ -115,6 +123,7 @@ impl EventScannerBuilder {
         })
     }
 
+    /// Builds the default callback strategy used when none is provided.
     fn get_default_callback_strategy() -> Arc<dyn CallbackStrategy> {
         let state_sync_aware_strategy = StateSyncAwareStrategy::new();
         Arc::new(state_sync_aware_strategy)
@@ -191,6 +200,7 @@ impl<N: Network> EventScanner<N> {
         Ok(())
     }
 
+    /// Spawns background tasks that drive callback execution for an event type.
     fn spawn_event_callback_task_executors(
         mut receiver: Receiver<Log>,
         callback: Arc<dyn crate::callback::EventCallback + Send + Sync>,
@@ -211,6 +221,7 @@ impl<N: Network> EventScanner<N> {
         });
     }
 
+    /// Fetches logs for the supplied block range and forwards them to the callback channels.
     async fn process_block_range(
         &self,
         from_block: u64,
