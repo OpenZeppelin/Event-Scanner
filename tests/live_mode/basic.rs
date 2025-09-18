@@ -12,7 +12,7 @@ use crate::{
 };
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 #[tokio::test]
 async fn basic_single_event_scanning() -> anyhow::Result<()> {
@@ -35,17 +35,24 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    for _ in 0..5 {
+    let expected_event_count = 5;
+
+    for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
     }
 
-    sleep(Duration::from_millis(200)).await;
-    scanner_handle.abort();
+    let event_counting = async move {
+        while event_count.load(Ordering::SeqCst) < expected_event_count {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
 
-    assert_eq!(event_count.load(Ordering::SeqCst), 5);
+    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 1 second");
+    };
+
     Ok(())
 }
 
@@ -76,22 +83,32 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         .with_event_filters(vec![a_filter, b_filter])
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    for _ in 0..3 {
-        let _ = a.increase().send().await?.get_receipt().await?;
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    let expected_a_events = 3;
+    let expected_b_events = 2;
+
+    for _ in 0..expected_a_events {
+        a.increase().send().await?.watch().await?;
     }
 
-    for _ in 0..2 {
-        let _ = b.increase().send().await?.get_receipt().await?;
+    for _ in 0..expected_b_events {
+        b.increase().send().await?.watch().await?;
     }
 
-    sleep(Duration::from_millis(300)).await;
-    scanner_handle.abort();
+    let event_counting = async move {
+        while a_count.load(Ordering::SeqCst) < expected_a_events ||
+            b_count.load(Ordering::SeqCst) < expected_b_events
+        {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
 
-    assert_eq!(a_count.load(Ordering::SeqCst), 3);
-    assert_eq!(b_count.load(Ordering::SeqCst), 2);
+    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 1 second");
+    };
+
     Ok(())
 }
 
@@ -123,21 +140,30 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    for i in 0..6 {
+    let expected_incr_events = 6;
+    let expected_decr_events = 2;
+
+    for _ in 0..expected_incr_events {
         contract.increase().send().await?.watch().await?;
-        if i >= 4 {
-            let _ = contract.decrease().send().await?.get_receipt().await?;
-        }
     }
 
-    sleep(Duration::from_millis(1500)).await;
-    scanner_handle.abort();
+    contract.decrease().send().await?.watch().await?;
+    contract.decrease().send().await?.watch().await?;
 
-    assert_eq!(increase_count.load(Ordering::SeqCst), 6);
-    assert_eq!(decrease_count.load(Ordering::SeqCst), 2);
+    let event_counting = async move {
+        while increase_count.load(Ordering::SeqCst) < expected_incr_events ||
+            decrease_count.load(Ordering::SeqCst) < expected_decr_events
+        {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
+
+    if timeout(Duration::from_secs(2), event_counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 2 seconds");
+    };
+
     Ok(())
 }
 
@@ -147,8 +173,8 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&count) });
+    let event_count = Arc::new(AtomicUsize::new(0));
+    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
 
     // Subscribe to CountDecreased but only emit CountIncreased
     let filter = EventFilter {
@@ -161,17 +187,23 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     for _ in 0..3 {
         contract.increase().send().await?.watch().await?;
     }
 
-    sleep(Duration::from_millis(300)).await;
-    scanner_handle.abort();
+    let event_counting = async move {
+        while event_count.load(Ordering::SeqCst) == 0 {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
 
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    if timeout(Duration::from_secs(1), event_counting).await.is_ok() {
+        anyhow::bail!("scanner should have ignored all of the emitted events");
+    };
+
     Ok(())
 }
 
@@ -181,8 +213,8 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&count) });
+    let event_count = Arc::new(AtomicUsize::new(0));
+    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
     let filter = EventFilter {
         contract_address: *contract.address(),
         event: "invalid-sig".to_string(),
@@ -193,16 +225,22 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     for _ in 0..3 {
         contract.increase().send().await?.watch().await?;
     }
 
-    sleep(Duration::from_millis(300)).await;
-    scanner_handle.abort();
+    let event_counting = async move {
+        while event_count.load(Ordering::SeqCst) == 0 {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
 
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    if timeout(Duration::from_secs(1), event_counting).await.is_ok() {
+        anyhow::bail!("scanner should have ignored all of the emitted events");
+    };
+
     Ok(())
 }

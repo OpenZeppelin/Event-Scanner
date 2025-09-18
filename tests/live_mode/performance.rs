@@ -35,14 +35,14 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         .await?;
     tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    let expected_number_of_events = 100;
+    let expected_event_count = 100;
 
-    for _ in 0..expected_number_of_events {
+    for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
     }
 
     let counting = async move {
-        while count.load(Ordering::SeqCst) < expected_number_of_events {
+        while count.load(Ordering::SeqCst) < expected_event_count {
             sleep(Duration::from_millis(100)).await;
         }
     };

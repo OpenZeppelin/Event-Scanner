@@ -16,7 +16,7 @@ use event_scanner::{
     callback_strategy::{FixedRetryConfig, FixedRetryStrategy},
     event_scanner::EventScannerBuilder,
 };
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 #[tokio::test]
 async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> {
@@ -39,19 +39,25 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    for _ in 0..3 {
+    let expected_event_count = 3;
+
+    for _ in 0..expected_event_count {
+        // emits faster than processing to simulate backlog
         contract.increase().send().await?.watch().await?;
-        // emit faster than processing to simulate backlog
-        sleep(Duration::from_millis(50)).await;
     }
 
-    sleep(Duration::from_millis(200)).await;
-    scanner_handle.abort();
+    let event_counting = async move {
+        while processed.load(Ordering::SeqCst) < expected_event_count {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
 
-    assert_eq!(processed.load(Ordering::SeqCst), 3);
+    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 1 second");
+    };
+
     Ok(())
 }
 
@@ -83,15 +89,21 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
         .with_callback_strategy(strategy)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     contract.increase().send().await?.watch().await?;
-    sleep(Duration::from_millis(300)).await;
-    scanner_handle.abort();
 
-    assert_eq!(attempts.load(Ordering::SeqCst), 3);
-    assert_eq!(successes.load(Ordering::SeqCst), 1);
+    let attempt_counting = async move {
+        while attempts.load(Ordering::SeqCst) < 3 || successes.load(Ordering::SeqCst) < 1 {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
+
+    if timeout(Duration::from_secs(1), attempt_counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 1 second");
+    };
+
     Ok(())
 }
 
@@ -118,13 +130,20 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
         .with_callback_strategy(strategy)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let scanner_handle =
-        tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
     contract.increase().send().await?.watch().await?;
-    sleep(Duration::from_millis(200)).await;
-    scanner_handle.abort();
 
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    let attempt_counting = async move {
+        while attempts.load(Ordering::SeqCst) < 2 {
+            sleep(Duration::from_millis(100)).await;
+        }
+    };
+
+    if timeout(Duration::from_secs(1), attempt_counting).await.is_err() {
+        anyhow::bail!("scanner did not finish within 1 second");
+    };
+
     Ok(())
 }

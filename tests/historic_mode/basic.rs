@@ -53,12 +53,11 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         .await?;
 
     tokio::spawn(async move {
-        let _ = scanner
+        scanner
             .start(BlockNumberOrTag::Number(start_block), Some(BlockNumberOrTag::Number(end_block)))
-            .await;
+            .await
     });
 
-    let event_count = Arc::clone(&event_count);
     let event_counting = async move {
         while event_count.load(Ordering::SeqCst) < 4 {
             sleep(Duration::from_millis(100)).await;
