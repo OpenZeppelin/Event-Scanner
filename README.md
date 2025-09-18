@@ -53,7 +53,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = { path = "../event-scanner" }
+event-scanner = "0.1.0-alpha.1"
 ```
 Create a callback implementing `EventCallback` and register it with the builder:
 
