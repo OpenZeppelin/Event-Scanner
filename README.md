@@ -4,6 +4,8 @@
 >
 > This project is under active development and likely contains bugs. APIs and behaviour may change without notice. Use at your own risk.
 
+## About
+
 Event Scanner is a Rust library for monitoring EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters and callback implementations; the scanner takes care of subscribing to historical ranges, bridging into live mode, and delivering events with retry-aware execution strategies.
 
 ---
