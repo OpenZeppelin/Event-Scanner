@@ -1,7 +1,4 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::Arc;
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
@@ -9,7 +6,7 @@ use tokio::time::{Duration, sleep, timeout};
 
 use crate::{
     common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
-    mock_callbacks::BasicCounterCallback,
+    mock_callbacks::EventOrderingCallback,
 };
 
 #[tokio::test]
@@ -30,8 +27,8 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
+    let event_new_counts = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
+    let callback = Arc::new(EventOrderingCallback { counts: Arc::clone(&event_new_counts) });
 
     let filter = EventFilter {
         contract_address,
@@ -54,15 +51,23 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let event_count_clone = Arc::clone(&event_count);
+    let event_new_counts_clone = Arc::clone(&event_new_counts);
     let event_counting = async move {
-        while event_count_clone.load(Ordering::SeqCst) < historical_events + live_events {
+        while event_new_counts_clone.lock().await.len() < historical_events + live_events {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        assert_eq!(event_count.load(Ordering::SeqCst), historical_events + live_events);
+        assert_eq!(event_new_counts.lock().await.len(), historical_events + live_events);
+    }
+
+    let event_new_counts = event_new_counts.lock().await;
+
+    let mut expected_new_count = 1;
+    for &new_count in event_new_counts.iter() {
+        assert_eq!(new_count, expected_new_count);
+        expected_new_count += 1;
     }
 
     Ok(())
