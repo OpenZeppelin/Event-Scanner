@@ -8,6 +8,7 @@ use crate::{
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
+    primitives::Address,
     providers::Provider,
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
@@ -38,38 +39,45 @@ impl EventScannerBuilder {
         }
     }
 
-    pub fn with_event_filter(&mut self, filter: EventFilter) -> &mut Self {
+    #[must_use]
+    pub fn with_event_filter(mut self, filter: EventFilter) -> Self {
         self.tracked_events.push(filter);
         self
     }
 
-    pub fn with_event_filters(&mut self, filters: Vec<EventFilter>) -> &mut Self {
+    #[must_use]
+    pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
         self.tracked_events.extend(filters);
         self
     }
 
-    pub fn with_callback_strategy(&mut self, strategy: Arc<dyn CallbackStrategy>) -> &mut Self {
+    #[must_use]
+    pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
         self.callback_strategy = strategy;
         self
     }
 
-    pub fn with_blocks_read_per_epoch(&mut self, blocks_read_per_epoch: usize) -> &mut Self {
-        let _ = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
+    #[must_use]
+    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
+        self.block_scanner = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
     }
 
-    pub fn with_reorg_rewind_depth(&mut self, reorg_rewind_depth: u64) -> &mut Self {
-        let _ = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
+    #[must_use]
+    pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
+        self.block_scanner = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
     }
 
-    pub fn with_retry_interval(&mut self, retry_interval: Duration) -> &mut Self {
-        let _ = self.block_scanner.with_retry_interval(retry_interval);
+    #[must_use]
+    pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
+        self.block_scanner = self.block_scanner.with_retry_interval(retry_interval);
         self
     }
 
-    pub fn with_block_confirmations(&mut self, block_confirmations: u64) -> &mut Self {
-        let _ = self.block_scanner.with_block_confirmations(block_confirmations);
+    #[must_use]
+    pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
+        self.block_scanner = self.block_scanner.with_block_confirmations(block_confirmations);
         self
     }
 
@@ -119,6 +127,12 @@ pub struct EventScanner<N: Network> {
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
+#[derive(Hash, Eq, PartialEq)]
+struct EventIdentifier {
+    contract_address: Address,
+    event: String,
+}
+
 impl<N: Network> EventScanner<N> {
     /// Starts the scanner
     ///
@@ -130,29 +144,31 @@ impl<N: Network> EventScanner<N> {
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
     ) -> anyhow::Result<()> {
-        let mut event_channels: HashMap<String, mpsc::Sender<Log>> = HashMap::new();
+        let mut event_channels: HashMap<EventIdentifier, mpsc::Sender<Log>> = HashMap::new();
 
         for filter in &self.tracked_events {
-            let event_name = filter.event.clone();
+            let unique_event = EventIdentifier {
+                contract_address: filter.contract_address,
+                event: filter.event.clone(),
+            };
 
-            if event_channels.contains_key(&event_name) {
+            if event_channels.contains_key(&unique_event) {
                 continue;
             }
 
             // TODO: configurable buffer size / smaller buffer ?
             let (sender, receiver) = mpsc::channel::<Log>(1024);
 
-            let event_name_clone = event_name.clone();
             let callback = filter.callback.clone();
             let strategy = self.callback_strategy.clone();
             Self::spawn_event_callback_task_executors(
                 receiver,
                 callback,
                 strategy,
-                event_name_clone,
+                filter.event.clone(),
             );
 
-            event_channels.insert(event_name, sender);
+            event_channels.insert(unique_event, sender);
         }
 
         let client = self.block_scanner.run()?;
@@ -199,7 +215,7 @@ impl<N: Network> EventScanner<N> {
         &self,
         from_block: u64,
         to_block: u64,
-        event_channels: &HashMap<String, mpsc::Sender<Log>>,
+        event_channels: &HashMap<EventIdentifier, mpsc::Sender<Log>>,
     ) -> anyhow::Result<()> {
         for event_filter in &self.tracked_events {
             let filter = Filter::new()
@@ -222,7 +238,12 @@ impl<N: Network> EventScanner<N> {
                         "found logs for event in block range"
                     );
 
-                    if let Some(sender) = event_channels.get(&event_filter.event) {
+                    let event_identifier = EventIdentifier {
+                        contract_address: event_filter.contract_address,
+                        event: event_filter.event.clone(),
+                    };
+
+                    if let Some(sender) = event_channels.get(&event_identifier) {
                         for log in logs {
                             if let Err(e) = sender.send(log).await {
                                 warn!(event = %event_filter.event, error = %e, "failed to enqueue log for processing");

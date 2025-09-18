@@ -1,16 +1,7 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
-
-use alloy::{network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol};
+use alloy::{network::Ethereum, providers::ProviderBuilder, sol};
 use alloy_node_bindings::{Anvil, AnvilInstance};
-use async_trait::async_trait;
-use event_scanner::EventCallback;
-use tokio::time::sleep;
+
+pub mod mock_callbacks;
 
 // Shared test contract used across integration tests
 sol! {
@@ -39,36 +30,13 @@ sol! {
     }
 }
 
-pub struct EventCounter {
-    pub count: Arc<AtomicUsize>,
+#[allow(clippy::missing_errors_doc)]
+pub fn spawn_anvil(block_time_secs: f64) -> anyhow::Result<AnvilInstance> {
+    Ok(Anvil::new().block_time_f64(block_time_secs).try_spawn()?)
 }
 
-#[async_trait]
-impl EventCallback for EventCounter {
-    async fn on_event(&self, _log: &Log) -> anyhow::Result<()> {
-        self.count.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-}
-
-pub struct SlowProcessor {
-    pub delay_ms: u64,
-    pub processed: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl EventCallback for SlowProcessor {
-    async fn on_event(&self, _log: &Log) -> anyhow::Result<()> {
-        sleep(Duration::from_millis(self.delay_ms)).await;
-        self.processed.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-}
-
-pub fn spawn_anvil(block_time_secs: u64) -> anyhow::Result<AnvilInstance> {
-    Ok(Anvil::new().block_time(block_time_secs).try_spawn()?)
-}
-
+#[allow(clippy::missing_errors_doc)]
+#[allow(clippy::missing_panics_doc)]
 pub async fn build_provider(
     anvil: &AnvilInstance,
 ) -> anyhow::Result<impl alloy::providers::Provider<Ethereum> + Clone> {
@@ -77,6 +45,7 @@ pub async fn build_provider(
     Ok(provider)
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub async fn deploy_counter<P>(provider: P) -> anyhow::Result<TestCounter::TestCounterInstance<P>>
 where
     P: alloy::providers::Provider<Ethereum> + Clone,
