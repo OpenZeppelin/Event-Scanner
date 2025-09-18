@@ -485,9 +485,9 @@ impl<N: Network> BlockScannerService<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64
-                > end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number +
+                self.config.blocks_read_per_epoch as u64 >
+                end.header().number()
             {
                 end.header().number()
             } else {
