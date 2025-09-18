@@ -177,6 +177,17 @@ impl BlockHashAndNumber {
     }
 }
 
+#[cfg(test)]
+impl BlockHashAndNumber {
+    fn hash(&self) -> BlockHash {
+        self.hash
+    }
+
+    fn number(&self) -> BlockNumber {
+        self.number
+    }
+}
+
 #[derive(Clone)]
 struct Config {
     blocks_read_per_epoch: usize,
@@ -768,11 +779,37 @@ impl BlockScannerClient {
 #[cfg(test)]
 mod tests {
     use alloy::network::Ethereum;
+    use alloy::primitives::B256;
+    use alloy::rpc::{client::RpcClient, types::Block as RpcBlock};
+    use alloy::transports::mock::Asserter;
     use alloy_node_bindings::Anvil;
+    use serde_json::{json, Value};
+    use tokio::sync::mpsc;
 
     use tokio_stream::StreamExt;
 
     use super::*;
+
+    fn test_config() -> Config {
+        Config {
+            blocks_read_per_epoch: 5,
+            reorg_rewind_depth: 5,
+            retry_interval: Duration::from_secs(1),
+            block_confirmations: 0,
+        }
+    }
+
+    fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
+        RootProvider::new(RpcClient::mocked(asserter))
+    }
+
+    fn mock_block(number: u64, hash: B256) -> RpcBlock<alloy::rpc::types::Transaction, alloy::rpc::types::Header> {
+        let mut block: RpcBlock<alloy::rpc::types::Transaction, alloy::rpc::types::Header> =
+            Default::default();
+        block.header.hash = hash;
+        block.header.inner.number = number;
+        block
+    }
 
     #[tokio::test]
     async fn live_mode_processes_all_blocks() -> anyhow::Result<()> {
@@ -810,6 +847,73 @@ mod tests {
                     panic!("Received error from subscription: {e}");
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewinds_on_detected_reorg() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter.clone());
+        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+
+        let current_block = mock_block(50, B256::with_last_byte(0x01));
+        service.current = Some(BlockHashAndNumber::from_header::<Ethereum>(current_block.header()));
+
+        asserter.push_success(&Value::Null);
+        asserter.push_success(&json!("0x3c"));
+        let rewound_hash = B256::with_last_byte(0x02);
+        let rewound_block = mock_block(45, rewound_hash);
+        asserter.push_success(&Some(rewound_block));
+
+        service.ensure_current_not_reorged().await?;
+
+        let current = service.current.as_ref().expect("current should be set");
+        assert_eq!(current.number(), 45);
+        assert_eq!(current.hash(), rewound_hash);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn buffered_messages_trim_invalid_ranges() -> anyhow::Result<()> {
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(40..45).await.unwrap();
+        buffer_tx.send(45..55).await.unwrap();
+        buffer_tx.send(60..62).await.unwrap();
+        drop(buffer_tx);
+
+        let (out_tx, mut out_rx) = mpsc::channel(8);
+
+        BlockScannerService::<Ethereum>::process_buffered_messages(buffer_rx, out_tx, 50).await;
+
+        let mut forwarded = Vec::new();
+        while let Some(result) = out_rx.recv().await {
+            forwarded.push(result.unwrap());
+        }
+
+        assert_eq!(forwarded, vec![50..55, 60..62]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn forwards_errors_to_subscribers() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+
+        let (tx, mut rx) = mpsc::channel(1);
+        service.subscriber = Some(tx);
+
+        service
+            .send_to_subscriber(Err(BlockScannerError::WebSocketConnectionFailed(4)))
+            .await;
+
+        match rx.recv().await.expect("subscriber should stay open") {
+            Err(BlockScannerError::WebSocketConnectionFailed(attempts)) => assert_eq!(attempts, 4),
+            other => panic!("unexpected message: {other:?}"),
         }
 
         Ok(())
