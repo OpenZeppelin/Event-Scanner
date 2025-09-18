@@ -41,7 +41,7 @@ Event Scanner is a Rust library for monitoring EVM-based smart contract events. 
 The library exposes two primary layers:
 
 - `EventScannerBuilder` / `EventScanner` – the main module the application will interact with. 
-- `BlockRangeScanner` – lower-level component that streams block ranges, handles reorg, batching, and provider subscriptions. This is exposed to the user but has many edge cases which will be documented in the future. For now interact with this via the `EventScanner`
+- `BlockRangeScanner` – lower-level component that streams block ranges, handles reorg, batching, and provider subscriptions.
 
 Callbacks implement the `EventCallback` trait. They are executed through a `CallbackStrategy` that performs retries when necessary before reporting failures.
 
