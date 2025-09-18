@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
-    block_scanner::{BlockScanner, BlockScannerError, ConnectedBlockScanner},
+    block_range_scanner::{BlockRangeScanner, BlockScannerError, ConnectedBlockScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
@@ -18,7 +18,7 @@ use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
 pub struct EventScannerBuilder {
-    block_scanner: BlockScanner,
+    block_range_scanner: BlockRangeScanner,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
@@ -34,7 +34,7 @@ impl EventScannerBuilder {
     /// Creates a new builder with default block scanner and callback strategy.
     pub fn new() -> Self {
         Self {
-            block_scanner: BlockScanner::new(),
+            block_range_scanner: BlockRangeScanner::new(),
             tracked_events: Vec::new(),
             callback_strategy: Self::get_default_callback_strategy(),
         }
@@ -64,28 +64,31 @@ impl EventScannerBuilder {
     /// Configures how many blocks are read per epoch during a historical sync.
     #[must_use]
     pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
-        self.block_scanner = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
+        self.block_range_scanner =
+            self.block_range_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
     }
 
     /// Sets the depth to rewind when a reorg is detected.
     #[must_use]
     pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
-        self.block_scanner = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
+        self.block_range_scanner =
+            self.block_range_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
     }
 
     /// Adjusts the retry interval when reconnecting to the provider.
     #[must_use]
     pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
-        self.block_scanner = self.block_scanner.with_retry_interval(retry_interval);
+        self.block_range_scanner = self.block_range_scanner.with_retry_interval(retry_interval);
         self
     }
 
     /// Configures how many confirmations are required before processing a block (used for reorgs).
     #[must_use]
     pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
-        self.block_scanner = self.block_scanner.with_block_confirmations(block_confirmations);
+        self.block_range_scanner =
+            self.block_range_scanner.with_block_confirmations(block_confirmations);
         self
     }
 
@@ -98,9 +101,9 @@ impl EventScannerBuilder {
         self,
         ws_url: Url,
     ) -> Result<EventScanner<N>, BlockScannerError> {
-        let block_scanner = self.block_scanner.connect_ws(ws_url).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         Ok(EventScanner {
-            block_scanner,
+            block_range_scanner,
             tracked_events: self.tracked_events,
             callback_strategy: self.callback_strategy,
         })
@@ -115,9 +118,9 @@ impl EventScannerBuilder {
         self,
         ipc_path: impl Into<String>,
     ) -> Result<EventScanner<N>, BlockScannerError> {
-        let block_scanner = self.block_scanner.connect_ipc(ipc_path.into()).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
         Ok(EventScanner {
-            block_scanner,
+            block_range_scanner,
             tracked_events: self.tracked_events,
             callback_strategy: self.callback_strategy,
         })
@@ -131,7 +134,7 @@ impl EventScannerBuilder {
 }
 
 pub struct EventScanner<N: Network> {
-    block_scanner: ConnectedBlockScanner<N>,
+    block_range_scanner: ConnectedBlockScanner<N>,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
@@ -180,7 +183,7 @@ impl<N: Network> EventScanner<N> {
             event_channels.insert(unique_event, sender);
         }
 
-        let client = self.block_scanner.run()?;
+        let client = self.block_range_scanner.run()?;
         let mut stream = client.subscribe(start_height, end_height).await?;
 
         while let Some(range) = stream.next().await {
@@ -235,7 +238,7 @@ impl<N: Network> EventScanner<N> {
                 .from_block(from_block)
                 .to_block(to_block);
 
-            match self.block_scanner.provider().get_logs(&filter).await {
+            match self.block_range_scanner.provider().get_logs(&filter).await {
                 Ok(logs) => {
                     if logs.is_empty() {
                         continue;

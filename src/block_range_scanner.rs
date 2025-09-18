@@ -2,12 +2,12 @@
 //!
 //! ```rust,no_run
 //! use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::BlockNumber};
-//! use event_scanner::block_scanner::BlockScannerError;
+//! use event_scanner::block_range_scanner::BlockScannerError;
 //! use std::ops::Range;
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
 //! use alloy::transports::http::reqwest::Url;
-//! use event_scanner::block_scanner::{BlockScanner, BlockScannerClient};
+//! use event_scanner::block_range_scanner::{BlockRangeScanner, BlockScannerClient};
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
 //!
@@ -17,7 +17,7 @@
 //!     tracing_subscriber::fmt::init();
 //!
 //!     // Configuration
-//!     let block_scanner = BlockScanner::new()
+//!     let block_range_scanner = BlockRangeScanner::new()
 //!         .with_blocks_read_per_epoch(1000)
 //!         .with_reorg_rewind_depth(5)
 //!         .with_retry_interval(Duration::from_secs(12))
@@ -26,7 +26,7 @@
 //!         .await?;
 //!
 //!     // Create client to send subscribe command to block scanner
-//!     let subscription_client: BlockScannerClient = block_scanner.run()?;
+//!     let subscription_client: BlockScannerClient = block_range_scanner.run()?;
 //!
 //!     let mut receiver: ReceiverStream<Result<Range<BlockNumber>, BlockScannerError>> =
 //!         subscription_client
@@ -187,20 +187,20 @@ struct Config {
     block_confirmations: u64,
 }
 
-pub struct BlockScanner {
+pub struct BlockRangeScanner {
     blocks_read_per_epoch: usize,
     reorg_rewind_depth: u64,
     retry_interval: Duration,
     block_confirmations: u64,
 }
 
-impl Default for BlockScanner {
+impl Default for BlockRangeScanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl BlockScanner {
+impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -778,7 +778,7 @@ mod tests {
     async fn live_mode_processes_all_blocks() -> anyhow::Result<()> {
         let anvil = Anvil::new().block_time_f64(0.01).try_spawn()?;
 
-        let sub_client = BlockScanner::new()
+        let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(3)
             .with_reorg_rewind_depth(5)
             .with_retry_interval(Duration::from_secs(1))
@@ -790,7 +790,7 @@ mod tests {
         let expected_blocks = 10;
 
         let mut receiver =
-            sub_client.subscribe(BlockNumberOrTag::Latest, None).await?.take(expected_blocks);
+            client.subscribe(BlockNumberOrTag::Latest, None).await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 

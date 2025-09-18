@@ -1,4 +1,4 @@
-pub mod block_scanner;
+pub mod block_range_scanner;
 pub mod callback;
 pub mod event_scanner;
 pub mod types;
