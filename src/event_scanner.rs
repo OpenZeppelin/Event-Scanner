@@ -120,9 +120,8 @@ impl EventScanner {
         self,
         ws_url: Url,
     ) -> Result<ConnectedEventScanner<N>, BlockScannerError> {
-        let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         Ok(ConnectedEventScanner {
-            block_range_scanner,
+            block_range_scanner: self.block_range_scanner.connect_ws(ws_url).await?,
             tracked_events: self.tracked_events,
             callback_strategy: self.callback_strategy,
         })
@@ -137,9 +136,8 @@ impl EventScanner {
         self,
         ipc_path: impl Into<String>,
     ) -> Result<ConnectedEventScanner<N>, BlockScannerError> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
         Ok(ConnectedEventScanner {
-            block_range_scanner,
+            block_range_scanner: self.block_range_scanner.connect_ipc(ipc_path.into()).await?,
             tracked_events: self.tracked_events,
             callback_strategy: self.callback_strategy,
         })
