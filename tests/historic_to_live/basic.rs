@@ -63,7 +63,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
         assert_eq!(event_count.load(Ordering::SeqCst), historical_events + live_events);
-    };
+    }
 
     Ok(())
 }

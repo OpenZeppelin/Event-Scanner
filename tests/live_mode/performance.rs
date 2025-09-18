@@ -50,7 +50,7 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
 
     if timeout(Duration::from_secs(60), event_counting).await.is_err() {
         assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
-    };
+    }
 
     Ok(())
 }

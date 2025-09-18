@@ -39,36 +39,43 @@ impl EventScannerBuilder {
         }
     }
 
+    #[must_use]
     pub fn with_event_filter(mut self, filter: EventFilter) -> Self {
         self.tracked_events.push(filter);
         self
     }
 
+    #[must_use]
     pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
         self.tracked_events.extend(filters);
         self
     }
 
+    #[must_use]
     pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
         self.callback_strategy = strategy;
         self
     }
 
+    #[must_use]
     pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
         self.block_scanner = self.block_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
     }
 
+    #[must_use]
     pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
         self.block_scanner = self.block_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
         self
     }
 
+    #[must_use]
     pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
         self.block_scanner = self.block_scanner.with_retry_interval(retry_interval);
         self
     }
 
+    #[must_use]
     pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
         self.block_scanner = self.block_scanner.with_block_confirmations(block_confirmations);
         self

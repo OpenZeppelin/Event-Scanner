@@ -57,7 +57,7 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
         assert_eq!(processed.load(Ordering::SeqCst), expected_event_count);
-    };
+    }
 
     Ok(())
 }
@@ -111,7 +111,7 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
     if timeout(Duration::from_secs(1), attempt_counting).await.is_err() {
         assert_eq!(attempts.load(Ordering::SeqCst), expected_attempts);
         assert_eq!(successes.load(Ordering::SeqCst), expected_successes);
-    };
+    }
 
     Ok(())
 }
@@ -154,7 +154,7 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
 
     if timeout(Duration::from_secs(1), attempt_counting).await.is_err() {
         assert_eq!(attempts.load(Ordering::SeqCst), expected_attempts);
-    };
+    }
 
     Ok(())
 }

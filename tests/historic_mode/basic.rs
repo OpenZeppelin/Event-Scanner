@@ -62,7 +62,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
 
     if timeout(Duration::from_secs(3), event_counting).await.is_err() {
         assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
-    };
+    }
 
     Ok(())
 }

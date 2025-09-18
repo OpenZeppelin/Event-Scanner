@@ -49,7 +49,7 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
             "callback ordering mismatch counts, expected: {expected:?}: {:?}",
             *counts.lock().await
         );
-    };
+    }
 
     Ok(())
 }
@@ -92,7 +92,7 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
         anyhow::bail!("expected {expected_event_count} events, got {}", blocks.lock().await.len());
-    };
+    }
 
     let data = blocks.lock().await.clone();
     assert!(
