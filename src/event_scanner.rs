@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
-    block_range_scanner::{BlockRangeScanner, BlockScannerError, ConnectedBlockScanner},
+    block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
@@ -100,7 +100,7 @@ impl EventScannerBuilder {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> Result<EventScanner<N>, BlockScannerError> {
+    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         Ok(EventScanner {
             block_range_scanner,
@@ -117,7 +117,7 @@ impl EventScannerBuilder {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<EventScanner<N>, BlockScannerError> {
+    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
         Ok(EventScanner {
             block_range_scanner,
@@ -134,7 +134,7 @@ impl EventScannerBuilder {
 }
 
 pub struct EventScanner<N: Network> {
-    block_range_scanner: ConnectedBlockScanner<N>,
+    block_range_scanner: ConnectedBlockRangeScanner<N>,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
