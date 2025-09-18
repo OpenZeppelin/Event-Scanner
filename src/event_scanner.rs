@@ -1,7 +1,10 @@
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::{
-    block_range_scanner::{BlockRangeScanner, BlockScannerError, ConnectedBlockScanner},
+    block_range_scanner::{
+        self, BlockRangeScanner, BlockScannerClient, BlockScannerError, BlockScannerService,
+        ConnectedBlockScanner,
+    },
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
@@ -154,6 +157,96 @@ pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockScanner<N>,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
+}
+
+impl<N: Network> ConnectedEventScanner<N> {
+    /// Returns the underlying Provider.
+    #[must_use]
+    pub fn provider(&self) -> &impl Provider<N> {
+        self.block_range_scanner.provider()
+    }
+
+    // TODO: use wrapper errors
+    /// Starts the subscription service and returns a client for sending commands.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscription service fails to start.
+    pub fn run(self) -> anyhow::Result<EventScannerClient> {
+        let (service, cmd_tx) = EventScannerService::new(self);
+        tokio::spawn(async move {
+            service.run().await;
+        });
+        Ok(EventScannerClient::new(cmd_tx))
+    }
+}
+
+struct EventScannerService<N: Network> {
+    block_range_service: BlockScannerService<N>,
+    tracked_events: Vec<EventFilter>,
+    callback_strategy: Arc<dyn CallbackStrategy>,
+    command_receiver: mpsc::Receiver<Command>,
+    shutdown: bool,
+}
+
+impl<N: Network> EventScannerService<N> {
+    pub fn new(connected_scanner: ConnectedEventScanner<N>) -> (Self, mpsc::Sender<Command>) {
+        let (cmd_tx, cmd_rx) = mpsc::channel(100);
+
+        let service = Self {
+            block_range_service: BlockScannerService::new(
+                connected_scanner.block_range_scanner.config.clone(),
+                connected_scanner.block_range_scanner.provider().clone(),
+            )
+            .0,
+            callback_strategy: connected_scanner.callback_strategy,
+            command_receiver: cmd_rx,
+            tracked_events: connected_scanner.tracked_events,
+            shutdown: false,
+        };
+
+        (service, cmd_tx)
+    }
+
+    pub async fn run(mut self) {
+        info!("Starting event scanner service");
+
+        while !self.shutdown {
+            tokio::select! {
+                cmd = self.command_receiver.recv() => {
+                    if let Some(command) = cmd {
+                        if let Err(e) = self.handle_command(command).await {
+                            error!("Command handling error: {}", e);
+                        }
+                    } else {
+                        info!("Command channel closed, shutting down");
+                        break;
+                    }
+                }
+            }
+        }
+
+        info!("Event scanner service stopped");
+    }
+
+    async fn handle_command(&mut self, command: Command) -> Result<(), BlockScannerError> {
+        match command {
+            Command::Subscribe { sender, start_height, end_height, response } => {
+                let t = self
+                    .block_range_service
+                    .handle_command(block_range_scanner::Command::Subscribe {
+                        sender,
+                        start_height,
+                        end_height,
+                        response,
+                    })
+                    .await;
+            }
+            Command::Unsubscribe { response: _ } => {}
+            Command::Shutdown { response: _ } => {}
+        }
+        Ok(())
+    }
 }
 
 #[derive(Hash, Eq, PartialEq)]

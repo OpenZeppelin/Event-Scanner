@@ -281,13 +281,13 @@ impl BlockRangeScanner {
 
 pub struct ConnectedBlockScanner<N: Network> {
     provider: RootProvider<N>,
-    config: Config,
+    pub config: Config,
 }
 
 impl<N: Network> ConnectedBlockScanner<N> {
     /// Returns the underlying Provider.
     #[must_use]
-    pub fn provider(&self) -> &impl Provider<N> {
+    pub fn provider(&self) -> &RootProvider<N> {
         &self.provider
     }
 
@@ -307,7 +307,7 @@ impl<N: Network> ConnectedBlockScanner<N> {
     }
 }
 
-struct BlockScannerService<N: Network> {
+pub struct BlockScannerService<N: Network> {
     config: Config,
     provider: RootProvider<N>,
     subscriber: Option<mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>>,
@@ -345,10 +345,7 @@ impl<N: Network> BlockScannerService<N> {
             tokio::select! {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
-                        if let Err(e) = self.handle_command(command).await {
-                            error!("Command handling error: {}", e);
-                            self.error_count += 1;
-                        }
+                        self.handle_command(command).await
                     } else {
                         info!("Command channel closed, shutting down");
                         break;
@@ -360,7 +357,7 @@ impl<N: Network> BlockScannerService<N> {
         info!("Subscription service stopped");
     }
 
-    async fn handle_command(&mut self, command: Command) -> Result<(), BlockScannerError> {
+    pub async fn handle_command(&mut self, command: Command) {
         match command {
             Command::Subscribe { sender, start_height, end_height, response } => {
                 let result = self.handle_subscribe(sender, start_height, end_height).await;
@@ -380,7 +377,6 @@ impl<N: Network> BlockScannerService<N> {
                 let _ = response.send(Ok(()));
             }
         }
-        Ok(())
     }
 
     async fn handle_subscribe(
