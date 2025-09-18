@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -60,7 +60,7 @@ impl EventCallback for FlakyCallback {
 
 // A callback that always fails and records attempts.
 pub struct AlwaysFailingCallback {
-    pub attempts: Arc<AtomicUsize>,
+    pub attempts: Arc<AtomicU64>,
 }
 
 #[async_trait]

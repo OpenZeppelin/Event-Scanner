@@ -54,14 +54,15 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
+    let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while event_count.load(Ordering::SeqCst) < historical_events + live_events {
+        while event_count_clone.load(Ordering::SeqCst) < historical_events + live_events {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 1 second");
+        assert_eq!(event_count.load(Ordering::SeqCst), historical_events + live_events);
     };
 
     Ok(())

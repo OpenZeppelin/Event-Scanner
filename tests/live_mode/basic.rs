@@ -43,14 +43,15 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
+    let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while event_count.load(Ordering::SeqCst) < expected_event_count {
+        while event_count_clone.load(Ordering::SeqCst) < expected_event_count {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 1 second");
+        assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
     };
 
     Ok(())
@@ -97,16 +98,19 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         b.increase().send().await?.watch().await?;
     }
 
+    let a_count_clone = Arc::clone(&a_count);
+    let b_count_clone = Arc::clone(&b_count);
     let event_counting = async move {
-        while a_count.load(Ordering::SeqCst) < expected_a_events ||
-            b_count.load(Ordering::SeqCst) < expected_b_events
+        while a_count_clone.load(Ordering::SeqCst) < expected_a_events ||
+            b_count_clone.load(Ordering::SeqCst) < expected_b_events
         {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 1 second");
+        assert_eq!(a_count.load(Ordering::SeqCst), expected_a_events);
+        assert_eq!(b_count.load(Ordering::SeqCst), expected_b_events);
     };
 
     Ok(())
@@ -152,16 +156,19 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     contract.decrease().send().await?.watch().await?;
     contract.decrease().send().await?.watch().await?;
 
+    let increase_count_clone = Arc::clone(&increase_count);
+    let decrease_count_clone = Arc::clone(&decrease_count);
     let event_counting = async move {
-        while increase_count.load(Ordering::SeqCst) < expected_incr_events ||
-            decrease_count.load(Ordering::SeqCst) < expected_decr_events
+        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events ||
+            decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
         {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(2), event_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 2 seconds");
+        assert_eq!(increase_count.load(Ordering::SeqCst), expected_incr_events);
+        assert_eq!(decrease_count.load(Ordering::SeqCst), expected_decr_events);
     };
 
     Ok(())
@@ -194,8 +201,9 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
+    let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while event_count.load(Ordering::SeqCst) == 0 {
+        while event_count_clone.load(Ordering::SeqCst) == 0 {
             sleep(Duration::from_millis(100)).await;
         }
     };
@@ -232,8 +240,9 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
+    let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while event_count.load(Ordering::SeqCst) == 0 {
+        while event_count_clone.load(Ordering::SeqCst) == 0 {
             sleep(Duration::from_millis(100)).await;
         }
     };

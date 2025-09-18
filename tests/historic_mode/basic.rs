@@ -31,21 +31,16 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         callback,
     };
 
-    let mut first_block = None;
-    let mut last_block = 0;
+    let receipt = contract.increase().send().await?.get_receipt().await?;
+    let start_block = receipt.block_number.expect("receipt should contain block number");
+    let mut end_block = 0;
 
-    for _ in 0..4 {
+    let expected_event_count = 4;
+
+    for _ in 1..expected_event_count {
         let receipt = contract.increase().send().await?.get_receipt().await?;
-        let block_number = receipt.block_number.expect("receipt should contain block number");
-
-        if first_block.is_none() {
-            first_block = Some(block_number);
-        }
-        last_block = block_number;
+        end_block = receipt.block_number.expect("receipt should contain block number");
     }
-
-    let start_block = first_block.expect("at least one historical event");
-    let end_block = last_block;
 
     let mut scanner = EventScannerBuilder::new()
         .with_event_filter(filter)
@@ -58,14 +53,15 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
             .await
     });
 
+    let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while event_count.load(Ordering::SeqCst) < 4 {
+        while event_count_clone.load(Ordering::SeqCst) < 4 {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(3), event_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 3 seconds");
+        assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
     };
 
     Ok(())

@@ -21,8 +21,8 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&count) });
+    let event_count = Arc::new(AtomicUsize::new(0));
+    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
     let filter = EventFilter {
         contract_address: *contract.address(),
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
@@ -41,14 +41,15 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let counting = async move {
-        while count.load(Ordering::SeqCst) < expected_event_count {
+    let event_count_clone = Arc::clone(&event_count);
+    let event_counting = async move {
+        while event_count_clone.load(Ordering::SeqCst) < expected_event_count {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
-    if timeout(Duration::from_secs(60), counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 60 seconds");
+    if timeout(Duration::from_secs(60), event_counting).await.is_err() {
+        assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
     };
 
     Ok(())

@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -48,14 +48,15 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
         contract.increase().send().await?.watch().await?;
     }
 
+    let processed_clone = Arc::clone(&processed);
     let event_counting = async move {
-        while processed.load(Ordering::SeqCst) < expected_event_count {
+        while processed_clone.load(Ordering::SeqCst) < expected_event_count {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 1 second");
+        assert_eq!(processed.load(Ordering::SeqCst), expected_event_count);
     };
 
     Ok(())
@@ -94,14 +95,22 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
 
     contract.increase().send().await?.watch().await?;
 
+    let expected_attempts = 3;
+    let expected_successes = 1;
+
+    let attempts_clone = Arc::clone(&attempts);
+    let successes_clone = Arc::clone(&successes);
     let attempt_counting = async move {
-        while attempts.load(Ordering::SeqCst) < 3 || successes.load(Ordering::SeqCst) < 1 {
+        while attempts_clone.load(Ordering::SeqCst) < expected_attempts ||
+            successes_clone.load(Ordering::SeqCst) < expected_successes
+        {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(1), attempt_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 1 second");
+        assert_eq!(attempts.load(Ordering::SeqCst), expected_attempts);
+        assert_eq!(successes.load(Ordering::SeqCst), expected_successes);
     };
 
     Ok(())
@@ -113,7 +122,8 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let attempts = Arc::new(AtomicUsize::new(0));
+    let expected_attempts = 2;
+    let attempts = Arc::new(AtomicU64::new(0));
     let callback = Arc::new(AlwaysFailingCallback { attempts: Arc::clone(&attempts) });
 
     let filter = EventFilter {
@@ -121,7 +131,7 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let cfg = FixedRetryConfig { max_attempts: 2, delay_ms: 20 };
+    let cfg = FixedRetryConfig { max_attempts: expected_attempts, delay_ms: 20 };
 
     let strategy: Arc<dyn CallbackStrategy> = Arc::new(FixedRetryStrategy::new(cfg));
 
@@ -135,14 +145,15 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
 
     contract.increase().send().await?.watch().await?;
 
+    let attempts_clone = Arc::clone(&attempts);
     let attempt_counting = async move {
-        while attempts.load(Ordering::SeqCst) < 2 {
+        while attempts_clone.load(Ordering::SeqCst) < expected_attempts {
             sleep(Duration::from_millis(100)).await;
         }
     };
 
     if timeout(Duration::from_secs(1), attempt_counting).await.is_err() {
-        anyhow::bail!("scanner did not finish within 1 second");
+        assert_eq!(attempts.load(Ordering::SeqCst), expected_attempts);
     };
 
     Ok(())
