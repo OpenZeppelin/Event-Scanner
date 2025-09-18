@@ -167,24 +167,13 @@ pub struct ServiceStatus {
 
 #[derive(Debug, Clone)]
 pub struct BlockHashAndNumber {
-    hash: BlockHash,
-    number: BlockNumber,
+    pub hash: BlockHash,
+    pub number: BlockNumber,
 }
 
 impl BlockHashAndNumber {
     fn from_header<N: Network>(header: &N::HeaderResponse) -> Self {
         Self { hash: header.hash(), number: header.number() }
-    }
-}
-
-#[cfg(test)]
-impl BlockHashAndNumber {
-    fn hash(&self) -> BlockHash {
-        self.hash
-    }
-
-    fn number(&self) -> BlockNumber {
-        self.number
     }
 }
 
@@ -496,9 +485,9 @@ impl<N: Network> BlockScannerService<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64 >
-                end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > end.header().number()
             {
                 end.header().number()
             } else {
@@ -778,14 +767,14 @@ impl BlockScannerClient {
 
 #[cfg(test)]
 mod tests {
+    use alloy::eips::BlockNumberOrTag;
     use alloy::network::Ethereum;
-    use alloy::primitives::B256;
-    use alloy::rpc::{client::RpcClient, types::Block as RpcBlock};
+    use alloy::providers::ext::AnvilApi;
+    use alloy::rpc::types::anvil::ReorgOptions;
+    use alloy::rpc::client::RpcClient;
     use alloy::transports::mock::Asserter;
     use alloy_node_bindings::Anvil;
-    use serde_json::{json, Value};
     use tokio::sync::mpsc;
-
     use tokio_stream::StreamExt;
 
     use super::*;
@@ -801,14 +790,6 @@ mod tests {
 
     fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
         RootProvider::new(RpcClient::mocked(asserter))
-    }
-
-    fn mock_block(number: u64, hash: B256) -> RpcBlock<alloy::rpc::types::Transaction, alloy::rpc::types::Header> {
-        let mut block: RpcBlock<alloy::rpc::types::Transaction, alloy::rpc::types::Header> =
-            Default::default();
-        block.header.hash = hash;
-        block.header.inner.number = number;
-        block
     }
 
     #[tokio::test]
@@ -854,24 +835,41 @@ mod tests {
 
     #[tokio::test]
     async fn rewinds_on_detected_reorg() -> anyhow::Result<()> {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter.clone());
-        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+        let anvil = Anvil::new().block_time_f64(0.1).try_spawn()?;
+        let provider: RootProvider<Ethereum> =
+            RootProvider::connect(anvil.endpoint().as_str()).await?;
 
-        let current_block = mock_block(50, B256::with_last_byte(0x01));
-        service.current = Some(BlockHashAndNumber::from_header::<Ethereum>(current_block.header()));
+        let mut config = test_config();
+        config.reorg_rewind_depth = 3;
 
-        asserter.push_success(&Value::Null);
-        asserter.push_success(&json!("0x3c"));
-        let rewound_hash = B256::with_last_byte(0x02);
-        let rewound_block = mock_block(45, rewound_hash);
-        asserter.push_success(&Some(rewound_block));
+        provider.anvil_mine(Some(12), None).await?;
+
+        let head_before = provider.get_block_number().await?;
+        assert!(head_before > config.reorg_rewind_depth);
+
+        let (mut service, _cmd) = BlockScannerService::new(config.clone(), provider.clone());
+
+        let tracked_block = provider
+            .get_block_by_number(BlockNumberOrTag::Number(head_before))
+            .await?
+            .expect("tracked block exists");
+        let tracked_hash = tracked_block.header().hash();
+
+        service.current = Some(BlockHashAndNumber::from_header::<Ethereum>(tracked_block.header()));
+
+        let reorg_depth = 4;
+        provider
+            .anvil_reorg(ReorgOptions { depth: reorg_depth, tx_block_pairs: Vec::new() })
+            .await?;
+        provider.anvil_mine(Some(reorg_depth), None).await?;
+
+        assert!(provider.get_block_by_hash(tracked_hash).await?.is_none());
 
         service.ensure_current_not_reorged().await?;
 
-        let current = service.current.as_ref().expect("current should be set");
-        assert_eq!(current.number(), 45);
-        assert_eq!(current.hash(), rewound_hash);
+        let current = service.current.expect("current should be set after rewind");
+        assert_eq!(current.number, head_before - config.reorg_rewind_depth);
+        assert_ne!(current.hash, tracked_hash);
 
         Ok(())
     }
@@ -907,9 +905,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
 
-        service
-            .send_to_subscriber(Err(BlockScannerError::WebSocketConnectionFailed(4)))
-            .await;
+        service.send_to_subscriber(Err(BlockScannerError::WebSocketConnectionFailed(4))).await;
 
         match rx.recv().await.expect("subscriber should stay open") {
             Err(BlockScannerError::WebSocketConnectionFailed(attempts)) => assert_eq!(attempts, 4),
