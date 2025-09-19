@@ -31,7 +31,12 @@ hex = "0.4"
 [package]
 name = "event-scanner"
 description = "Event Scanner is a library for scanning events from any EVM-based blockchain."
-categories = ["asynchronous", "web-programming", "web3"]
+categories = [
+    "asynchronous",
+    "web-programming",
+    "web-programming::websocket",
+    "cryptography::cryptocurrencies",
+]
 keywords = ["evm", "ethereum", "blockchain", "events", "alloy"]
 version.workspace = true
 license.workspace = true
