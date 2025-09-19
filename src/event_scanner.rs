@@ -12,7 +12,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
     primitives::{Address, BlockNumber},
-    providers::Provider,
+    providers::{Provider, RootProvider},
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
@@ -20,13 +20,13 @@ use tokio::sync::{
     mpsc::{self, Receiver},
     oneshot,
 };
-use tokio_stream::StreamExt;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
 #[derive(Debug)]
 pub enum Command {
     Subscribe {
-        sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
+        sender: mpsc::Sender<Result<Vec<Log>, BlockScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
         response: oneshot::Sender<Result<(), BlockScannerError>>,
@@ -162,7 +162,7 @@ pub struct ConnectedEventScanner<N: Network> {
 impl<N: Network> ConnectedEventScanner<N> {
     /// Returns the underlying Provider.
     #[must_use]
-    pub fn provider(&self) -> &impl Provider<N> {
+    pub fn provider(&self) -> &RootProvider<N> {
         self.block_range_scanner.provider()
     }
 
@@ -173,7 +173,8 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///
     /// Returns an error if the subscription service fails to start.
     pub fn run(self) -> anyhow::Result<EventScannerClient> {
-        let (service, cmd_tx) = EventScannerService::new(self);
+        let block_range_client = self.block_range_scanner.run()?;
+        let (service, cmd_tx) = EventScannerService::new(self, block_range_client);
         tokio::spawn(async move {
             service.run().await;
         });
@@ -181,8 +182,15 @@ impl<N: Network> ConnectedEventScanner<N> {
     }
 }
 
+#[derive(Hash, Eq, PartialEq)]
+struct EventIdentifier {
+    contract_address: Address,
+    event: String,
+}
+
 struct EventScannerService<N: Network> {
-    block_range_service: BlockScannerService<N>,
+    block_range_client: BlockScannerClient,
+    provider: RootProvider<N>,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
     command_receiver: mpsc::Receiver<Command>,
@@ -190,15 +198,15 @@ struct EventScannerService<N: Network> {
 }
 
 impl<N: Network> EventScannerService<N> {
-    pub fn new(connected_scanner: ConnectedEventScanner<N>) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(
+        connected_scanner: ConnectedEventScanner<N>,
+        block_range_client: BlockScannerClient,
+    ) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
-            block_range_service: BlockScannerService::new(
-                connected_scanner.block_range_scanner.config.clone(),
-                connected_scanner.block_range_scanner.provider().clone(),
-            )
-            .0,
+            block_range_client,
+            provider: connected_scanner.provider().clone(),
             callback_strategy: connected_scanner.callback_strategy,
             command_receiver: cmd_rx,
             tracked_events: connected_scanner.tracked_events,
@@ -232,40 +240,26 @@ impl<N: Network> EventScannerService<N> {
     async fn handle_command(&mut self, command: Command) -> Result<(), BlockScannerError> {
         match command {
             Command::Subscribe { sender, start_height, end_height, response } => {
-                let t = self
-                    .block_range_service
-                    .handle_command(block_range_scanner::Command::Subscribe {
-                        sender,
-                        start_height,
-                        end_height,
-                        response,
-                    })
-                    .await;
+                let result = self.handle_subscribe(sender, start_height, end_height).await;
+                let _ = response.send(result);
             }
             Command::Unsubscribe { response: _ } => {}
             Command::Shutdown { response: _ } => {}
         }
         Ok(())
     }
-}
 
-#[derive(Hash, Eq, PartialEq)]
-struct EventIdentifier {
-    contract_address: Address,
-    event: String,
-}
-
-impl<N: Network> ConnectedEventScanner<N> {
     /// Starts the scanner
     ///
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
-    pub async fn start(
+    async fn handle_subscribe(
         &mut self,
+        _sender: mpsc::Sender<Result<Vec<Log>, BlockScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), BlockScannerError> {
         let mut event_channels: HashMap<EventIdentifier, mpsc::Sender<Log>> = HashMap::new();
 
         for filter in &self.tracked_events {
@@ -293,8 +287,7 @@ impl<N: Network> ConnectedEventScanner<N> {
             event_channels.insert(unique_event, sender);
         }
 
-        let client = self.block_range_scanner.run()?;
-        let mut stream = client.subscribe(start_height, end_height).await?;
+        let mut stream = self.block_range_client.subscribe(start_height, end_height).await?;
 
         while let Some(range) = stream.next().await {
             match range {
@@ -303,6 +296,10 @@ impl<N: Network> ConnectedEventScanner<N> {
                     let to_block = range.end;
                     info!(from_block, to_block, "processing block range");
                     self.process_block_range(from_block, to_block, &event_channels).await?;
+                }
+                Err(BlockScannerError::Eof) => {
+                    info!("End of block batch");
+                    break;
                 }
                 Err(e) => {
                     error!(error = %e, "failed to get block range");
@@ -340,7 +337,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         from_block: u64,
         to_block: u64,
         event_channels: &HashMap<EventIdentifier, mpsc::Sender<Log>>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), BlockScannerError> {
         for event_filter in &self.tracked_events {
             let filter = Filter::new()
                 .address(event_filter.contract_address)
@@ -348,7 +345,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                 .from_block(from_block)
                 .to_block(to_block);
 
-            match self.block_range_scanner.provider().get_logs(&filter).await {
+            match self.provider.get_logs(&filter).await {
                 Ok(logs) => {
                     if logs.is_empty() {
                         continue;
@@ -391,5 +388,85 @@ impl<N: Network> ConnectedEventScanner<N> {
         }
 
         Ok(())
+    }
+}
+
+pub struct EventScannerClient {
+    command_sender: mpsc::Sender<Command>,
+}
+
+impl EventScannerClient {
+    /// Creates a new subscription client.
+    ///
+    /// # Arguments
+    ///
+    /// * `command_sender` - The sender for sending commands to the subscription service.
+    #[must_use]
+    pub fn new(command_sender: mpsc::Sender<Command>) -> Self {
+        Self { command_sender }
+    }
+
+    /// Subscribes to new blocks.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The block number to start from.
+    /// * `end_height` - The block number to end at.
+    ///
+    /// # Errors
+    ///
+    /// * `BlockScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn subscribe(
+        &self,
+        start_height: BlockNumberOrTag,
+        end_height: Option<BlockNumberOrTag>,
+    ) -> Result<ReceiverStream<Result<Vec<Log>, BlockScannerError>>, BlockScannerError> {
+        let (event_sender, event_receiver) = mpsc::channel(100);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::Subscribe {
+            sender: event_sender,
+            start_height,
+            end_height,
+            response: response_tx,
+        };
+
+        self.command_sender.send(command).await.map_err(|_| BlockScannerError::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| BlockScannerError::ServiceShutdown)??;
+
+        let stream = ReceiverStream::new(event_receiver);
+
+        Ok(stream)
+    }
+
+    /// Unsubscribes the current subscriber.
+    ///
+    /// # Errors
+    ///
+    /// * `BlockScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn unsubscribe(&self) -> Result<(), BlockScannerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::Unsubscribe { response: response_tx };
+
+        self.command_sender.send(command).await.map_err(|_| BlockScannerError::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| BlockScannerError::ServiceShutdown)?
+    }
+
+    /// Shuts down the subscription service and unsubscribes the current subscriber.
+    ///
+    /// # Errors
+    ///
+    /// * `BlockScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn shutdown(&self) -> Result<(), BlockScannerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::Shutdown { response: response_tx };
+
+        self.command_sender.send(command).await.map_err(|_| BlockScannerError::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| BlockScannerError::ServiceShutdown)?
     }
 }

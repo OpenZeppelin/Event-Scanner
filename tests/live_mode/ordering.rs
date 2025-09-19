@@ -23,12 +23,15 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     for _ in 0..5 {
         contract.increase().send().await?.watch().await?;
@@ -68,12 +71,15 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
         callback,
     };
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     let expected_event_count = 5;
 

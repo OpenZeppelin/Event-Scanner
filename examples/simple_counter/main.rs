@@ -65,13 +65,14 @@ async fn main() -> anyhow::Result<()> {
         callback: Arc::new(CounterCallback),
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(increase_filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    let task_1 = tokio::spawn(async move {
-        scanner.start(BlockNumberOrTag::Latest, None).await.expect("failed to start scanner");
+        let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
     });
 
     let task_2 = tokio::spawn(async move {
@@ -84,8 +85,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    task_1.await.ok();
-    task_2.await.ok();
+    task_2.await?;
 
     Ok(())
 }

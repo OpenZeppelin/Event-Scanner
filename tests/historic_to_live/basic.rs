@@ -36,16 +36,15 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
+    let client = scanner.run()?;
     tokio::spawn(async move {
-        scanner.start(BlockNumberOrTag::Number(first_historical_block), None).await
+        _ = client.subscribe(BlockNumberOrTag::Number(first_historical_block), None).await;
     });
-
-    sleep(Duration::from_millis(200)).await;
 
     for _ in 0..live_events {
         contract.increase().send().await?.watch().await?;

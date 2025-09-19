@@ -42,16 +42,15 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         end_block = receipt.block_number.expect("receipt should contain block number");
     }
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move {
-        scanner
-            .start(BlockNumberOrTag::Number(start_block), Some(BlockNumberOrTag::Number(end_block)))
-            .await
-    });
+    let client = scanner.run()?;
+    client
+        .subscribe(BlockNumberOrTag::Number(start_block), Some(BlockNumberOrTag::Number(end_block)))
+        .await?;
 
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {

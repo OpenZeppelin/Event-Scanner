@@ -30,12 +30,15 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     let expected_event_count = 5;
 
@@ -80,12 +83,15 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         callback: b_cb,
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filters(vec![a_filter, b_filter])
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     let expected_events_a = 3;
     let expected_events_b = 2;
@@ -101,8 +107,8 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let a_count_clone = Arc::clone(&a_count);
     let b_count_clone = Arc::clone(&b_count);
     let event_counting = async move {
-        while a_count_clone.load(Ordering::SeqCst) < expected_events_a ||
-            b_count_clone.load(Ordering::SeqCst) < expected_events_b
+        while a_count_clone.load(Ordering::SeqCst) < expected_events_a
+            || b_count_clone.load(Ordering::SeqCst) < expected_events_b
         {
             sleep(Duration::from_millis(100)).await;
         }
@@ -139,12 +145,15 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         callback: decrease_cb,
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filters(vec![increase_filter, decrease_filter])
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     let expected_incr_events = 6;
     let expected_decr_events = 2;
@@ -159,8 +168,8 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let increase_count_clone = Arc::clone(&increase_count);
     let decrease_count_clone = Arc::clone(&decrease_count);
     let event_counting = async move {
-        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events ||
-            decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
+        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events
+            || decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
         {
             sleep(Duration::from_millis(100)).await;
         }
@@ -190,12 +199,15 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     for _ in 0..3 {
         contract.increase().send().await?.watch().await?;
@@ -229,12 +241,15 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     for _ in 0..3 {
         contract.increase().send().await?.watch().await?;

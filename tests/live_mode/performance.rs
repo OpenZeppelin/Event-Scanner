@@ -29,11 +29,15 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         callback,
     };
 
-    let mut scanner = EventScanner::new()
+    let scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+
+    let client = scanner.run()?;
+    tokio::spawn(async move {
+        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
+    });
 
     let expected_event_count = 100;
 
