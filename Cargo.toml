@@ -2,6 +2,12 @@
 members = [".", "examples/historical_scanning", "examples/simple_counter"]
 resolver = "2"
 
+[package]
+name = "event-scanner"
+version = "0.1.0"
+edition = "2024"
+publish = true
+
 [lints.clippy]
 pedantic = "warn"
 
@@ -20,25 +26,19 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 hex = "0.4"
 
-[package]
-name = "event-scanner"
-version = "0.1.0"
-edition = "2024"
-publish = true
-
 [package.metadata.docs.rs]
 all-features = true
 
 [dependencies]
-alloy = { workspace = true }
-tokio = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-async-trait = { workspace = true }
-chrono = { workspace = true }
-alloy-node-bindings = { workspace = true }
-tokio-stream = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+alloy.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+alloy-node-bindings.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
