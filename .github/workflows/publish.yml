@@ -1,0 +1,60 @@
+name: publish event-scanner
+
+# This workflow publishes event-scanner on crates.io.
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - v*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-publish:
+    name: Publish event-scanner on crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Verify tag matches crate version
+        id: version-check
+        run: |
+          PKG_VERSION=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name=="event-scanner") | .version')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          echo "Package:  ${PKG_VERSION}"
+          echo "Tag:      ${TAG_VERSION}"
+
+          if [ -z "$PKG_VERSION" ]; then
+            echo "Failed to determine package version via cargo metadata" >&2
+            exit 1
+          fi
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag v${TAG_VERSION} does not match package version ${PKG_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Check event-scanner
+        run: cargo publish -p event-scanner --locked --dry-run
+
+      # cargo automatically picks up CARGO_REGISTRY_TOKEN from environment variables
+      - name: Publish event-scanner
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is not set in repository secrets" >&2
+            exit 1
+          fi
+          cargo publish -p event-scanner --locked
