@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 authors = ["OpenZeppelin"]
 edition = "2024"
-license = "APGL-3.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/OpenZeppelin/Event-Scanner"
 version = "0.1.0-alpha.1"
 
