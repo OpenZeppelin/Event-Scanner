@@ -39,7 +39,7 @@ pub fn spawn_anvil(block_time_secs: f64) -> anyhow::Result<AnvilInstance> {
 #[allow(clippy::missing_panics_doc)]
 pub async fn build_provider(
     anvil: &AnvilInstance,
-) -> anyhow::Result<impl alloy::providers::Provider<Ethereum> + Clone> {
+) -> anyhow::Result<impl alloy::providers::Provider<Ethereum> + Clone + use<>> {
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
     let provider = ProviderBuilder::new().wallet(wallet).connect(anvil.endpoint().as_str()).await?;
     Ok(provider)

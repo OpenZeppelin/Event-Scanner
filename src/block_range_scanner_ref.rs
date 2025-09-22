@@ -70,15 +70,18 @@
 
 use std::{ops::Range, time::Duration};
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::wrappers::ReceiverStream;
 
 use alloy::{
     consensus::BlockHeader,
     eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
-    primitives::{BlockHash, BlockNumber},
-    providers::{Provider, RootProvider},
+    primitives::{BlockHash, BlockNumber, map::HashMap},
+    providers::{EthGetBlock, Provider, RootProvider},
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
@@ -89,6 +92,8 @@ use alloy::{
 };
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
+
+use crate::types::ConnectionId;
 
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
@@ -135,6 +140,9 @@ pub enum BlockScannerError {
 
     #[error("End of block batch")]
     Eof,
+
+    #[error("Block not found: {0}")]
+    BlockNotFound(BlockNumberOrTag),
 }
 
 #[derive(Debug)]
@@ -143,7 +151,7 @@ pub enum Command {
         sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-        response: oneshot::Sender<Result<(), BlockScannerError>>,
+        response: oneshot::Sender<Result<ConnectionId, BlockScannerError>>,
     },
     Unsubscribe {
         response: oneshot::Sender<Result<(), BlockScannerError>>,
@@ -165,7 +173,7 @@ pub struct ServiceStatus {
     pub error_count: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BlockHashAndNumber {
     hash: BlockHash,
     number: BlockNumber,
@@ -316,6 +324,10 @@ pub struct BlockScannerService<N: Network> {
     processed_count: u64,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
+    connections: HashMap<
+        ConnectionId,
+        (mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>, JoinHandle<()>),
+    >,
     shutdown: bool,
 }
 
@@ -332,6 +344,7 @@ impl<N: Network> BlockScannerService<N> {
             processed_count: 0,
             error_count: 0,
             command_receiver: cmd_rx,
+            connections: HashMap::default(),
             shutdown: false,
         };
 
@@ -361,7 +374,7 @@ impl<N: Network> BlockScannerService<N> {
         match command {
             Command::Subscribe { sender, start_height, end_height, response } => {
                 let result = self.handle_subscribe(sender, start_height, end_height).await;
-                let _ = response.send(result);
+                response.send(result).expect("response channel should be open");
             }
             Command::Unsubscribe { response } => {
                 self.handle_unsubscribe();
@@ -384,108 +397,135 @@ impl<N: Network> BlockScannerService<N> {
         sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), BlockScannerError> {
-        if self.subscriber.is_some() {
-            return Err(BlockScannerError::MultipleSubscribers);
-        }
+    ) -> Result<ConnectionId, BlockScannerError> {
+        let connection_id = (self.connections.len() + 1) as ConnectionId;
 
         // TODO: update local state relate to reorg and validate data
 
         info!("Starting subscription from point: {start_height:?}");
-        self.subscriber = Some(sender);
 
-        self.sync_with_transition(start_height, end_height).await?;
+        let join_handle =
+            self.spawn_block_range_scanner(sender.clone(), start_height, end_height).await?;
 
-        Ok(())
+        self.connections.insert(connection_id, (sender, join_handle));
+
+        Ok(connection_id)
     }
 
-    async fn sync_with_transition(
+    async fn spawn_block_range_scanner(
         &mut self,
+        sender: mpsc::Sender<Result<Range<BlockNumber>, BlockScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), BlockScannerError> {
-        // Step 1: Establish WebSocket connection
-        let (buffer_tx, buffer_rx) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+    ) -> Result<JoinHandle<()>, BlockScannerError> {
+        let join_handle = tokio::spawn(async move {
+            // Step 1: Initiate block range scanner channel
+            let (buffer_tx, buffer_rx) = mpsc::channel(MAX_BUFFERED_MESSAGES);
 
-        // Step 2: Perform historical sync
-        let (start_block, sync_end_block) = if let Some(end_height) = end_height {
-            let start_block =
-                self.provider.get_block_by_number(start_height).await?.expect("already checked");
-            let end_block = self
-                .provider
-                .get_block(end_height.into())
-                .await?
-                .expect("TODO: check if really valid");
-            (start_block, end_block)
-        } else {
-            let start_block =
-                self.provider.get_block_by_number(start_height).await?.expect("already checked");
-            let end_block = self
-                .provider
-                .get_block(BlockId::Number(BlockNumberOrTag::Latest))
-                .await?
-                .expect("TODO: check if really valid");
-            (start_block, end_block)
-        };
+            let process = async |eth_block: EthGetBlock<N::BlockResponse>| match eth_block.await {
+                Ok(Some(block)) => Some(BlockHashAndNumber::from_header::<N>(block.header())),
+                Ok(None) => {
+                    sender
+                        .send(Err(BlockScannerError::BlockNotFound(start_height)))
+                        .await
+                        .expect("receiver should be open");
+                    return None;
+                }
+                Err(e) => {
+                    sender.send(Err(e.into())).await.expect("receiver should be open");
+                    return None;
+                }
+            };
 
-        info!(
-            "Syncing historical data from {} to {}",
-            start_block.header().number(),
-            sync_end_block.header().number()
-        );
+            // Step 2: Get exact block numbers for the range
+            let (start_block, sync_end_block) = if let Some(end_height) = end_height {
+                let Some(start_block) =
+                    process(self.provider.get_block_by_number(start_height)).await
+                else {
+                    return;
+                };
+                let Some(end_block) = process(self.provider.get_block(end_height.into())).await
+                else {
+                    return;
+                };
 
-        // start buffering the subscription data
-        let provider = self.provider.clone();
-        let cutoff = sync_end_block.header().number();
-        let ws_task = tokio::spawn(async move {
+                (start_block, end_block)
+            } else {
+                let Some(start_block) =
+                    process(self.provider.get_block_by_number(start_height)).await
+                else {
+                    return;
+                };
+                let Some(end_block) =
+                    process(self.provider.get_block(BlockId::Number(BlockNumberOrTag::Latest)))
+                        .await
+                else {
+                    return;
+                };
+                (start_block, end_block)
+            };
+
+            info!(
+                "Syncing historical data from {} to {}",
+                start_block.number, sync_end_block.number
+            );
+
+            // start buffering the subscription data
+            let provider = self.provider.clone();
+            let cutoff = sync_end_block.number;
+            let ws_task = tokio::spawn(async move {
+                if end_height.is_none() {
+                    Self::websocket_buffer_task(cutoff, provider, buffer_tx).await;
+                }
+            });
+
+            // TODO: invoke with smart retry mechanism with backoff
+            if let Err(e) = self.sync_historical_data(start_block, sync_end_block).await {
+                warn!("aborting ws_task");
+                ws_task.abort();
+                sender
+                    .send(Err(BlockScannerError::HistoricalSyncError(e.to_string())))
+                    .await
+                    .expect("receiver should be open");
+                return;
+            }
+
+            // Step 3: Process buffered WebSocket messages
+            tokio::spawn(async move {
+                if end_height.is_none() {
+                    Self::process_buffered_messages(buffer_rx, sender, cutoff).await;
+                } else if sender.send(Err(BlockScannerError::Eof)).await.is_err() {
+                    warn!("Subscriber channel closed, cleaning up");
+                }
+            });
+
             if end_height.is_none() {
-                Self::websocket_buffer_task(cutoff, provider, buffer_tx).await;
+                info!("Successfully transitioned from historical to live data");
+            } else {
+                info!("Successfully synced historical data");
             }
         });
 
-        // TODO: invoke with smart retry mechanism with backoff
-        if let Err(e) = self.sync_historical_data(start_block, sync_end_block).await {
-            warn!("aborting ws_task");
-            ws_task.abort();
-            return Err(BlockScannerError::HistoricalSyncError(e.to_string()));
-        }
-
-        // Step 3: Process buffered WebSocket messages
-        let sender = self.subscriber.clone().expect("subscriber should be set");
-        tokio::spawn(async move {
-            if end_height.is_none() {
-                Self::process_buffered_messages(buffer_rx, sender, cutoff).await;
-            } else if sender.send(Err(BlockScannerError::Eof)).await.is_err() {
-                warn!("Subscriber channel closed, cleaning up");
-            }
-        });
-
-        if end_height.is_none() {
-            info!("Successfully transitioned from historical to live data");
-        } else {
-            info!("Successfully synced historical data");
-        }
-
-        Ok(())
+        Ok(join_handle)
     }
 
     async fn sync_historical_data(
         &mut self,
-        start: N::BlockResponse,
-        end: N::BlockResponse,
+        start: BlockHashAndNumber,
+        end: BlockHashAndNumber,
     ) -> Result<(), BlockScannerError> {
         let mut batch_count = 0;
 
-        self.current = Some(BlockHashAndNumber::from_header::<N>(start.header()));
+        self.current = Some(start);
 
-        while self.current.as_ref().unwrap().number < end.header().number() {
+        while self.current.as_ref().unwrap().number < end.number {
             self.ensure_current_not_reorged().await?;
 
             let batch_to = if self.current.as_ref().unwrap().number +
                 self.config.blocks_read_per_epoch as u64 >
-                end.header().number()
+                end.number
             {
-                end.header().number()
+                end.number
             } else {
                 self.current.as_ref().unwrap().number + self.config.blocks_read_per_epoch as u64
             };

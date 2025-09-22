@@ -1,6 +1,8 @@
 pub mod block_range_scanner;
+pub mod block_range_scanner_ref;
 pub mod callback;
 pub mod event_scanner;
+pub mod event_scanner_ref;
 pub mod types;
 
 pub use crate::{

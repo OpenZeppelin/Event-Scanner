@@ -11,8 +11,14 @@ use crate::{
     mock_callbacks::BasicCounterCallback,
 };
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScanner, types::EventFilter};
+use anyhow::Context;
+use event_scanner::{
+    event_scanner::EventScanner,
+    event_scanner_ref::EventScanner as EventScannerRef,
+    types::{EventFilter, EventFilterRef},
+};
 use tokio::time::{sleep, timeout};
+use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn basic_single_event_scanning() -> anyhow::Result<()> {
@@ -21,30 +27,35 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
-
-    let filter = EventFilter {
+    let filter = EventFilterRef {
         contract_address,
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        callback,
     };
 
-    let scanner = EventScanner::new()
-        .with_event_filter(filter)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let scanner = EventScannerRef::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let client = scanner.run()?;
-    tokio::spawn(async move {
-        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
-    });
+    let (_, mut stream) = client
+        .subscribe(filter)
+        .await
+        .with_context(|| format!("subscribe failed at {}:{}", file!(), line!()))?;
 
     let expected_event_count = 5;
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
     }
+
+    let event_count = Arc::new(AtomicUsize::new(0));
+
+    let event_count_clone = Arc::clone(&event_count);
+
+    tokio::spawn(async move {
+        // The same number of blocks should be created as events
+        while let Some(Ok(logs)) = stream.next().await {
+            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        }
+    });
 
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
@@ -67,50 +78,72 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let a = deploy_counter(provider.clone()).await?;
     let b = deploy_counter(provider.clone()).await?;
 
-    let a_count = Arc::new(AtomicUsize::new(0));
-    let b_count = Arc::new(AtomicUsize::new(0));
-    let a_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&a_count) });
-    let b_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&b_count) });
-
-    let a_filter = EventFilter {
+    let a_filter = EventFilterRef {
         contract_address: *a.address(),
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        callback: a_cb,
     };
-    let b_filter = EventFilter {
+    let b_filter = EventFilterRef {
         contract_address: *b.address(),
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        callback: b_cb,
     };
 
-    let scanner = EventScanner::new()
-        .with_event_filters(vec![a_filter, b_filter])
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let scanner = EventScannerRef::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let client = scanner.run()?;
-    tokio::spawn(async move {
-        _ = client.subscribe(BlockNumberOrTag::Latest, None).await;
-    });
+
+    // Subscribe to events from both A and B contracts
+    let (_, mut a_stream) = client
+        .subscribe(a_filter)
+        .await
+        .with_context(|| format!("subscribe(A) failed at {}:{}", file!(), line!()))?;
+    let (_, mut b_stream) = client
+        .subscribe(b_filter)
+        .await
+        .with_context(|| format!("subscribe(B) failed at {}:{}", file!(), line!()))?;
 
     let expected_events_a = 3;
     let expected_events_b = 2;
 
-    for _ in 0..expected_events_a {
-        a.increase().send().await?.watch().await?;
-    }
+    // Start emitting events
+    tokio::spawn(async move {
+        for _ in 0..expected_events_a {
+            a.increase()
+                .send()
+                .await
+                .expect("should emit A")
+                .watch()
+                .await
+                .expect("should confirm tx for A");
+        }
+    });
 
-    for _ in 0..expected_events_b {
-        b.increase().send().await?.watch().await?;
-    }
+    tokio::spawn(async move {
+        for _ in 0..expected_events_b {
+            b.increase()
+                .send()
+                .await
+                .expect("should emit B")
+                .watch()
+                .await
+                .expect("should confirm tx for B");
+        }
+    });
+
+    let a_count = Arc::new(AtomicUsize::new(0));
+    let b_count = Arc::new(AtomicUsize::new(0));
 
     let a_count_clone = Arc::clone(&a_count);
     let b_count_clone = Arc::clone(&b_count);
+
+    // Start processing events from both contracts
     let event_counting = async move {
-        while a_count_clone.load(Ordering::SeqCst) < expected_events_a
-            || b_count_clone.load(Ordering::SeqCst) < expected_events_b
-        {
-            sleep(Duration::from_millis(100)).await;
+        while a_count_clone.load(Ordering::SeqCst) != expected_events_a {
+            let logs = a_stream.next().await.expect("should receive event").expect("should be Ok");
+            a_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        }
+        while b_count_clone.load(Ordering::SeqCst) != expected_events_b {
+            let logs = b_stream.next().await.expect("should receive event").expect("should be Ok");
+            b_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
         }
     };
 
@@ -168,8 +201,8 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let increase_count_clone = Arc::clone(&increase_count);
     let decrease_count_clone = Arc::clone(&decrease_count);
     let event_counting = async move {
-        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events
-            || decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
+        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events ||
+            decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
         {
             sleep(Duration::from_millis(100)).await;
         }
