@@ -769,12 +769,14 @@ impl BlockScannerClient {
 mod tests {
     use alloy::eips::BlockNumberOrTag;
     use alloy::network::Ethereum;
-    use alloy::primitives::keccak256;
-    use alloy::providers::ext::AnvilApi;
-    use alloy::rpc::client::RpcClient;
-    use alloy::rpc::types::anvil::ReorgOptions;
+    use alloy::primitives::{B256, keccak256};
+    use alloy::rpc::{
+        client::RpcClient,
+        types::{Block as RpcBlock, Header, Transaction},
+    };
     use alloy::transports::mock::Asserter;
     use alloy_node_bindings::Anvil;
+    use serde_json::{Value, json};
     use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
 
@@ -791,6 +793,13 @@ mod tests {
 
     fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
         RootProvider::new(RpcClient::mocked(asserter))
+    }
+
+    fn mock_block(number: u64, hash: B256) -> RpcBlock<Transaction, Header> {
+        let mut block: RpcBlock<Transaction, Header> = RpcBlock::default();
+        block.header.hash = hash;
+        block.header.number = number;
+        block
     }
 
     #[test]
@@ -950,46 +959,33 @@ mod tests {
 
     #[tokio::test]
     async fn rewinds_on_detected_reorg() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
-        let provider: RootProvider<Ethereum> =
-            RootProvider::connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_set_auto_mine(false).await?;
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter.clone());
 
         let mut config = test_config();
-        config.reorg_rewind_depth = 3;
+        config.reorg_rewind_depth = 6;
 
-        provider.anvil_mine(Some(12), None).await?;
+        let (mut service, _cmd) = BlockScannerService::new(config.clone(), provider);
 
-        let head_before = provider.get_block_number().await?;
-        assert!(head_before > config.reorg_rewind_depth);
+        let current_height = 10;
+        let tracked_hash = keccak256(b"tracked block");
+        let tracked_block = mock_block(current_height, tracked_hash);
+        service.current = Some(BlockHashAndNumber::from_header::<Ethereum>(tracked_block.header()));
 
-        let (mut service, _cmd) = BlockScannerService::new(config.clone(), provider.clone());
+        let rewound_height = current_height - config.reorg_rewind_depth;
+        let rewound_hash = keccak256(b"rewound block");
+        let rewound_block = mock_block(rewound_height, rewound_hash);
 
-        let tracked_current_block = provider
-            .get_block_by_number(BlockNumberOrTag::Number(head_before))
-            .await?
-            .expect("tracked block exists");
-        let tracked_current_hash = tracked_current_block.header().hash();
-
-        service.current =
-            Some(BlockHashAndNumber::from_header::<Ethereum>(tracked_current_block.header()));
-
-        let reorg_depth = 4;
-        provider
-            .anvil_reorg(ReorgOptions { depth: reorg_depth, tx_block_pairs: Vec::new() })
-            .await?;
-        provider.anvil_mine(Some(reorg_depth), None).await?;
-
-        let block_hash =
-            provider.get_block_by_number(head_before.into()).await?.unwrap().header().hash();
-
-        assert!(provider.get_block_by_hash(tracked_current_hash).await?.is_none());
+        asserter.push_success(&Value::Null);
+        asserter.push_success(&json!(format!("0x{:x}", current_height + 2)));
+        asserter.push_success(&rewound_block);
 
         service.ensure_current_not_reorged().await?;
 
         let current = service.current.expect("current should be set after rewind");
-        assert_eq!(current.number, head_before - config.reorg_rewind_depth);
-        assert_ne!(current.hash, tracked_current_hash);
+        println!("current: {current:?}");
+        assert_eq!(current.number, rewound_height);
+        assert_eq!(current.hash, rewound_hash);
 
         Ok(())
     }
