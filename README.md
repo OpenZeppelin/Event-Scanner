@@ -102,7 +102,6 @@ async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: al
 - `with_callback_strategy(strategy)` – override retry behaviour (`StateSyncAwareStrategy` by default).
 - `with_blocks_read_per_epoch` - how many blocks are read at a time in a single batch (taken into consideration when fetching historical blocks)
 - `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected
-- `with_retry_interval` - how often to retry failed callbacks
 - `with_block_confirmations` - how many confirmations to wait for before considering a block final
 
 Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `build` the `EventScanner` and allow you to call run to start in various [modes](#scanning-Modes).
