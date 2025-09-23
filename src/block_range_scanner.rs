@@ -548,9 +548,8 @@ impl<N: Network> Service<N> {
                         continue;
                     }
 
-                    // we add 1 to include the latest block
-                    #[allow(clippy::range_plus_one)]
-                    if let Err(e) = buffer_sender.send(current..=header_resp.number() + 1).await {
+                    // RangeInclusive already includes the end block
+                    if let Err(e) = buffer_sender.send(current..=header_resp.number()).await {
                         error!("Buffer channel closed, stopping buffer task: {e}");
 
                         return;
@@ -658,7 +657,7 @@ impl BlockRangeScannerClient {
     /// # Arguments
     ///
     /// * `start_height` - The block number to start from.
-    /// * `end_height` - The block number to end at.
+    /// * `end_height` - The block number to end at (inclusive).
     ///
     /// # Errors
     ///
@@ -764,14 +763,14 @@ mod tests {
         while let Some(result) = receiver.next().await {
             match result {
                 Ok(range) => {
-                    println!("Received block range: {} - {}", *range.start(), *range.end());
+                    println!("Received block range: [{}..={}]", *range.start(), *range.end());
                     if block_range_start == 0 {
                         block_range_start = *range.start();
                     }
 
                     assert_eq!(block_range_start, *range.start());
                     assert!(*range.end() >= *range.start());
-                    block_range_start = *range.end();
+                    block_range_start = *range.end() + 1;
                 }
                 Err(e) => {
                     panic!("Received error from subscription: {e}");
