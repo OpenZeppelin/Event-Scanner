@@ -181,8 +181,8 @@ impl<N: Network> EventScanner<N> {
         while let Some(range) = stream.next().await {
             match range {
                 Ok(range) => {
-                    let from_block = range.start;
-                    let to_block = range.end;
+                    let from_block = *range.start();
+                    let to_block = *range.end();
                     info!(from_block, to_block, "processing block range");
                     self.process_block_range(from_block, to_block, &event_channels).await?;
                 }
