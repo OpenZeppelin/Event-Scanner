@@ -514,8 +514,12 @@ impl<N: Network> Service<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = (self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64)
+            let batch_to = self
+                .current
+                .as_ref()
+                .unwrap()
+                .number
+                .saturating_add(self.config.blocks_read_per_epoch as u64)
                 .min(end.header().number());
 
             let batch_end_block =
@@ -527,7 +531,7 @@ impl<N: Network> Service<N> {
 
             batch_count += 1;
             if batch_count % 10 == 0 {
-                debug!("Processed {batch_count} historical batches");
+                debug!(batch_count = batch_count, "Processed historical batches");
             }
         }
 
