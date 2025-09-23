@@ -466,9 +466,9 @@ impl<N: Network> Service<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64
-                > end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number +
+                self.config.blocks_read_per_epoch as u64 >
+                end.header().number()
             {
                 end.header().number()
             } else {
@@ -735,14 +735,16 @@ impl BlockRangeScannerClient {
 
 #[cfg(test)]
 mod tests {
-    use alloy::eips::BlockNumberOrTag;
-    use alloy::network::Ethereum;
-    use alloy::primitives::{B256, keccak256};
-    use alloy::rpc::{
-        client::RpcClient,
-        types::{Block as RpcBlock, Header, Transaction},
+    use alloy::{
+        eips::BlockNumberOrTag,
+        network::Ethereum,
+        primitives::{B256, keccak256},
+        rpc::{
+            client::RpcClient,
+            types::{Block as RpcBlock, Header, Transaction},
+        },
+        transports::mock::Asserter,
     };
-    use alloy::transports::mock::Asserter;
     use alloy_node_bindings::Anvil;
     use serde_json::{Value, json};
     use tokio::sync::mpsc;
