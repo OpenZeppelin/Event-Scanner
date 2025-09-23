@@ -81,7 +81,7 @@ use alloy::{
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
-        TransportResult,
+        RpcError, TransportErrorKind, TransportResult,
         http::reqwest::{self, Url},
         ws::WsConnect,
     },
@@ -113,7 +113,7 @@ pub enum Error {
     SerializationError(#[from] serde_json::Error),
 
     #[error("RPC error: {0}")]
-    RpcError(#[from] alloy::transports::RpcError<alloy::transports::TransportErrorKind>),
+    RpcError(#[from] RpcError<TransportErrorKind>),
 
     #[error("Channel send error")]
     ChannelError,
@@ -123,6 +123,9 @@ pub enum Error {
 
     #[error("Only one subscriber allowed at a time")]
     MultipleSubscribers,
+
+    #[error("No subscriber set for streaming")]
+    NoSubscriber,
 
     #[error("Historical sync failed: {0}")]
     HistoricalSyncError(String),
@@ -402,9 +405,14 @@ impl<N: Network> Service<N> {
         end_height: BlockNumberOrTag,
     ) -> Result<(), Error> {
         let start_block =
-            self.provider.get_block_by_number(start_height).await?.expect("block does not exist");
-        let end_block =
-            self.provider.get_block_by_number(end_height).await?.expect("block does not exist");
+            self.provider.get_block_by_number(start_height).await?.ok_or(
+                Error::HistoricalSyncError(format!("Start block {start_height:?} not found")),
+            )?;
+        let end_block = self
+            .provider
+            .get_block_by_number(end_height)
+            .await?
+            .ok_or(Error::HistoricalSyncError(format!("End block {end_height:?} not found")))?;
 
         info!(
             start_block = start_block.header().number(),
@@ -416,8 +424,8 @@ impl<N: Network> Service<N> {
 
         info!("Successfully synced historical data");
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -432,13 +440,15 @@ impl<N: Network> Service<N> {
         // Step 1:
         // Fetches the starting block and end block for historical sync
         let start_block =
-            self.provider.get_block_by_number(start_height).await?.expect("already checked");
+            self.provider.get_block_by_number(start_height).await?.ok_or(
+                Error::HistoricalSyncError(format!("Start block {start_height:?} not found")),
+            )?;
 
         let end_block = self
             .provider
             .get_block_by_number(BlockNumberOrTag::Latest)
             .await?
-            .expect("should be valid");
+            .ok_or(Error::HistoricalSyncError("Latest block not found".to_string()))?;
 
         info!(
             start_block = start_block.header().number(),
@@ -471,8 +481,9 @@ impl<N: Network> Service<N> {
             return Err(Error::HistoricalSyncError(e.to_string()));
         }
 
-        let sender = self.subscriber.clone().expect("subscriber should be set");
-
+        let Some(sender) = self.subscriber.clone() else {
+            return Err(Error::ServiceShutdown);
+        };
         // Step 5:
         // Spawn the buffer processor task
         // This will:
@@ -492,7 +503,10 @@ impl<N: Network> Service<N> {
         let provider = self.provider.clone();
         let start = self.provider.get_block_number().await?;
 
-        let sender = self.subscriber.clone().expect("subscriber should be set");
+        let Some(sender) = self.subscriber.clone() else {
+            return Err(Error::ServiceShutdown);
+        };
+
         tokio::spawn(async move {
             Self::stream_live_blocks(start, provider, sender).await;
         });
@@ -520,8 +534,9 @@ impl<N: Network> Service<N> {
                 .saturating_add(self.config.blocks_read_per_epoch as u64)
                 .min(end.header().number());
 
-            let batch_end_block =
-                self.provider.get_block_by_number(batch_to.into()).await?.expect("should be valid");
+            let batch_end_block = self.provider.get_block_by_number(batch_to.into()).await?.ok_or(
+                Error::HistoricalSyncError(format!("Batch end block {batch_to} not found")),
+            )?;
 
             self.send_to_subscriber(Ok(self.current.as_ref().unwrap().number..=batch_to)).await;
 
@@ -565,7 +580,9 @@ impl<N: Network> Service<N> {
             .get_block_by_number(new_current_height.into())
             .await?
             .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
-            .expect("block should exist");
+            .ok_or(Error::HistoricalSyncError(format!(
+                "Block {new_current_height} not found during rewind",
+            )))?;
 
         info!(
             old_current = self.current.as_ref().unwrap().number,
