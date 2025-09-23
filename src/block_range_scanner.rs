@@ -416,8 +416,8 @@ impl<N: Network> Service<N> {
 
         info!("Successfully synced historical data");
 
-        if let Some(sender) = &self.subscriber
-            && sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber &&
+            sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -478,7 +478,8 @@ impl<N: Network> Service<N> {
         // This will:
         // 1. Process all buffered blocks, filtering out any ≤ cutoff
         // 2. Forward blocks > cutoff to the user
-        // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live stream)
+        // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
+        //    stream)
         tokio::spawn(async move {
             Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
         });
@@ -511,8 +512,8 @@ impl<N: Network> Service<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = (self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64)
+            let batch_to = (self.current.as_ref().unwrap().number +
+                self.config.blocks_read_per_epoch as u64)
                 .min(end.header().number());
 
             let batch_end_block =
