@@ -379,7 +379,7 @@ impl<N: Network> Service<N> {
             return Err(Error::MultipleSubscribers);
         }
 
-        info!("Starting subscription from point: {start_height:?}");
+        info!(start_height = start_height, "Starting subscription from point");
         self.subscriber = Some(sender);
 
         self.sync_historical_and_transition_to_live(start_height, end_height).await?;
@@ -466,14 +466,9 @@ impl<N: Network> Service<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64
-                > end.header().number()
-            {
-                end.header().number()
-            } else {
-                self.current.as_ref().unwrap().number + self.config.blocks_read_per_epoch as u64
-            };
+            let batch_to = (self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64)
+                .min(end.header().number());
 
             let batch_end_block =
                 self.provider.get_block_by_number(batch_to.into()).await?.expect("should be valid");
@@ -488,7 +483,7 @@ impl<N: Network> Service<N> {
             }
         }
 
-        info!("Historical sync completed: {batch_count} batches processed");
+        info!(batch_count = batch_count, "Historical sync completed");
         Ok(())
     }
 
@@ -523,9 +518,9 @@ impl<N: Network> Service<N> {
             .expect("block should exist");
 
         info!(
-            "Rewind on reorg detected\noldCurrent: {}, newCurrent: {}",
-            self.current.as_ref().unwrap().number,
-            current.number
+            old_current = self.current.as_ref().unwrap().number,
+            new_current = current.number,
+            "Rewind on reorg detected"
         );
 
         self.current = Some(current);
@@ -543,7 +538,7 @@ impl<N: Network> Service<N> {
                 info!("WebSocket connected for buffering");
 
                 while let Ok(header_resp) = ws_stream.recv().await {
-                    info!("Received block header: {}", header_resp.number());
+                    info!(block_number = header_resp.number(), "Received block header");
                     if current == header_resp.number() {
                         continue;
                     }
@@ -596,7 +591,7 @@ impl<N: Network> Service<N> {
             }
         }
 
-        info!("Processed buffered messages: {processed} forwarded, {discarded} discarded");
+        info!(processed = processed, discarded = discarded, "Processed buffered messages");
     }
 
     async fn get_block_subscription(
