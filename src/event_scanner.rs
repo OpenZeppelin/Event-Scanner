@@ -240,10 +240,9 @@ impl<N: Network> EventScanner<N> {
                     }
                     let contract_display = event_filter
                         .contract_address
-                        .map(|addr| format!("{:?}", addr))
-                        .unwrap_or_else(|| "all contracts".to_string());
+                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
                     let event_display =
-                        event_filter.event.as_ref().map(|s| s.as_str()).unwrap_or("all events");
+                        event_filter.event.as_deref().map_or("all events", |s| s);
 
                     info!(
                         contract = %contract_display,
@@ -264,25 +263,23 @@ impl<N: Network> EventScanner<N> {
                             if let Err(e) = sender.send(log).await {
                                 let event_display = event_filter
                                     .event
-                                    .as_ref()
-                                    .map(|s| s.as_str())
-                                    .unwrap_or("all events");
+                                    .as_deref()
+                                    .map_or("all events", |s| s);
                                 warn!(event = %event_display, error = %e, "failed to enqueue log for processing");
                             }
                         }
                     } else {
                         let event_display =
-                            event_filter.event.as_ref().map(|s| s.as_str()).unwrap_or("all events");
+                            event_filter.event.as_deref().map_or("all events", |s| s);
                         warn!(event = %event_display, "no channel found for event type");
                     }
                 }
                 Err(e) => {
                     let contract_display = event_filter
                         .contract_address
-                        .map(|addr| format!("{:?}", addr))
-                        .unwrap_or_else(|| "all contracts".to_string());
+                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
                     let event_display =
-                        event_filter.event.as_ref().map(|s| s.as_str()).unwrap_or("all events");
+                        event_filter.event.as_deref().map_or("all events", |s| s);
 
                     error!(
                         contract = %contract_display,
