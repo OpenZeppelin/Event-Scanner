@@ -762,7 +762,7 @@ mod tests {
         while let Some(result) = receiver.next().await {
             match result {
                 Ok(range) => {
-                    println!("Received block range: [{}..={}]", *range.start(), *range.end());
+                    println!("Received block range: [{range:?}]");
                     if block_range_start == 0 {
                         block_range_start = *range.start();
                     }
