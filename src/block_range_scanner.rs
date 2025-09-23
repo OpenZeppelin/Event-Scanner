@@ -997,24 +997,143 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn buffered_messages_trim_invalid_ranges() -> anyhow::Result<()> {
+    async fn ranges_entirely_after_cutoff_are_forwarded_unchanged() -> anyhow::Result<()> {
+        let cutoff = 50;
+
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Ok(40..=44)).await.unwrap();
-        buffer_tx.send(Ok(45..=54)).await.unwrap();
-        buffer_tx.send(Ok(60..=61)).await.unwrap();
+        buffer_tx.send(Ok(51..=55)).await.unwrap();
+        buffer_tx.send(Ok(60..=65)).await.unwrap();
+        buffer_tx.send(Ok(70..=71)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
-
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, 50).await;
+        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
             forwarded.push(result.unwrap());
         }
 
-        assert_eq!(forwarded, vec![50..=54, 60..=61]);
+        // All ranges should be forwarded as-is since they're after cutoff
+        assert_eq!(forwarded, vec![51..=55, 60..=65, 70..=71]);
+        Ok(())
+    }
 
+    #[tokio::test]
+    async fn ranges_entirely_before_cutoff_are_discarded() -> anyhow::Result<()> {
+        let cutoff = 100;
+
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(Ok(40..=50)).await.unwrap();
+        buffer_tx.send(Ok(60..=75)).await.unwrap();
+        buffer_tx.send(Ok(90..=99)).await.unwrap();
+        drop(buffer_tx);
+
+        let (out_tx, mut out_rx) = mpsc::channel(8);
+        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+
+        let mut forwarded = Vec::new();
+        while let Some(result) = out_rx.recv().await {
+            forwarded.push(result.unwrap());
+        }
+
+        // All ranges should be discarded since they're before cutoff
+        assert_eq!(forwarded, vec![]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ranges_overlapping_cutoff_are_trimmed() -> anyhow::Result<()> {
+        let cutoff = 75;
+
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(Ok(70..=80)).await.unwrap();
+        buffer_tx.send(Ok(60..=90)).await.unwrap();
+        buffer_tx.send(Ok(74..=76)).await.unwrap();
+        drop(buffer_tx);
+
+        let (out_tx, mut out_rx) = mpsc::channel(8);
+        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+
+        let mut forwarded = Vec::new();
+        while let Some(result) = out_rx.recv().await {
+            forwarded.push(result.unwrap());
+        }
+
+        // All ranges should be trimmed to start at cutoff (75)
+        assert_eq!(forwarded, vec![75..=80, 75..=90, 75..=76]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mixed_ranges_are_handled_correctly() -> anyhow::Result<()> {
+        let cutoff = 50;
+
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(Ok(30..=40)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Ok(45..=55)).await.unwrap(); // Overlaps: trim to 50..=55
+        buffer_tx.send(Ok(60..=65)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(Ok(48..=49)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Ok(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
+        buffer_tx.send(Ok(100..=110)).await.unwrap(); // After cutoff: forward as-is
+        drop(buffer_tx);
+
+        let (out_tx, mut out_rx) = mpsc::channel(8);
+        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+
+        let mut forwarded = Vec::new();
+        while let Some(result) = out_rx.recv().await {
+            forwarded.push(result.unwrap());
+        }
+
+        assert_eq!(forwarded, vec![50..=55, 60..=65, 50..=51, 100..=110]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn edge_case_range_exactly_at_cutoff() -> anyhow::Result<()> {
+        let cutoff = 100;
+
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(Ok(99..=99)).await.unwrap(); // Just before: discard
+        buffer_tx.send(Ok(100..=100)).await.unwrap(); // Exactly at: forward
+        buffer_tx.send(Ok(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
+        buffer_tx.send(Ok(100..=101)).await.unwrap(); // Starts at cutoff: forward
+        drop(buffer_tx);
+
+        let (out_tx, mut out_rx) = mpsc::channel(8);
+        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+
+        let mut forwarded = Vec::new();
+        while let Some(result) = out_rx.recv().await {
+            forwarded.push(result.unwrap());
+        }
+
+        // ensure no duplicates
+        assert_eq!(forwarded, vec![100..=100, 100..=101]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cutoff_at_zero_handles_all_ranges() -> anyhow::Result<()> {
+        let cutoff = 0;
+
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(Ok(0..=5)).await.unwrap();
+        buffer_tx.send(Ok(1..=10)).await.unwrap();
+        buffer_tx.send(Ok(20..=25)).await.unwrap();
+        drop(buffer_tx);
+
+        let (out_tx, mut out_rx) = mpsc::channel(8);
+        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+
+        let mut forwarded = Vec::new();
+        while let Some(result) = out_rx.recv().await {
+            forwarded.push(result.unwrap());
+        }
+
+        // All ranges should be forwarded since they're all >= 0
+        assert_eq!(forwarded, vec![0..=5, 1..=10, 20..=25]);
         Ok(())
     }
 
