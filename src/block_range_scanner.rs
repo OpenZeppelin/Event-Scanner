@@ -379,10 +379,48 @@ impl<N: Network> Service<N> {
             return Err(Error::MultipleSubscribers);
         }
 
-        info!(start_height = start_height, "Starting subscription from point");
+        info!(start_height = ?start_height, "Starting subscription from point");
         self.subscriber = Some(sender);
 
-        self.sync_historical_and_transition_to_live(start_height, end_height).await?;
+        if let Some(end_height) = end_height {
+            self.sync_historical(start_height, end_height).await?;
+            return Ok(());
+        }
+
+        if matches!(start_height, BlockNumberOrTag::Latest) {
+            self.sync_live().await?;
+        } else {
+            self.sync_historical_and_transition_to_live(start_height).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn sync_historical(
+        &mut self,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<(), Error> {
+        let start_block =
+            self.provider.get_block_by_number(start_height).await?.expect("block does not exist");
+        let end_block =
+            self.provider.get_block(end_height.into()).await?.expect("block does not exist");
+
+        info!(
+            start_block = start_block.header().number(),
+            end_block = end_block.header().number(),
+            "Syncing historical data"
+        );
+
+        self.sync_historical_data(start_block, end_block).await?;
+
+        info!("Successfully synced historical data");
+
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
+        {
+            warn!("Subscriber channel closed, cleaning up");
+        }
 
         Ok(())
     }
@@ -390,66 +428,58 @@ impl<N: Network> Service<N> {
     async fn sync_historical_and_transition_to_live(
         &mut self,
         start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
     ) -> Result<(), Error> {
-        // Step 1: Establish WebSocket connection
-        let (live_block_buffer_sender, live_block_buffer_receiver) =
-            mpsc::channel(MAX_BUFFERED_MESSAGES);
-
-        // Step 2: Perform historical sync
-        let (start_block, sync_end_block) = if let Some(end_height) = end_height {
-            let start_block =
-                self.provider.get_block_by_number(start_height).await?.expect("already checked");
-            let end_block =
-                self.provider.get_block(end_height.into()).await?.expect("should be valid");
-            (start_block, end_block)
-        } else {
-            let start_block =
-                self.provider.get_block_by_number(start_height).await?.expect("already checked");
-            let end_block = self
-                .provider
-                .get_block(BlockId::Number(BlockNumberOrTag::Latest))
-                .await?
-                .expect("should be valid");
-            (start_block, end_block)
-        };
+        let start_block =
+            self.provider.get_block_by_number(start_height).await?.expect("already checked");
+        let end_block = self
+            .provider
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .await?
+            .expect("should be valid");
 
         info!(
             start_block = start_block.header().number(),
-            end_block = sync_end_block.header().number(),
+            end_block = end_block.header().number(),
             "Syncing historical data"
         );
 
-        // start buffering the subscription data
+        let (live_block_buffer_sender, live_block_buffer_receiver) =
+            mpsc::channel(MAX_BUFFERED_MESSAGES);
         let provider = self.provider.clone();
-        let cutoff = sync_end_block.header().number();
+        let cutoff = end_block.header().number();
         let live_subscription_task = tokio::spawn(async move {
-            if end_height.is_none() {
-                Self::buffer_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
-            }
+            Self::buffer_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
         });
 
-        if let Err(e) = self.sync_historical_data(start_block, sync_end_block).await {
+        if let Err(e) = self.sync_historical_data(start_block, end_block).await {
             warn!("aborting live_subscription_task");
             live_subscription_task.abort();
             return Err(Error::HistoricalSyncError(e.to_string()));
         }
 
-        // Step 3: Process buffered WebSocket messages
         let sender = self.subscriber.clone().expect("subscriber should be set");
         tokio::spawn(async move {
-            if end_height.is_none() {
-                Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
-            } else if sender.send(Err(Error::Eof)).await.is_err() {
-                warn!("Subscriber channel closed, cleaning up");
-            }
+            Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
         });
 
-        if end_height.is_none() {
-            info!("Successfully transitioned from historical to live data");
-        } else {
-            info!("Successfully synced historical data");
-        }
+        info!("Successfully transitioned from historical to live data");
+
+        Ok(())
+    }
+
+    async fn sync_live(&mut self) -> Result<(), Error> {
+        let (live_block_buffer_sender, live_block_buffer_receiver) =
+            mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let provider = self.provider.clone();
+        let cutoff = self.provider.get_block_number().await?;
+        tokio::spawn(async move {
+            Self::buffer_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
+        });
+
+        let sender = self.subscriber.clone().expect("subscriber should be set");
+        tokio::spawn(async move {
+            Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
+        });
 
         Ok(())
     }
