@@ -751,12 +751,7 @@ mod tests {
     use super::*;
 
     fn test_config() -> Config {
-        Config {
-            blocks_read_per_epoch: 5,
-            reorg_rewind_depth: 5,
-            retry_interval: Duration::from_secs(1),
-            block_confirmations: 0,
-        }
+        Config { blocks_read_per_epoch: 5, reorg_rewind_depth: 5, block_confirmations: 0 }
     }
 
     fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
@@ -776,7 +771,6 @@ mod tests {
 
         assert_eq!(scanner.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
         assert_eq!(scanner.reorg_rewind_depth, DEFAULT_REORG_REWIND_DEPTH);
-        assert_eq!(scanner.retry_interval, DEFAULT_RETRY_INTERVAL);
         assert_eq!(scanner.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
@@ -784,18 +778,14 @@ mod tests {
     fn builder_methods_update_configuration() {
         let blocks_read_per_epoch = 42;
         let reorg_rewind_depth = 12;
-        let retry_interval = Duration::from_secs(33);
         let block_confirmations = 7;
 
         let scanner = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(blocks_read_per_epoch)
             .with_reorg_rewind_depth(reorg_rewind_depth)
-            .with_retry_interval(retry_interval)
             .with_block_confirmations(block_confirmations);
 
         assert_eq!(scanner.blocks_read_per_epoch, blocks_read_per_epoch);
-        assert_eq!(scanner.reorg_rewind_depth, reorg_rewind_depth);
-        assert_eq!(scanner.retry_interval, retry_interval);
         assert_eq!(scanner.block_confirmations, block_confirmations);
     }
 
@@ -803,7 +793,7 @@ mod tests {
     fn service_status_reflects_internal_state() {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(test_config(), provider);
 
         let processed_count = 7;
         let error_count = 2;
@@ -830,7 +820,7 @@ mod tests {
     async fn send_to_subscriber_increments_processed_count() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(test_config(), provider);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
@@ -851,7 +841,7 @@ mod tests {
     async fn send_to_subscriber_removes_closed_channel() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(test_config(), provider);
 
         let (tx, rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -872,7 +862,7 @@ mod tests {
     fn handle_unsubscribe_clears_subscriber() {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(test_config(), provider);
 
         let (tx, _rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -932,7 +922,7 @@ mod tests {
         let mut config = test_config();
         config.reorg_rewind_depth = 6;
 
-        let (mut service, _cmd) = BlockScannerService::new(config.clone(), provider);
+        let (mut service, _cmd) = Service::new(config.clone(), provider);
 
         let current_height = 10;
         let tracked_hash = keccak256(b"tracked block");
@@ -967,7 +957,7 @@ mod tests {
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
 
-        BlockScannerService::<Ethereum>::process_buffered_messages(buffer_rx, out_tx, 50).await;
+        Service::<Ethereum>::process_buffered_messages(buffer_rx, out_tx, 50).await;
 
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
@@ -983,15 +973,15 @@ mod tests {
     async fn forwards_errors_to_subscribers() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = BlockScannerService::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(test_config(), provider);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
 
-        service.send_to_subscriber(Err(BlockScannerError::WebSocketConnectionFailed(4))).await;
+        service.send_to_subscriber(Err(Error::WebSocketConnectionFailed(4))).await;
 
         match rx.recv().await.expect("subscriber should stay open") {
-            Err(BlockScannerError::WebSocketConnectionFailed(attempts)) => assert_eq!(attempts, 4),
+            Err(Error::WebSocketConnectionFailed(attempts)) => assert_eq!(attempts, 4),
             other => panic!("unexpected message: {other:?}"),
         }
 
