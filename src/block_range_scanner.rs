@@ -429,8 +429,11 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
     ) -> Result<(), Error> {
+        // Step 1:
+        // Fetches the starting block and end block for historical sync
         let start_block =
             self.provider.get_block_by_number(start_height).await?.expect("already checked");
+
         let end_block = self
             .provider
             .get_block_by_number(BlockNumberOrTag::Latest)
@@ -443,14 +446,25 @@ impl<N: Network> Service<N> {
             "Syncing historical data"
         );
 
+        // Step 2: Setup the live streaming buffer
+        // This channel will accumulate while historical sync is running
         let (live_block_buffer_sender, live_block_buffer_receiver) =
             mpsc::channel::<Result<RangeInclusive<BlockNumber>, Error>>(MAX_BUFFERED_MESSAGES);
+
         let provider = self.provider.clone();
+
+        // The cutoff is the last block we have synced historically
+        // Any block > cutoff will come from the live stream
         let cutoff = end_block.header().number();
+
+        // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
             Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
         });
 
+        // Step 4: Perform historical synchronization
+        // This processes blocks from start_block to end_block (cutoff)
+        // If this fails, we need to abort the live streaming task
         if let Err(e) = self.sync_historical_data(start_block, end_block).await {
             warn!("aborting live_subscription_task");
             live_subscription_task.abort();
@@ -458,12 +472,18 @@ impl<N: Network> Service<N> {
         }
 
         let sender = self.subscriber.clone().expect("subscriber should be set");
+
+        // Step 5: Setup the buffer processor
+        // Spawn the buffer processor task
+        // This will:
+        // 1. Process all buffered blocks, filtering out any ≤ cutoff
+        // 2. Forward blocks > cutoff to the user
+        // 3. Continue forwarding until the buffer
         tokio::spawn(async move {
             Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
         });
 
         info!("Successfully transitioned from historical to live data");
-
         Ok(())
     }
 
