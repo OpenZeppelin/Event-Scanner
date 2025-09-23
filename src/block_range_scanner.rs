@@ -425,7 +425,7 @@ impl<N: Network> Service<N> {
         let cutoff = sync_end_block.header().number();
         let ws_task = tokio::spawn(async move {
             if end_height.is_none() {
-                Self::websocket_buffer_task(cutoff, provider, buffer_tx).await;
+                Self::websocket_buffer_task(cutoff + 1, provider, buffer_tx).await;
             }
         });
 
