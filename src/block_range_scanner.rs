@@ -382,18 +382,19 @@ impl<N: Network> Service<N> {
         info!("Starting subscription from point: {start_height:?}");
         self.subscriber = Some(sender);
 
-        self.sync_with_transition(start_height, end_height).await?;
+        self.sync_historical_and_transition_to_live(start_height, end_height).await?;
 
         Ok(())
     }
 
-    async fn sync_with_transition(
+    async fn sync_historical_and_transition_to_live(
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
     ) -> Result<(), Error> {
         // Step 1: Establish WebSocket connection
-        let (buffer_tx, buffer_rx) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (live_block_buffer_sender, live_block_buffer_receiver) =
+            mpsc::channel(MAX_BUFFERED_MESSAGES);
 
         // Step 2: Perform historical sync
         let (start_block, sync_end_block) = if let Some(end_height) = end_height {
@@ -414,23 +415,23 @@ impl<N: Network> Service<N> {
         };
 
         info!(
-            "Syncing historical data from {} to {}",
-            start_block.header().number(),
-            sync_end_block.header().number()
+            start_block = start_block.header().number(),
+            end_block = sync_end_block.header().number(),
+            "Syncing historical data"
         );
 
         // start buffering the subscription data
         let provider = self.provider.clone();
         let cutoff = sync_end_block.header().number();
-        let ws_task = tokio::spawn(async move {
+        let live_subscription_task = tokio::spawn(async move {
             if end_height.is_none() {
-                Self::websocket_buffer_task(cutoff + 1, provider, buffer_tx).await;
+                Self::buffer_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
             }
         });
 
         if let Err(e) = self.sync_historical_data(start_block, sync_end_block).await {
-            warn!("aborting ws_task");
-            ws_task.abort();
+            warn!("aborting live_subscription_task");
+            live_subscription_task.abort();
             return Err(Error::HistoricalSyncError(e.to_string()));
         }
 
@@ -438,7 +439,7 @@ impl<N: Network> Service<N> {
         let sender = self.subscriber.clone().expect("subscriber should be set");
         tokio::spawn(async move {
             if end_height.is_none() {
-                Self::process_buffered_messages(buffer_rx, sender, cutoff).await;
+                Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
             } else if sender.send(Err(Error::Eof)).await.is_err() {
                 warn!("Subscriber channel closed, cleaning up");
             }
@@ -465,9 +466,9 @@ impl<N: Network> Service<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64 >
-                end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64
+                > end.header().number()
             {
                 end.header().number()
             } else {
@@ -532,7 +533,7 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn websocket_buffer_task<P: Provider<N>>(
+    async fn buffer_live_blocks<P: Provider<N>>(
         mut current: BlockNumber,
         provider: P,
         buffer_sender: mpsc::Sender<RangeInclusive<BlockNumber>>,
@@ -564,7 +565,7 @@ impl<N: Network> Service<N> {
         }
     }
 
-    async fn process_buffered_messages(
+    async fn process_live_block_buffer(
         mut buffer_rx: mpsc::Receiver<RangeInclusive<BlockNumber>>,
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         cutoff: BlockNumber,
@@ -960,7 +961,7 @@ mod tests {
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
 
-        Service::<Ethereum>::process_buffered_messages(buffer_rx, out_tx, 50).await;
+        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, 50).await;
 
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
