@@ -101,8 +101,8 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let a_count_clone = Arc::clone(&a_count);
     let b_count_clone = Arc::clone(&b_count);
     let event_counting = async move {
-        while a_count_clone.load(Ordering::SeqCst) < expected_events_a ||
-            b_count_clone.load(Ordering::SeqCst) < expected_events_b
+        while a_count_clone.load(Ordering::SeqCst) < expected_events_a
+            || b_count_clone.load(Ordering::SeqCst) < expected_events_b
         {
             sleep(Duration::from_millis(100)).await;
         }
@@ -159,8 +159,8 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let increase_count_clone = Arc::clone(&increase_count);
     let decrease_count_clone = Arc::clone(&decrease_count);
     let event_counting = async move {
-        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events ||
-            decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
+        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events
+            || decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
         {
             sleep(Duration::from_millis(100)).await;
         }

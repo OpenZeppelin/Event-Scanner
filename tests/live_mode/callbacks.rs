@@ -101,8 +101,8 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
     let attempts_clone = Arc::clone(&attempts);
     let successes_clone = Arc::clone(&successes);
     let attempt_counting = async move {
-        while attempts_clone.load(Ordering::SeqCst) < expected_attempts ||
-            successes_clone.load(Ordering::SeqCst) < expected_successes
+        while attempts_clone.load(Ordering::SeqCst) < expected_attempts
+            || successes_clone.load(Ordering::SeqCst) < expected_successes
         {
             sleep(Duration::from_millis(100)).await;
         }
