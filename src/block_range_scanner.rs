@@ -921,28 +921,31 @@ mod tests {
 
         let mut config = test_config();
         config.reorg_rewind_depth = 6;
-
         let (mut service, _cmd) = Service::new(config.clone(), provider);
 
-        let current_height = 10;
-        let tracked_hash = keccak256(b"tracked block");
-        let tracked_block = mock_block(current_height, tracked_hash);
-        service.current = Some(BlockHashAndNumber::from_header::<Ethereum>(tracked_block.header()));
+        let original_height = 10;
+        let original_hash = keccak256(b"original block");
+        let original_block = mock_block(original_height, original_hash);
+        service.current =
+            Some(BlockHashAndNumber::from_header::<Ethereum>(original_block.header()));
 
-        let rewound_height = current_height - config.reorg_rewind_depth;
-        let rewound_hash = keccak256(b"rewound block");
-        let rewound_block = mock_block(rewound_height, rewound_hash);
+        let expected_rewind_height = original_height - config.reorg_rewind_depth;
+        let expected_rewind_hash = keccak256(b"rewound block");
+        let rewound_block = mock_block(expected_rewind_height, expected_rewind_hash);
 
+        // Mock provider responses for reorg detection and rewind:
+        // 1. get_block_by_hash(original_hash) -> None (block not found = reorg detected)
         asserter.push_success(&Value::Null);
-        asserter.push_success(&json!(format!("0x{:x}", current_height + 2)));
+        // 2. get_block_number() -> 12 (current chain head is at 12)
+        asserter.push_success(&json!(format!("0x{:x}", original_height + 2)));
+        // 3. get_block_by_number(expected_rewind_height) -> rewound_block
         asserter.push_success(&rewound_block);
 
         service.ensure_current_not_reorged().await?;
 
-        let current = service.current.expect("current should be set after rewind");
-        println!("current: {current:?}");
-        assert_eq!(current.number, rewound_height);
-        assert_eq!(current.hash, rewound_hash);
+        let current = service.current.expect("current block should be set after rewind");
+        assert_eq!(current.number, expected_rewind_height, "should rewind by reorg_rewind_depth");
+        assert_eq!(current.hash, expected_rewind_hash, "should use hash of block at rewind height");
 
         Ok(())
     }
