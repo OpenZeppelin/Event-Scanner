@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    block_range_scanner::{BlockRangeScanner, BlockScannerError, ConnectedBlockScanner},
+    block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
@@ -77,13 +77,6 @@ impl EventScannerBuilder {
         self
     }
 
-    /// Adjusts the retry interval when reconnecting to the provider.
-    #[must_use]
-    pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
-        self.block_range_scanner = self.block_range_scanner.with_retry_interval(retry_interval);
-        self
-    }
-
     /// Configures how many confirmations are required before processing a block (used for reorgs).
     #[must_use]
     pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
@@ -100,7 +93,7 @@ impl EventScannerBuilder {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> Result<EventScanner<N>, BlockScannerError> {
+    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         Ok(EventScanner {
             block_range_scanner,
@@ -117,7 +110,7 @@ impl EventScannerBuilder {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<EventScanner<N>, BlockScannerError> {
+    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
         Ok(EventScanner {
             block_range_scanner,
@@ -134,7 +127,7 @@ impl EventScannerBuilder {
 }
 
 pub struct EventScanner<N: Network> {
-    block_range_scanner: ConnectedBlockScanner<N>,
+    block_range_scanner: ConnectedBlockRangeScanner<N>,
     tracked_events: Vec<EventFilter>,
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
@@ -168,7 +161,6 @@ impl<N: Network> EventScanner<N> {
                 continue;
             }
 
-            // TODO: configurable buffer size / smaller buffer ?
             let (sender, receiver) = mpsc::channel::<Log>(1024);
 
             let callback = filter.callback.clone();

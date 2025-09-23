@@ -2,8 +2,16 @@
 members = [".", "examples/historical_scanning", "examples/simple_counter"]
 resolver = "2"
 
-[lints.clippy]
+[workspace.package]
+authors = ["OpenZeppelin"]
+edition = "2024"
+license = "AGPL-3.0-only"
+repository = "https://github.com/OpenZeppelin/Event-Scanner"
+version = "0.1.0-alpha.1"
+
+[workspace.lints.clippy]
 pedantic = "warn"
+all = "warn"
 
 [workspace.dependencies]
 alloy = { version = "1.0.30", features = ["full"] }
@@ -22,23 +30,36 @@ hex = "0.4"
 
 [package]
 name = "event-scanner"
-version = "0.1.0"
-edition = "2024"
+description = "Event Scanner is a library for scanning events from any EVM-based blockchain."
+categories = [
+    "asynchronous",
+    "web-programming",
+    "web-programming::websocket",
+    "cryptography::cryptocurrencies",
+]
+keywords = ["evm", "ethereum", "blockchain", "events", "alloy"]
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
 publish = true
 
 [package.metadata.docs.rs]
 all-features = true
 
 [dependencies]
-alloy = { workspace = true }
-tokio = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-async-trait = { workspace = true }
-chrono = { workspace = true }
-alloy-node-bindings = { workspace = true }
-tokio-stream = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+alloy.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+alloy-node-bindings.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

@@ -1,7 +1,9 @@
 [package]
 name = "historical_scanning"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 publish = false
 
 [[bin]]
@@ -9,12 +11,12 @@ name = "historical_scanning"
 path = "main.rs"
 
 [dependencies]
-alloy = { workspace = true }
-alloy-node-bindings = { workspace = true }
-tokio = { workspace = true }
-anyhow = { workspace = true }
-async-trait = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-hex = { workspace = true }
+alloy.workspace = true
+alloy-node-bindings.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+hex.workspace = true
 event-scanner = { path = "../.." }
