@@ -825,7 +825,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
 
-        let expected_range = 10..12;
+        let expected_range = 10..=11;
         service.send_to_subscriber(Ok(expected_range.clone())).await;
 
         assert_eq!(service.processed_count, 1);
@@ -849,7 +849,7 @@ mod tests {
         // channel is closed
         drop(rx);
 
-        service.send_to_subscriber(Ok(15..16)).await;
+        service.send_to_subscriber(Ok(15..=15)).await;
 
         assert!(service.subscriber.is_none());
         assert!(!service.websocket_connected);
@@ -953,9 +953,9 @@ mod tests {
     #[tokio::test]
     async fn buffered_messages_trim_invalid_ranges() -> anyhow::Result<()> {
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(40..45).await.unwrap();
-        buffer_tx.send(45..55).await.unwrap();
-        buffer_tx.send(60..62).await.unwrap();
+        buffer_tx.send(40..=44).await.unwrap();
+        buffer_tx.send(45..=54).await.unwrap();
+        buffer_tx.send(60..=61).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -967,7 +967,7 @@ mod tests {
             forwarded.push(result.unwrap());
         }
 
-        assert_eq!(forwarded, vec![50..55, 60..62]);
+        assert_eq!(forwarded, vec![50..=54, 60..=61]);
 
         Ok(())
     }
