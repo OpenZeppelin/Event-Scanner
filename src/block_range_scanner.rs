@@ -28,9 +28,7 @@
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
 //!
-//!     let mut receiver: ReceiverStream<
-//!         Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>,
-//!     > = client
+//!     let mut receiver = client
 //!         .subscribe(
 //!             BlockNumberOrTag::Latest,
 //!             None, // just subscribe to new blocks
