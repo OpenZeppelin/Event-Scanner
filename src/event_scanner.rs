@@ -216,7 +216,8 @@ impl<N: Network> EventScanner<N> {
         });
     }
 
-    /// Fetches logs for the supplied inclusive block range [`from_block..=to_block`] and forwards them to the callback channels.
+    /// Fetches logs for the supplied inclusive block range [`from_block..=to_block`] and forwards
+    /// them to the callback channels.
     async fn process_block_range(
         &self,
         from_block: u64,

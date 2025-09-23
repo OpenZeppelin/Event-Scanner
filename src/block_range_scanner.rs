@@ -28,13 +28,14 @@
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
 //!
-//!     let mut receiver: ReceiverStream<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>> =
-//!         client
-//!             .subscribe(
-//!                 BlockNumberOrTag::Latest,
-//!                 None, // just subscribe to new blocks
-//!             )
-//!             .await?;
+//!     let mut receiver: ReceiverStream<
+//!         Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>,
+//!     > = client
+//!         .subscribe(
+//!             BlockNumberOrTag::Latest,
+//!             None, // just subscribe to new blocks
+//!         )
+//!         .await?;
 //!
 //!     while let Some(result) = receiver.next().await {
 //!         match result {
@@ -466,9 +467,9 @@ impl<N: Network> Service<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = if self.current.as_ref().unwrap().number
-                + self.config.blocks_read_per_epoch as u64
-                > end.header().number()
+            let batch_to = if self.current.as_ref().unwrap().number +
+                self.config.blocks_read_per_epoch as u64 >
+                end.header().number()
             {
                 end.header().number()
             } else {
