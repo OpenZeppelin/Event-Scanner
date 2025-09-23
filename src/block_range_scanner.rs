@@ -275,7 +275,7 @@ pub struct ConnectedBlockRangeScanner<N: Network> {
 impl<N: Network> ConnectedBlockRangeScanner<N> {
     /// Returns the underlying Provider.
     #[must_use]
-    pub fn provider(&self) -> &impl Provider<N> {
+    pub fn provider(&self) -> &RootProvider<N> {
         &self.provider
     }
 
