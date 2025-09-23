@@ -416,8 +416,8 @@ impl<N: Network> Service<N> {
 
         info!("Successfully synced historical data");
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -452,6 +452,7 @@ impl<N: Network> Service<N> {
             mpsc::channel::<Result<RangeInclusive<BlockNumber>, Error>>(MAX_BUFFERED_MESSAGES);
 
         let provider = self.provider.clone();
+        let rewind = self.config.reorg_rewind_depth;
 
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
@@ -459,7 +460,7 @@ impl<N: Network> Service<N> {
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
-            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
+            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender, rewind).await;
         });
 
         // Step 4: Perform historical synchronization
@@ -493,8 +494,9 @@ impl<N: Network> Service<N> {
         let start = self.provider.get_block_number().await?;
 
         let sender = self.subscriber.clone().expect("subscriber should be set");
+        let rewind = self.config.reorg_rewind_depth;
         tokio::spawn(async move {
-            Self::stream_live_blocks(start, provider, sender).await;
+            Self::stream_live_blocks(start, provider, sender, rewind).await;
         });
 
         Ok(())
@@ -512,8 +514,8 @@ impl<N: Network> Service<N> {
         while self.current.as_ref().unwrap().number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = (self.current.as_ref().unwrap().number +
-                self.config.blocks_read_per_epoch as u64)
+            let batch_to = (self.current.as_ref().unwrap().number
+                + self.config.blocks_read_per_epoch as u64)
                 .min(end.header().number());
 
             let batch_end_block =
@@ -578,24 +580,52 @@ impl<N: Network> Service<N> {
         mut current: BlockNumber,
         provider: P,
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        reorg_rewind_depth: u64,
     ) {
+        // Track previous block hash for reorg detection
+        let mut prev_hash: Option<BlockHash> = None;
+        if current > 0
+            && let Ok(Some(prev_block)) = provider
+                .get_block_by_number(BlockNumberOrTag::Number(current.saturating_sub(1)))
+                .await
+        {
+            prev_hash = Some(prev_block.header().hash());
+        }
+
         match Self::get_block_subscription(&provider).await {
             Ok(mut ws_stream) => {
                 info!("WebSocket connected for live blocks");
 
                 while let Ok(header_resp) = ws_stream.recv().await {
-                    info!(block_number = header_resp.number(), "Received block header");
-                    if header_resp.number() < current {
+                    let num = header_resp.number();
+                    info!(block_number = num, "Received block header");
+                    if num < current {
                         continue;
                     }
 
-                    if sender.send(Ok(current..=header_resp.number())).await.is_err() {
+                    // Reorg detection when the incoming header is exactly the next expected block
+                    if num == current
+                        && prev_hash.is_some()
+                        && header_resp.parent_hash() != prev_hash.unwrap()
+                    {
+                        let rewind_start = current.saturating_sub(reorg_rewind_depth);
+                        info!(current, rewind_start, "Reorg detected: sending rewind range");
+                        if sender.send(Ok(rewind_start..=current)).await.is_err() {
+                            warn!("Downstream channel closed, stopping live blocks task (reorg)");
+                            return;
+                        }
+                        prev_hash = Some(header_resp.hash());
+                        current = num + 1;
+                        continue;
+                    }
+
+                    if sender.send(Ok(current..=num)).await.is_err() {
                         warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
 
-                    // next block will be processed in the next batch
-                    current = header_resp.number() + 1;
+                    prev_hash = Some(header_resp.hash());
+                    current = num + 1;
                 }
             }
             Err(e) => {
