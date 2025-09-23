@@ -195,7 +195,10 @@ impl<N: Network> EventScanner<N> {
                     let from_block = *range.start();
                     let to_block = *range.end();
                     info!(from_block, to_block, "processing block range");
-                    let _ = range_tx.send((from_block, to_block));
+                    if let Err(e) = range_tx.send((from_block, to_block)) {
+                        error!(error = %e, "failed to send block range to broadcast channel");
+                        break;
+                    }
                 }
                 Err(e) => {
                     error!(error = %e, "failed to get block range");
