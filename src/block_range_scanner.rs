@@ -473,12 +473,12 @@ impl<N: Network> Service<N> {
 
         let sender = self.subscriber.clone().expect("subscriber should be set");
 
-        // Step 5: Setup the buffer processor
+        // Step 5:
         // Spawn the buffer processor task
         // This will:
         // 1. Process all buffered blocks, filtering out any ≤ cutoff
         // 2. Forward blocks > cutoff to the user
-        // 3. Continue forwarding until the buffer
+        // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live stream)
         tokio::spawn(async move {
             Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
         });
