@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
@@ -74,13 +74,6 @@ impl EventScannerBuilder {
     pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
         self.block_range_scanner =
             self.block_range_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
-        self
-    }
-
-    /// Adjusts the retry interval when reconnecting to the provider.
-    #[must_use]
-    pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
-        self.block_range_scanner = self.block_range_scanner.with_retry_interval(retry_interval);
         self
     }
 
@@ -168,7 +161,6 @@ impl<N: Network> EventScanner<N> {
                 continue;
             }
 
-            // TODO: configurable buffer size / smaller buffer ?
             let (sender, receiver) = mpsc::channel::<Log>(1024);
 
             let callback = filter.callback.clone();
