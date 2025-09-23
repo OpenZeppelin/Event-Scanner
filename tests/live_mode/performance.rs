@@ -24,8 +24,8 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
     let event_count = Arc::new(AtomicUsize::new(0));
     let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
 

@@ -19,8 +19,8 @@ async fn callback_occurs_in_order() -> anyhow::Result<()> {
     let callback = Arc::new(EventOrderingCallback { counts: Arc::clone(&counts) });
 
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
     let mut scanner = EventScannerBuilder::new()
@@ -64,8 +64,8 @@ async fn blocks_and_events_arrive_in_order() -> anyhow::Result<()> {
     let callback = Arc::new(BlockOrderingCallback { blocks: Arc::clone(&blocks) });
 
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
     let mut scanner = EventScannerBuilder::new()

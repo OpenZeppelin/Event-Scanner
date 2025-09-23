@@ -60,8 +60,8 @@ async fn main() -> anyhow::Result<()> {
     let contract_address = counter_contract.address();
 
     let increase_filter = EventFilter {
-        contract_address: *contract_address,
-        event: Counter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract_address),
+        event: Some(Counter::CountIncreased::SIGNATURE.to_owned()),
         callback: Arc::new(CounterCallback),
     };
 

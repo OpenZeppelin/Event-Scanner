@@ -75,8 +75,8 @@ impl EventCallback for CounterCallback {
 
 async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: alloy::primitives::Address) -> anyhow::Result<()> {
     let filter = EventFilter {
-        contract_address: contract,
-        event: MyContract::SomeEvent::SIGNATURE.to_owned(),
+        contract_address: Some(contract),
+        event: Some(MyContract::SomeEvent::SIGNATURE.to_owned()),
         callback: Arc::new(CounterCallback { processed: Arc::new(AtomicUsize::new(0)) }),
     };
 
@@ -111,15 +111,43 @@ Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `conne
 
 Create an `EventFilter` for each contract/event pair you want to track. The filter bundles the contract address, the event signature (from `SolEvent::SIGNATURE`), and an `Arc<dyn EventCallback + Send + Sync>`.
 
+Both `contract_address` and `event` fields are optional, allowing for flexible event tracking:
+
 ```rust
-let filter = EventFilter {
-    contract_address: *counter_contract.address(),
-    event: Counter::CountIncreased::SIGNATURE.to_owned(),
+// Track a specific event from a specific contract (traditional usage)
+let specific_filter = EventFilter {
+    contract_address: Some(*counter_contract.address()),
+    event: Some(Counter::CountIncreased::SIGNATURE.to_owned()),
     callback: Arc::new(CounterCallback),
+};
+
+// Track ALL events from a specific contract
+let all_contract_events_filter = EventFilter {
+    contract_address: Some(*counter_contract.address()),
+    event: None, // Will track all events from this contract
+    callback: Arc::new(AllEventsCallback),
+};
+
+// Track ALL events from ALL contracts in the block range
+let all_events_filter = EventFilter {
+    contract_address: None, // Will track events from all contracts
+    event: None,            // Will track all event types
+    callback: Arc::new(GlobalEventsCallback),
 };
 ```
 
 Register multiple filters by calling either `with_event_filter` repeatedly or `with_event_filters` once.
+
+#### Use Cases for Optional Fields
+
+The optional `contract_address` and `event` fields enable several powerful use cases:
+
+- **Track all events from a specific contract**: Set `contract_address` but leave `event` as `None`
+- **Track all events across all contracts**: Set both `contract_address` and `event` as `None`
+- **Track specific events from specific contracts**: Set both fields (traditional usage)
+- **Mixed filtering**: Use multiple filters with different optional field combinations
+
+This flexibility allows you to build sophisticated event monitoring systems that can track events at different granularities depending on your application's needs.
 
 
 ### Scanning Modes

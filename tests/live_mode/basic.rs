@@ -25,8 +25,8 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
 
     let filter = EventFilter {
-        contract_address,
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
 
@@ -70,13 +70,13 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let b_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&b_count) });
 
     let a_filter = EventFilter {
-        contract_address: *a.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*a.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback: a_cb,
     };
     let b_filter = EventFilter {
-        contract_address: *b.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*b.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback: b_cb,
     };
 
@@ -129,13 +129,13 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let decrease_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&decrease_count) });
 
     let increase_filter = EventFilter {
-        contract_address,
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback: increase_cb,
     };
     let decrease_filter = EventFilter {
-        contract_address,
-        event: TestCounter::CountDecreased::SIGNATURE.to_owned(),
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountDecreased::SIGNATURE.to_owned()),
         callback: decrease_cb,
     };
 
@@ -185,8 +185,8 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     // Subscribe to CountDecreased but only emit CountIncreased
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountDecreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountDecreased::SIGNATURE.to_owned()),
         callback,
     };
 
@@ -224,8 +224,8 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let event_count = Arc::new(AtomicUsize::new(0));
     let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: "invalid-sig".to_string(),
+        contract_address: Some(*contract.address()),
+        event: Some("invalid-sig".to_string()),
         callback,
     };
 

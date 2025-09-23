@@ -31,8 +31,8 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     let callback = Arc::new(EventOrderingCallback { counts: Arc::clone(&event_new_counts) });
 
     let filter = EventFilter {
-        contract_address,
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
 
