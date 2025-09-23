@@ -74,7 +74,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{BlockHash, BlockNumber},
     providers::{Provider, RootProvider},
@@ -404,7 +404,7 @@ impl<N: Network> Service<N> {
         let start_block =
             self.provider.get_block_by_number(start_height).await?.expect("block does not exist");
         let end_block =
-            self.provider.get_block(end_height.into()).await?.expect("block does not exist");
+            self.provider.get_block_by_number(end_height).await?.expect("block does not exist");
 
         info!(
             start_block = start_block.header().number(),
@@ -444,11 +444,11 @@ impl<N: Network> Service<N> {
         );
 
         let (live_block_buffer_sender, live_block_buffer_receiver) =
-            mpsc::channel(MAX_BUFFERED_MESSAGES);
+            mpsc::channel::<Result<RangeInclusive<BlockNumber>, Error>>(MAX_BUFFERED_MESSAGES);
         let provider = self.provider.clone();
         let cutoff = end_block.header().number();
         let live_subscription_task = tokio::spawn(async move {
-            Self::buffer_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
+            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
         });
 
         if let Err(e) = self.sync_historical_data(start_block, end_block).await {
@@ -468,17 +468,12 @@ impl<N: Network> Service<N> {
     }
 
     async fn sync_live(&mut self) -> Result<(), Error> {
-        let (live_block_buffer_sender, live_block_buffer_receiver) =
-            mpsc::channel(MAX_BUFFERED_MESSAGES);
         let provider = self.provider.clone();
-        let cutoff = self.provider.get_block_number().await?;
-        tokio::spawn(async move {
-            Self::buffer_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
-        });
+        let start = self.provider.get_block_number().await?;
 
         let sender = self.subscriber.clone().expect("subscriber should be set");
         tokio::spawn(async move {
-            Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
+            Self::stream_live_blocks(start, provider, sender).await;
         });
 
         Ok(())
@@ -558,25 +553,23 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn buffer_live_blocks<P: Provider<N>>(
+    async fn stream_live_blocks<P: Provider<N>>(
         mut current: BlockNumber,
         provider: P,
-        buffer_sender: mpsc::Sender<RangeInclusive<BlockNumber>>,
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
     ) {
         match Self::get_block_subscription(&provider).await {
             Ok(mut ws_stream) => {
-                info!("WebSocket connected for buffering");
+                info!("WebSocket connected for live blocks");
 
                 while let Ok(header_resp) = ws_stream.recv().await {
                     info!(block_number = header_resp.number(), "Received block header");
-                    if current == header_resp.number() {
+                    if header_resp.number() < current {
                         continue;
                     }
 
-                    // RangeInclusive already includes the end block
-                    if let Err(e) = buffer_sender.send(current..=header_resp.number()).await {
-                        error!("Buffer channel closed, stopping buffer task: {e}");
-
+                    if sender.send(Ok(current..=header_resp.number())).await.is_err() {
+                        warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
 
@@ -585,13 +578,13 @@ impl<N: Network> Service<N> {
                 }
             }
             Err(e) => {
-                error!("Failed to connect WebSocket for buffering: {e}");
+                let _ = sender.send(Err(e)).await;
             }
         }
     }
 
     async fn process_live_block_buffer(
-        mut buffer_rx: mpsc::Receiver<RangeInclusive<BlockNumber>>,
+        mut buffer_rx: mpsc::Receiver<Result<RangeInclusive<BlockNumber>, Error>>,
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         cutoff: BlockNumber,
     ) {
@@ -599,25 +592,32 @@ impl<N: Network> Service<N> {
         let mut discarded = 0;
 
         // Process all buffered messages
-        while let Some(range) = buffer_rx.recv().await {
-            let (start, end) = (*range.start(), *range.end());
-            if start >= cutoff {
-                if sender.send(Ok(range)).await.is_err() {
-                    warn!("Subscriber channel closed, cleaning up");
-                    return;
-                }
-                processed += end - start;
-            } else if end > cutoff {
-                discarded += cutoff - start;
+        while let Some(item) = buffer_rx.recv().await {
+            match item {
+                Ok(range) => {
+                    let (start, end) = (*range.start(), *range.end());
+                    if start >= cutoff {
+                        if sender.send(Ok(range)).await.is_err() {
+                            warn!("Subscriber channel closed, cleaning up");
+                            return;
+                        }
+                        processed += end - start;
+                    } else if end > cutoff {
+                        discarded += cutoff - start;
 
-                let start = cutoff;
-                if sender.send(Ok(start..=end)).await.is_err() {
-                    warn!("Subscriber channel closed, cleaning up");
-                    return;
+                        let start = cutoff;
+                        if sender.send(Ok(start..=end)).await.is_err() {
+                            warn!("Subscriber channel closed, cleaning up");
+                            return;
+                        }
+                        processed += end - start;
+                    } else {
+                        discarded += end - start;
+                    }
                 }
-                processed += end - start;
-            } else {
-                discarded += end - start;
+                Err(e) => {
+                    warn!("Buffered live stream error: {e}");
+                }
             }
         }
 
@@ -979,9 +979,9 @@ mod tests {
     #[tokio::test]
     async fn buffered_messages_trim_invalid_ranges() -> anyhow::Result<()> {
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(40..=44).await.unwrap();
-        buffer_tx.send(45..=54).await.unwrap();
-        buffer_tx.send(60..=61).await.unwrap();
+        buffer_tx.send(Ok(40..=44)).await.unwrap();
+        buffer_tx.send(Ok(45..=54)).await.unwrap();
+        buffer_tx.send(Ok(60..=61)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
