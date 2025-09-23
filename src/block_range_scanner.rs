@@ -601,35 +601,43 @@ impl<N: Network> Service<N> {
                 info!("WebSocket connected for live blocks");
 
                 while let Ok(header_resp) = ws_stream.recv().await {
-                    let num = header_resp.number();
-                    info!(block_number = num, "Received block header");
-                    if num < current {
+                    let incoming_block_num = header_resp.number();
+                    info!(block_number = incoming_block_num, "Received block header");
+                    if incoming_block_num < current {
                         continue;
                     }
 
-                    // Reorg detection when the incoming header is exactly the next expected block
-                    if num == current
+                    // TODO: Find a way to send this to the subscriber or something (without
+                    // blocking)
+                    // NOTE: We only check reorg if the incoming header is exactly the next expected block
+                    // If incoming (num) is more than current + 1, we should probably check
+                    // hashes until the prev hash matches the current header's parent hash
+                    if incoming_block_num == current
                         && prev_hash.is_some()
                         && header_resp.parent_hash() != prev_hash.unwrap()
                     {
                         let rewind_start = current.saturating_sub(reorg_rewind_depth);
+                        // NOTE: we could just rewind until the parent hash matches or directly
+                        // rewind until latest finalized block until current
+                        // TODO: Maybe also need to think about the processed live block buffer
+                        // as it may cut off the reorg rewind range
                         info!(current, rewind_start, "Reorg detected: sending rewind range");
                         if sender.send(Ok(rewind_start..=current)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
                         prev_hash = Some(header_resp.hash());
-                        current = num + 1;
+                        current = incoming_block_num + 1;
                         continue;
                     }
 
-                    if sender.send(Ok(current..=num)).await.is_err() {
+                    if sender.send(Ok(current..=incoming_block_num)).await.is_err() {
                         warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
 
                     prev_hash = Some(header_resp.hash());
-                    current = num + 1;
+                    current = incoming_block_num + 1;
                 }
             }
             Err(e) => {
