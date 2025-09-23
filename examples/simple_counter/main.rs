@@ -1,52 +1,42 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use alloy::{
-    eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol,
-    sol_types::SolEvent,
+    eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent,
 };
 use alloy_node_bindings::Anvil;
-use async_trait::async_trait;
-use event_scanner::{EventCallback, EventFilter, event_scanner::EventScannerBuilder};
+use event_scanner::{EventFilter, event_scanner::EventScanner};
 
-use tokio::time::sleep;
+use tokio::{sync::mpsc, time::sleep};
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-struct CounterCallback;
-
-#[async_trait]
-impl EventCallback for CounterCallback {
-    async fn on_event(&self, log: &Log) -> anyhow::Result<()> {
-        info!("Callback successfully executed with event {:?}", log.inner.data);
-        Ok(())
-    }
-}
 
 sol! {
     #[allow(missing_docs)]
     #[sol(rpc, bytecode="608080604052346015576101b0908161001a8239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c90816306661abd1461016157508063a87d942c14610145578063d732d955146100ad5763e8927fbc14610048575f80fd5b346100a9575f3660031901126100a9575f5460018101809111610095576020817f7ca2ca9527391044455246730762df008a6b47bbdb5d37a890ef78394535c040925f55604051908152a1005b634e487b7160e01b5f52601160045260245ffd5b5f80fd5b346100a9575f3660031901126100a9575f548015610100575f198101908111610095576020817f53a71f16f53e57416424d0d18ccbd98504d42a6f98fe47b09772d8f357c620ce925f55604051908152a1005b60405162461bcd60e51b815260206004820152601860248201527f436f756e742063616e6e6f74206265206e6567617469766500000000000000006044820152606490fd5b346100a9575f3660031901126100a95760205f54604051908152f35b346100a9575f3660031901126100a9576020905f548152f3fea2646970667358221220b846b706f79f5ae1fc4a4238319e723a092f47ce4051404186424739164ab02264736f6c634300081e0033")]
-contract Counter {
-    uint256 public count;
+    contract Counter {
+        uint256 public count;
 
-    event CountIncreased(uint256 newCount);
-    event CountDecreased(uint256 newCount);
+        event CountIncreased(uint256 newCount);
+        event CountDecreased(uint256 newCount);
 
-    function increase() public {
-        count += 1;
-        emit CountIncreased(count);
-    }
+        function increase() public {
+            count += 1;
+            emit CountIncreased(count);
+        }
 
-    function decrease() public {
-        require(count > 0, "Count cannot be negative");
-        count -= 1;
-        emit CountDecreased(count);
-    }
+        function decrease() public {
+            require(count > 0, "Count cannot be negative");
+            count -= 1;
+            emit CountDecreased(count);
+        }
 
-    function getCount() public view returns (uint256) {
-        return count;
+        function getCount() public view returns (uint256) {
+            return count;
+        }
     }
 }
-}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env()).try_init();
@@ -59,13 +49,14 @@ async fn main() -> anyhow::Result<()> {
 
     let contract_address = counter_contract.address();
 
+    let (sender, receiver) = mpsc::channel(100);
     let increase_filter = EventFilter {
         contract_address: *contract_address,
         event: Counter::CountIncreased::SIGNATURE.to_owned(),
-        callback: Arc::new(CounterCallback),
+        sender,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(increase_filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -83,6 +74,13 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    let mut stream = ReceiverStream::new(receiver);
+    while let Some(Ok(logs)) = stream.next().await {
+        for log in logs {
+            info!("Callback successfully executed with event {:?}", log.inner.data);
+        }
+    }
 
     task_1.await.ok();
     task_2.await.ok();

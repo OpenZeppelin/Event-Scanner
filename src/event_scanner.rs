@@ -1,43 +1,30 @@
-use std::{collections::HashMap, sync::Arc};
-
 use crate::{
     block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
-    callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
     types::EventFilter,
 };
 use alloy::{
-    eips::BlockNumberOrTag,
-    network::Network,
-    primitives::Address,
-    providers::Provider,
-    rpc::types::{Filter, Log},
+    eips::BlockNumberOrTag, network::Network, providers::Provider, rpc::types::Filter,
     transports::http::reqwest::Url,
 };
-use tokio::sync::mpsc::{self, Receiver};
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-pub struct EventScannerBuilder {
+pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
     tracked_events: Vec<EventFilter>,
-    callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
-impl Default for EventScannerBuilder {
+impl Default for EventScanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl EventScannerBuilder {
+impl EventScanner {
     #[must_use]
     /// Creates a new builder with default block scanner and callback strategy.
     pub fn new() -> Self {
-        Self {
-            block_range_scanner: BlockRangeScanner::new(),
-            tracked_events: Vec::new(),
-            callback_strategy: Self::get_default_callback_strategy(),
-        }
+        Self { block_range_scanner: BlockRangeScanner::new(), tracked_events: Vec::default() }
     }
 
     /// Registers a single event filter for scanning.
@@ -51,13 +38,6 @@ impl EventScannerBuilder {
     #[must_use]
     pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
         self.tracked_events.extend(filters);
-        self
-    }
-
-    /// Overrides the callback execution strategy used by the scanner.
-    #[must_use]
-    pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
-        self.callback_strategy = strategy;
         self
     }
 
@@ -93,13 +73,9 @@ impl EventScannerBuilder {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
+    ) -> Result<ConnectedEventScanner<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
-        Ok(EventScanner {
-            block_range_scanner,
-            tracked_events: self.tracked_events,
-            callback_strategy: self.callback_strategy,
-        })
+        Ok(ConnectedEventScanner { block_range_scanner, tracked_events: self.tracked_events })
     }
 
     /// Connects to the provider via IPC
@@ -110,35 +86,18 @@ impl EventScannerBuilder {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
+    ) -> Result<ConnectedEventScanner<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
-        Ok(EventScanner {
-            block_range_scanner,
-            tracked_events: self.tracked_events,
-            callback_strategy: self.callback_strategy,
-        })
-    }
-
-    /// Builds the default callback strategy used when none is provided.
-    fn get_default_callback_strategy() -> Arc<dyn CallbackStrategy> {
-        let state_sync_aware_strategy = StateSyncAwareStrategy::new();
-        Arc::new(state_sync_aware_strategy)
+        Ok(ConnectedEventScanner { block_range_scanner, tracked_events: self.tracked_events })
     }
 }
 
-pub struct EventScanner<N: Network> {
+pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     tracked_events: Vec<EventFilter>,
-    callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
-#[derive(Hash, Eq, PartialEq)]
-struct EventIdentifier {
-    contract_address: Address,
-    event: String,
-}
-
-impl<N: Network> EventScanner<N> {
+impl<N: Network> ConnectedEventScanner<N> {
     /// Starts the scanner
     ///
     /// # Errors
@@ -149,32 +108,6 @@ impl<N: Network> EventScanner<N> {
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
     ) -> anyhow::Result<()> {
-        let mut event_channels: HashMap<EventIdentifier, mpsc::Sender<Log>> = HashMap::new();
-
-        for filter in &self.tracked_events {
-            let unique_event = EventIdentifier {
-                contract_address: filter.contract_address,
-                event: filter.event.clone(),
-            };
-
-            if event_channels.contains_key(&unique_event) {
-                continue;
-            }
-
-            let (sender, receiver) = mpsc::channel::<Log>(1024);
-
-            let callback = filter.callback.clone();
-            let strategy = self.callback_strategy.clone();
-            Self::spawn_event_callback_task_executors(
-                receiver,
-                callback,
-                strategy,
-                filter.event.clone(),
-            );
-
-            event_channels.insert(unique_event, sender);
-        }
-
         let client = self.block_range_scanner.run()?;
         let mut stream = client.subscribe(start_height, end_height).await?;
 
@@ -184,7 +117,7 @@ impl<N: Network> EventScanner<N> {
                     let from_block = range.start;
                     let to_block = range.end;
                     info!(from_block, to_block, "processing block range");
-                    self.process_block_range(from_block, to_block, &event_channels).await?;
+                    self.process_block_range(from_block, to_block).await?;
                 }
                 Err(e) => {
                     error!(error = %e, "failed to get block range");
@@ -195,34 +128,8 @@ impl<N: Network> EventScanner<N> {
         Ok(())
     }
 
-    /// Spawns background tasks that drive callback execution for an event type.
-    fn spawn_event_callback_task_executors(
-        mut receiver: Receiver<Log>,
-        callback: Arc<dyn crate::callback::EventCallback + Send + Sync>,
-        strategy: Arc<dyn CallbackStrategy>,
-        event_name: String,
-    ) {
-        tokio::spawn(async move {
-            while let Some(log) = receiver.recv().await {
-                if let Err(e) = strategy.execute(&callback, &log).await {
-                    error!(
-                        event = %event_name,
-                        at_block = &log.block_number,
-                        error = %e,
-                        "failed to invoke callback after retries"
-                    );
-                }
-            }
-        });
-    }
-
     /// Fetches logs for the supplied block range and forwards them to the callback channels.
-    async fn process_block_range(
-        &self,
-        from_block: u64,
-        to_block: u64,
-        event_channels: &HashMap<EventIdentifier, mpsc::Sender<Log>>,
-    ) -> anyhow::Result<()> {
+    async fn process_block_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<()> {
         for event_filter in &self.tracked_events {
             let filter = Filter::new()
                 .address(event_filter.contract_address)
@@ -244,19 +151,8 @@ impl<N: Network> EventScanner<N> {
                         "found logs for event in block range"
                     );
 
-                    let event_identifier = EventIdentifier {
-                        contract_address: event_filter.contract_address,
-                        event: event_filter.event.clone(),
-                    };
-
-                    if let Some(sender) = event_channels.get(&event_identifier) {
-                        for log in logs {
-                            if let Err(e) = sender.send(log).await {
-                                warn!(event = %event_filter.event, error = %e, "failed to enqueue log for processing");
-                            }
-                        }
-                    } else {
-                        warn!(event = %event_filter.event, "no channel found for event type");
+                    if let Err(e) = event_filter.sender.send(Ok(logs)).await {
+                        error!(event = %event_filter.event, error = %e, "failed to enqueue logs for processing");
                     }
                 }
                 Err(e) => {
@@ -268,6 +164,10 @@ impl<N: Network> EventScanner<N> {
                         to_block,
                         "failed to get logs for block range"
                     );
+
+                    if let Err(e) = event_filter.sender.send(Err(e.into())).await {
+                        error!(event = %event_filter.event, error = %e, "failed to enqueue error for processing");
+                    }
                 }
             }
         }

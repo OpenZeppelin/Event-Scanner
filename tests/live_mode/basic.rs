@@ -6,13 +6,11 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
-    mock_callbacks::BasicCounterCallback,
-};
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
-use tokio::time::{sleep, timeout};
+use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
+use alloy::{eips::BlockNumberOrTag, network::Ethereum, rpc::types::Log, sol_types::SolEvent};
+use event_scanner::{block_range_scanner, event_scanner::EventScanner, types::EventFilter};
+use tokio::{sync::mpsc, time::timeout};
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 #[tokio::test]
 async fn basic_single_event_scanning() -> anyhow::Result<()> {
@@ -21,16 +19,14 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
-
+    let (sender, receiver) = mpsc::channel(100);
     let filter = EventFilter {
         contract_address,
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        callback,
+        sender,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -43,16 +39,26 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
+    let mut stream = ReceiverStream::new(receiver).take(expected_event_count);
+
+    let event_count = Arc::new(AtomicUsize::new(0));
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while event_count_clone.load(Ordering::SeqCst) < expected_event_count {
-            sleep(Duration::from_millis(100)).await;
+        let mut expected_new_count = 1;
+        while let Some(Ok(logs)) = stream.next().await {
+            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+
+            for log in logs {
+                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
+                assert_eq!(newCount, expected_new_count);
+                expected_new_count += 1;
+            }
         }
     };
 
-    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
-    }
+    _ = timeout(Duration::from_secs(1), event_counting).await;
+
+    assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
 
     Ok(())
 }
@@ -64,23 +70,20 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let a = deploy_counter(provider.clone()).await?;
     let b = deploy_counter(provider.clone()).await?;
 
-    let a_count = Arc::new(AtomicUsize::new(0));
-    let b_count = Arc::new(AtomicUsize::new(0));
-    let a_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&a_count) });
-    let b_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&b_count) });
-
+    let (a_sender, a_receiver) = mpsc::channel(100);
     let a_filter = EventFilter {
         contract_address: *a.address(),
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        callback: a_cb,
+        sender: a_sender,
     };
+    let (b_sender, b_receiver) = mpsc::channel(100);
     let b_filter = EventFilter {
         contract_address: *b.address(),
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        callback: b_cb,
+        sender: b_sender,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filters(vec![a_filter, b_filter])
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -98,20 +101,34 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         b.increase().send().await?.watch().await?;
     }
 
-    let a_count_clone = Arc::clone(&a_count);
-    let b_count_clone = Arc::clone(&b_count);
-    let event_counting = async move {
-        while a_count_clone.load(Ordering::SeqCst) < expected_events_a ||
-            b_count_clone.load(Ordering::SeqCst) < expected_events_b
-        {
-            sleep(Duration::from_millis(100)).await;
-        }
+    let make_assertion = async |receiver, expected_events| {
+        let mut stream =
+            ReceiverStream::<Result<Vec<Log>, block_range_scanner::Error>>::new(receiver)
+                .take(expected_events);
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_clone = Arc::clone(&count);
+
+        let event_counting = async move {
+            let mut expected_new_count = 1;
+            while let Some(Ok(logs)) = stream.next().await {
+                count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+
+                for log in logs {
+                    let TestCounter::CountIncreased { newCount } =
+                        log.log_decode().unwrap().inner.data;
+                    assert_eq!(newCount, expected_new_count);
+                    expected_new_count += 1;
+                }
+            }
+        };
+
+        _ = timeout(Duration::from_secs(1), event_counting).await;
+        assert_eq!(count.load(Ordering::SeqCst), expected_events);
     };
 
-    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        assert_eq!(a_count.load(Ordering::SeqCst), expected_events_a);
-        assert_eq!(b_count.load(Ordering::SeqCst), expected_events_b);
-    }
+    make_assertion(a_receiver, expected_events_a).await;
+    make_assertion(b_receiver, expected_events_b).await;
 
     Ok(())
 }
@@ -123,23 +140,20 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let contract = deploy_counter(provider).await?;
     let contract_address = *contract.address();
 
-    let increase_count = Arc::new(AtomicUsize::new(0));
-    let decrease_count = Arc::new(AtomicUsize::new(0));
-    let increase_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&increase_count) });
-    let decrease_cb = Arc::new(BasicCounterCallback { count: Arc::clone(&decrease_count) });
-
+    let (incr_sender, incr_receiver) = mpsc::channel(100);
     let increase_filter = EventFilter {
         contract_address,
         event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        callback: increase_cb,
+        sender: incr_sender,
     };
+    let (decr_sender, decr_receiver) = mpsc::channel(100);
     let decrease_filter = EventFilter {
         contract_address,
         event: TestCounter::CountDecreased::SIGNATURE.to_owned(),
-        callback: decrease_cb,
+        sender: decr_sender,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filters(vec![increase_filter, decrease_filter])
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
@@ -156,20 +170,49 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     contract.decrease().send().await?.watch().await?;
     contract.decrease().send().await?.watch().await?;
 
-    let increase_count_clone = Arc::clone(&increase_count);
-    let decrease_count_clone = Arc::clone(&decrease_count);
+    let mut incr_stream =
+        ReceiverStream::<Result<Vec<Log>, block_range_scanner::Error>>::new(incr_receiver)
+            .take(expected_incr_events);
+    let mut decr_stream =
+        ReceiverStream::<Result<Vec<Log>, block_range_scanner::Error>>::new(decr_receiver)
+            .take(expected_decr_events);
+
+    let incr_count = Arc::new(AtomicUsize::new(0));
+    let decr_count = Arc::new(AtomicUsize::new(0));
+    let incr_count_clone = Arc::clone(&incr_count);
+    let decr_count_clone = Arc::clone(&decr_count);
+
     let event_counting = async move {
-        while increase_count_clone.load(Ordering::SeqCst) < expected_incr_events ||
-            decrease_count_clone.load(Ordering::SeqCst) < expected_decr_events
-        {
-            sleep(Duration::from_millis(100)).await;
+        let mut expected_new_count = 0;
+
+        // process CountIncreased
+        while let Some(Ok(logs)) = incr_stream.next().await {
+            incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+
+            for log in logs {
+                expected_new_count += 1;
+                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
+                assert_eq!(newCount, expected_new_count);
+            }
+        }
+
+        expected_new_count -= 1;
+
+        // process CountDecreased
+        while let Some(Ok(logs)) = decr_stream.next().await {
+            decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+
+            for log in logs {
+                let TestCounter::CountDecreased { newCount } = log.log_decode().unwrap().inner.data;
+                assert_eq!(newCount, expected_new_count);
+                expected_new_count -= 1;
+            }
         }
     };
 
-    if timeout(Duration::from_secs(2), event_counting).await.is_err() {
-        assert_eq!(increase_count.load(Ordering::SeqCst), expected_incr_events);
-        assert_eq!(decrease_count.load(Ordering::SeqCst), expected_decr_events);
-    }
+    _ = timeout(Duration::from_secs(2), event_counting).await;
+    assert_eq!(incr_count.load(Ordering::SeqCst), expected_incr_events);
+    assert_eq!(decr_count.load(Ordering::SeqCst), expected_decr_events);
 
     Ok(())
 }
@@ -180,32 +223,30 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
-
     // Subscribe to CountDecreased but only emit CountIncreased
+    let (sender, receiver) = mpsc::channel(100);
     let filter = EventFilter {
         contract_address: *contract.address(),
         event: TestCounter::CountDecreased::SIGNATURE.to_owned(),
-        callback,
+        sender,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
     tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    for _ in 0..3 {
+    let num_of_events = 3;
+    for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
     }
 
-    let event_count_clone = Arc::clone(&event_count);
+    let mut stream = ReceiverStream::new(receiver).take(num_of_events);
+
     let event_counting = async move {
-        while event_count_clone.load(Ordering::SeqCst) == 0 {
-            sleep(Duration::from_millis(100)).await;
-        }
+        _ = stream.next().await;
     };
 
     if timeout(Duration::from_secs(1), event_counting).await.is_ok() {
@@ -221,30 +262,29 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
+    let (sender, receiver) = mpsc::channel(100);
     let filter = EventFilter {
         contract_address: *contract.address(),
         event: "invalid-sig".to_string(),
-        callback,
+        sender,
     };
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut scanner = EventScanner::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
     tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    for _ in 0..3 {
+    let num_of_events = 3;
+    for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
     }
 
-    let event_count_clone = Arc::clone(&event_count);
+    let mut stream = ReceiverStream::new(receiver).take(num_of_events);
+
     let event_counting = async move {
-        while event_count_clone.load(Ordering::SeqCst) == 0 {
-            sleep(Duration::from_millis(100)).await;
-        }
+        _ = stream.next().await;
     };
 
     if timeout(Duration::from_secs(1), event_counting).await.is_ok() {
