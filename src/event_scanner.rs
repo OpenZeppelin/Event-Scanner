@@ -109,8 +109,8 @@ impl<N: Network> ConnectedEventScanner<N> {
         while let Some(range) = stream.next().await {
             match range {
                 Ok(range) => {
-                    let from_block = range.start;
-                    let to_block = range.end;
+                    let from_block = *range.start();
+                    let to_block = *range.end();
                     info!(from_block, to_block, "processing block range");
                     self.process_block_range(from_block, to_block).await;
                 }
@@ -123,7 +123,8 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
-    /// Fetches logs for the supplied block range and forwards them to the callback channels.
+    /// Fetches logs for the supplied inclusive block range [`from_block..=to_block`] and forwards
+    /// them to the appropriate event channels.
     async fn process_block_range(&self, from_block: u64, to_block: u64) {
         for listener in &self.event_listeners {
             let filter = Filter::new()
