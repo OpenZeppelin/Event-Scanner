@@ -28,12 +28,7 @@
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
 //!
-//!     let mut receiver = client
-//!         .subscribe(
-//!             BlockNumberOrTag::Latest,
-//!             None, // just subscribe to new blocks
-//!         )
-//!         .await?;
+//!     let mut receiver = client.subscribe_live().await?;
 //!
 //!     while let Some(result) = receiver.next().await {
 //!         match result {
@@ -139,10 +134,19 @@ pub enum Error {
 
 #[derive(Debug)]
 pub enum Command {
-    Subscribe {
+    SubscribeLive {
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    SubscribeHistorical {
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
+        end_height: BlockNumberOrTag,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    SubscribeSync {
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        start_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), Error>>,
     },
     Unsubscribe {
@@ -351,8 +355,42 @@ impl<N: Network> Service<N> {
 
     async fn handle_command(&mut self, command: Command) -> Result<(), Error> {
         match command {
-            Command::Subscribe { sender, start_height, end_height, response } => {
-                let result = self.handle_subscribe(sender, start_height, end_height).await;
+            Command::SubscribeLive { sender, response } => {
+                if self.subscriber.is_some() {
+                    return Err(Error::MultipleSubscribers);
+                }
+
+                info!("Starting live subscription");
+                self.subscriber = Some(sender);
+
+                let result = self.handle_live().await;
+                let _ = response.send(result);
+            }
+            Command::SubscribeHistorical { sender, start_height, end_height, response } => {
+                if self.subscriber.is_some() {
+                    return Err(Error::MultipleSubscribers);
+                }
+
+                info!(start_height = ?start_height, end_height = ?end_height, "Starting historical subscription");
+                self.subscriber = Some(sender);
+
+                let result = self.handle_historical(start_height, end_height).await;
+                let _ = response.send(result);
+            }
+            Command::SubscribeSync { sender, start_height, response } => {
+                if self.subscriber.is_some() {
+                    return Err(Error::MultipleSubscribers);
+                }
+
+                info!(start_height = ?start_height, "Starting sync subscription");
+                self.subscriber = Some(sender);
+                if matches!(start_height, BlockNumberOrTag::Latest) {
+                    warn!(
+                        "Starting sync subscription from latest block is not recommended, please use live mode instead"
+                    );
+                    // TODO: Return error?
+                }
+                let result = self.handle_sync(start_height).await;
                 let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
@@ -372,34 +410,22 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn handle_subscribe(
-        &mut self,
-        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
-        start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), Error> {
-        if self.subscriber.is_some() {
-            return Err(Error::MultipleSubscribers);
-        }
+    async fn handle_live(&mut self) -> Result<(), Error> {
+        let provider = self.provider.clone();
+        let start = self.provider.get_block_number().await?;
 
-        info!(start_height = ?start_height, "Starting subscription from point");
-        self.subscriber = Some(sender);
+        let Some(sender) = self.subscriber.clone() else {
+            return Err(Error::ServiceShutdown);
+        };
 
-        if let Some(end_height) = end_height {
-            self.sync_historical(start_height, end_height).await?;
-            return Ok(());
-        }
-
-        if matches!(start_height, BlockNumberOrTag::Latest) {
-            self.sync_live().await?;
-        } else {
-            self.sync_historical_and_transition_to_live(start_height).await?;
-        }
+        tokio::spawn(async move {
+            Self::stream_live_blocks(start, provider, sender).await;
+        });
 
         Ok(())
     }
 
-    async fn sync_historical(
+    async fn handle_historical(
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
@@ -433,10 +459,7 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn sync_historical_and_transition_to_live(
-        &mut self,
-        start_height: BlockNumberOrTag,
-    ) -> Result<(), Error> {
+    async fn handle_sync(&mut self, start_height: BlockNumberOrTag) -> Result<(), Error> {
         // Step 1:
         // Fetches the starting block and end block for historical sync
         let start_block =
@@ -499,21 +522,6 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn sync_live(&mut self) -> Result<(), Error> {
-        let provider = self.provider.clone();
-        let start = self.provider.get_block_number().await?;
-
-        let Some(sender) = self.subscriber.clone() else {
-            return Err(Error::ServiceShutdown);
-        };
-
-        tokio::spawn(async move {
-            Self::stream_live_blocks(start, provider, sender).await;
-        });
-
-        Ok(())
-    }
-
     async fn sync_historical_data(
         &mut self,
         start: N::BlockResponse,
@@ -555,49 +563,6 @@ impl<N: Network> Service<N> {
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
-        Ok(())
-    }
-
-    async fn ensure_current_not_reorged(&mut self) -> Result<(), Error> {
-        let current_block =
-            self.provider.get_block_by_hash(self.current.as_ref().unwrap().hash).await?;
-        if current_block.is_some() {
-            return Ok(());
-        }
-
-        self.rewind_on_reorg_detected().await
-    }
-
-    async fn rewind_on_reorg_detected(&mut self) -> Result<(), Error> {
-        let mut new_current_height =
-            if self.current.as_ref().unwrap().number <= self.config.reorg_rewind_depth {
-                0
-            } else {
-                self.current.as_ref().unwrap().number - self.config.reorg_rewind_depth
-            };
-
-        let head = self.provider.get_block_number().await?;
-        if head < new_current_height {
-            new_current_height = head;
-        }
-
-        let current = self
-            .provider
-            .get_block_by_number(new_current_height.into())
-            .await?
-            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
-            .ok_or(Error::HistoricalSyncError(format!(
-                "Block {new_current_height} not found during rewind",
-            )))?;
-
-        info!(
-            old_current = self.current.as_ref().unwrap().number,
-            new_current = current.number,
-            "Rewind on reorg detected"
-        );
-
-        self.current = Some(current);
-
         Ok(())
     }
 
@@ -672,6 +637,49 @@ impl<N: Network> Service<N> {
         info!(processed = processed, discarded = discarded, "Processed buffered messages");
     }
 
+    async fn ensure_current_not_reorged(&mut self) -> Result<(), Error> {
+        let current_block =
+            self.provider.get_block_by_hash(self.current.as_ref().unwrap().hash).await?;
+        if current_block.is_some() {
+            return Ok(());
+        }
+
+        self.rewind_on_reorg_detected().await
+    }
+
+    async fn rewind_on_reorg_detected(&mut self) -> Result<(), Error> {
+        let mut new_current_height =
+            if self.current.as_ref().unwrap().number <= self.config.reorg_rewind_depth {
+                0
+            } else {
+                self.current.as_ref().unwrap().number - self.config.reorg_rewind_depth
+            };
+
+        let head = self.provider.get_block_number().await?;
+        if head < new_current_height {
+            new_current_height = head;
+        }
+
+        let current = self
+            .provider
+            .get_block_by_number(new_current_height.into())
+            .await?
+            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
+            .ok_or(Error::HistoricalSyncError(format!(
+                "Block {new_current_height} not found during rewind",
+            )))?;
+
+        info!(
+            old_current = self.current.as_ref().unwrap().number,
+            new_current = current.number,
+            "Rewind on reorg detected"
+        );
+
+        self.current = Some(current);
+
+        Ok(())
+    }
+
     async fn get_block_subscription(
         provider: &impl Provider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, Error> {
@@ -725,25 +733,45 @@ impl BlockRangeScannerClient {
         Self { command_sender }
     }
 
-    /// Subscribes to new blocks.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_height` - The block number to start from.
-    /// * `end_height` - The block number to end at (inclusive).
+    /// Subscribes to live blocks starting from the latest block.
     ///
     /// # Errors
     ///
     /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn subscribe(
+    pub async fn subscribe_live(
         &self,
-        start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command = Command::Subscribe {
+        let command = Command::SubscribeLive { sender: blocks_sender, response: response_tx };
+
+        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| Error::ServiceShutdown)??;
+
+        Ok(ReceiverStream::new(blocks_receiver))
+    }
+
+    /// Subscribes to historical blocks from `start_height` to `end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    /// * `end_height` - The ending block number or tag.
+    ///
+    /// # Errors
+    ///
+    /// * `Error::ServiceShutdown` - if the service is already shutting down.
+    pub async fn subscribe_historical(
+        &self,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
+        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::SubscribeHistorical {
             sender: blocks_sender,
             start_height,
             end_height,
@@ -754,9 +782,33 @@ impl BlockRangeScannerClient {
 
         response_rx.await.map_err(|_| Error::ServiceShutdown)??;
 
-        let stream = ReceiverStream::new(blocks_receiver);
+        Ok(ReceiverStream::new(blocks_receiver))
+    }
 
-        Ok(stream)
+    /// Subscribes to blocks starting from `start_height` and transitions to live mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    ///
+    /// # Errors
+    ///
+    /// * `Error::ServiceShutdown` - if the service is already shutting down.
+    pub async fn subscribe_sync(
+        &self,
+        start_height: BlockNumberOrTag,
+    ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
+        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command =
+            Command::SubscribeSync { sender: blocks_sender, start_height, response: response_tx };
+
+        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| Error::ServiceShutdown)??;
+
+        Ok(ReceiverStream::new(blocks_receiver))
     }
 
     /// Unsubscribes the current subscriber.
@@ -808,7 +860,6 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
     use alloy::{
-        eips::BlockNumberOrTag,
         network::Ethereum,
         primitives::{B256, keccak256},
         rpc::{
@@ -962,8 +1013,7 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver =
-            client.subscribe(BlockNumberOrTag::Latest, None).await?.take(expected_blocks);
+        let mut receiver = client.subscribe_live().await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
