@@ -260,15 +260,21 @@ impl<N: Network> EventScanner<N> {
                     if let Some(sender) = event_channels.get(&event_identifier) {
                         for log in logs {
                             if let Err(e) = sender.send(log).await {
+                                let contract_display = event_filter
+                                    .contract_address
+                                    .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
                                 let event_display =
                                     event_filter.event.as_deref().map_or("all events", |s| s);
-                                warn!(event = %event_display, error = %e, "failed to enqueue log for processing");
+                                warn!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
                             }
                         }
                     } else {
+                        let contract_display = event_filter
+                            .contract_address
+                            .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
                         let event_display =
                             event_filter.event.as_deref().map_or("all events", |s| s);
-                        warn!(event = %event_display, "no channel found for event type");
+                        warn!(contract = %contract_display, event = %event_display, "no channel found for event type");
                     }
                 }
                 Err(e) => {
