@@ -28,12 +28,7 @@
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
 //!
-//!     let mut receiver = client
-//!         .subscribe(
-//!             BlockNumberOrTag::Latest,
-//!             None, // just subscribe to new blocks
-//!         )
-//!         .await?;
+//!     let mut receiver = client.subscribe_live().await?;
 //!
 //!     while let Some(result) = receiver.next().await {
 //!         match result {
@@ -70,7 +65,7 @@
 use std::ops::RangeInclusive;
 
 use tokio::sync::{mpsc, oneshot};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use alloy::{
     consensus::BlockHeader,
@@ -81,7 +76,7 @@ use alloy::{
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
-        TransportResult,
+        RpcError, TransportErrorKind, TransportResult,
         http::reqwest::{self, Url},
         ws::WsConnect,
     },
@@ -113,7 +108,7 @@ pub enum Error {
     SerializationError(#[from] serde_json::Error),
 
     #[error("RPC error: {0}")]
-    RpcError(#[from] alloy::transports::RpcError<alloy::transports::TransportErrorKind>),
+    RpcError(#[from] RpcError<TransportErrorKind>),
 
     #[error("Channel send error")]
     ChannelError,
@@ -123,6 +118,9 @@ pub enum Error {
 
     #[error("Only one subscriber allowed at a time")]
     MultipleSubscribers,
+
+    #[error("No subscriber set for streaming")]
+    NoSubscriber,
 
     #[error("Historical sync failed: {0}")]
     HistoricalSyncError(String),
@@ -136,10 +134,19 @@ pub enum Error {
 
 #[derive(Debug)]
 pub enum Command {
-    Subscribe {
+    SubscribeLive {
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    SubscribeHistorical {
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
+        end_height: BlockNumberOrTag,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    SubscribeSync {
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        start_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), Error>>,
     },
     Unsubscribe {
@@ -156,13 +163,13 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub struct ServiceStatus {
     pub is_subscribed: bool,
-    pub last_synced_block: Option<BlockHashAndNumber>,
+    pub last_synced_block: BlockHashAndNumber,
     pub websocket_connected: bool,
     pub processed_count: u64,
     pub error_count: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct BlockHashAndNumber {
     pub hash: BlockHash,
     pub number: BlockNumber,
@@ -297,7 +304,7 @@ struct Service<N: Network> {
     config: Config,
     provider: RootProvider<N>,
     subscriber: Option<mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>>,
-    current: Option<BlockHashAndNumber>,
+    current: BlockHashAndNumber,
     websocket_connected: bool,
     processed_count: u64,
     error_count: u64,
@@ -313,7 +320,7 @@ impl<N: Network> Service<N> {
             config,
             provider,
             subscriber: None,
-            current: None,
+            current: BlockHashAndNumber::default(),
             websocket_connected: false,
             processed_count: 0,
             error_count: 0,
@@ -348,8 +355,31 @@ impl<N: Network> Service<N> {
 
     async fn handle_command(&mut self, command: Command) -> Result<(), Error> {
         match command {
-            Command::Subscribe { sender, start_height, end_height, response } => {
-                let result = self.handle_subscribe(sender, start_height, end_height).await;
+            Command::SubscribeLive { sender, response } => {
+                self.ensure_no_subscriber()?;
+                info!("Starting live subscription");
+                self.subscriber = Some(sender);
+                let result = self.handle_live().await;
+                let _ = response.send(result);
+            }
+            Command::SubscribeHistorical { sender, start_height, end_height, response } => {
+                self.ensure_no_subscriber()?;
+                info!(start_height = ?start_height, end_height = ?end_height, "Starting historical subscription");
+                self.subscriber = Some(sender);
+                let result = self.handle_historical(start_height, end_height).await;
+                let _ = response.send(result);
+            }
+            Command::SubscribeSync { sender, start_height, response } => {
+                self.ensure_no_subscriber()?;
+                info!(start_height = ?start_height, "Starting sync subscription");
+                self.subscriber = Some(sender);
+                if matches!(start_height, BlockNumberOrTag::Latest) {
+                    warn!(
+                        "Starting sync subscription from latest block is not recommended, please use live mode instead"
+                    );
+                    // TODO: Return error?
+                }
+                let result = self.handle_sync(start_height).await;
                 let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
@@ -369,42 +399,43 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn handle_subscribe(
-        &mut self,
-        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
-        start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), Error> {
-        if self.subscriber.is_some() {
-            return Err(Error::MultipleSubscribers);
-        }
+    async fn handle_live(&mut self) -> Result<(), Error> {
+        let provider = self.provider.clone();
+        let start = self.provider.get_block_number().await?;
 
-        info!(start_height = ?start_height, "Starting subscription from point");
-        self.subscriber = Some(sender);
+        let Some(sender) = self.subscriber.clone() else {
+            return Err(Error::ServiceShutdown);
+        };
 
-        if let Some(end_height) = end_height {
-            self.sync_historical(start_height, end_height).await?;
-            return Ok(());
-        }
+        let rewind_depth = self.config.reorg_rewind_depth;
 
-        if matches!(start_height, BlockNumberOrTag::Latest) {
-            self.sync_live().await?;
-        } else {
-            self.sync_historical_and_transition_to_live(start_height).await?;
-        }
+        tokio::spawn(async move {
+            Self::stream_live_blocks(start, provider, sender, rewind_depth).await;
+        });
 
         Ok(())
     }
 
-    async fn sync_historical(
+    async fn handle_historical(
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), Error> {
         let start_block =
-            self.provider.get_block_by_number(start_height).await?.expect("block does not exist");
-        let end_block =
-            self.provider.get_block_by_number(end_height).await?.expect("block does not exist");
+            self.provider.get_block_by_number(start_height).await?.ok_or(
+                Error::HistoricalSyncError(format!("Start block {start_height:?} not found")),
+            )?;
+        let end_block = self
+            .provider
+            .get_block_by_number(end_height)
+            .await?
+            .ok_or(Error::HistoricalSyncError(format!("End block {end_height:?} not found")))?;
+
+        if end_block.header().number() < start_block.header().number() {
+            return Err(Error::HistoricalSyncError(format!(
+                "End block {end_height:?} is lower than start block {start_height:?}"
+            )));
+        }
 
         info!(
             start_block = start_block.header().number(),
@@ -416,29 +447,22 @@ impl<N: Network> Service<N> {
 
         info!("Successfully synced historical data");
 
-        if let Some(sender) = &self.subscriber
-            && sender.send(Err(Error::Eof)).await.is_err()
-        {
-            warn!("Subscriber channel closed, cleaning up");
-        }
-
         Ok(())
     }
 
-    async fn sync_historical_and_transition_to_live(
-        &mut self,
-        start_height: BlockNumberOrTag,
-    ) -> Result<(), Error> {
+    async fn handle_sync(&mut self, start_height: BlockNumberOrTag) -> Result<(), Error> {
         // Step 1:
         // Fetches the starting block and end block for historical sync
         let start_block =
-            self.provider.get_block_by_number(start_height).await?.expect("already checked");
+            self.provider.get_block_by_number(start_height).await?.ok_or(
+                Error::HistoricalSyncError(format!("Start block {start_height:?} not found")),
+            )?;
 
         let end_block = self
             .provider
             .get_block_by_number(BlockNumberOrTag::Latest)
             .await?
-            .expect("should be valid");
+            .ok_or(Error::HistoricalSyncError("Latest block not found".to_string()))?;
 
         info!(
             start_block = start_block.header().number(),
@@ -452,7 +476,7 @@ impl<N: Network> Service<N> {
             mpsc::channel::<Result<RangeInclusive<BlockNumber>, Error>>(MAX_BUFFERED_MESSAGES);
 
         let provider = self.provider.clone();
-        let rewind = self.config.reorg_rewind_depth;
+        let rewind_depth = self.config.reorg_rewind_depth;
 
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
@@ -460,7 +484,8 @@ impl<N: Network> Service<N> {
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
-            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender, rewind).await;
+            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender, rewind_depth)
+                .await;
         });
 
         // Step 4: Perform historical synchronization
@@ -472,8 +497,9 @@ impl<N: Network> Service<N> {
             return Err(Error::HistoricalSyncError(e.to_string()));
         }
 
-        let sender = self.subscriber.clone().expect("subscriber should be set");
-
+        let Some(sender) = self.subscriber.clone() else {
+            return Err(Error::ServiceShutdown);
+        };
         // Step 5:
         // Spawn the buffer processor task
         // This will:
@@ -489,19 +515,6 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn sync_live(&mut self) -> Result<(), Error> {
-        let provider = self.provider.clone();
-        let start = self.provider.get_block_number().await?;
-
-        let sender = self.subscriber.clone().expect("subscriber should be set");
-        let rewind = self.config.reorg_rewind_depth;
-        tokio::spawn(async move {
-            Self::stream_live_blocks(start, provider, sender, rewind).await;
-        });
-
-        Ok(())
-    }
-
     async fn sync_historical_data(
         &mut self,
         start: N::BlockResponse,
@@ -509,25 +522,27 @@ impl<N: Network> Service<N> {
     ) -> Result<(), Error> {
         let mut batch_count = 0;
 
-        self.current = Some(BlockHashAndNumber::from_header::<N>(start.header()));
+        self.current = BlockHashAndNumber::from_header::<N>(start.header());
 
-        while self.current.as_ref().unwrap().number < end.header().number() {
+        while self.current.number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
             let batch_to = self
                 .current
-                .as_ref()
-                .unwrap()
                 .number
                 .saturating_add(self.config.blocks_read_per_epoch as u64)
                 .min(end.header().number());
 
-            let batch_end_block =
-                self.provider.get_block_by_number(batch_to.into()).await?.expect("should be valid");
+            // safe unwrap since we've checked end block exists
+            let batch_end_block = self
+                .provider
+                .get_block_by_number(batch_to.into())
+                .await?
+                .expect("end of the batch should already be ensured to exist");
 
-            self.send_to_subscriber(Ok(self.current.as_ref().unwrap().number..=batch_to)).await;
+            self.send_to_subscriber(Ok(self.current.number..=batch_to)).await;
 
-            self.current = Some(BlockHashAndNumber::from_header::<N>(batch_end_block.header()));
+            self.current = BlockHashAndNumber::from_header::<N>(batch_end_block.header());
 
             batch_count += 1;
             if batch_count % 10 == 0 {
@@ -536,46 +551,12 @@ impl<N: Network> Service<N> {
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
-        Ok(())
-    }
 
-    async fn ensure_current_not_reorged(&mut self) -> Result<(), Error> {
-        let current_block =
-            self.provider.get_block_by_hash(self.current.as_ref().unwrap().hash).await?;
-        if current_block.is_some() {
-            return Ok(());
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
+        {
+            warn!("Subscriber channel closed, cleaning up");
         }
-
-        self.rewind_on_reorg_detected().await
-    }
-
-    async fn rewind_on_reorg_detected(&mut self) -> Result<(), Error> {
-        let mut new_current_height =
-            if self.current.as_ref().unwrap().number <= self.config.reorg_rewind_depth {
-                0
-            } else {
-                self.current.as_ref().unwrap().number - self.config.reorg_rewind_depth
-            };
-
-        let head = self.provider.get_block_number().await?;
-        if head < new_current_height {
-            new_current_height = head;
-        }
-
-        let current = self
-            .provider
-            .get_block_by_number(new_current_height.into())
-            .await?
-            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
-            .expect("block should exist");
-
-        info!(
-            old_current = self.current.as_ref().unwrap().number,
-            new_current = current.number,
-            "Rewind on reorg detected"
-        );
-
-        self.current = Some(current);
 
         Ok(())
     }
@@ -597,15 +578,14 @@ impl<N: Network> Service<N> {
         }
 
         match Self::get_block_subscription(&provider).await {
-            Ok(mut ws_stream) => {
+            Ok(ws_stream) => {
                 info!("WebSocket connected for live blocks");
 
-                while let Ok(header_resp) = ws_stream.recv().await {
+                let cur = current;
+                let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cur);
+                while let Some(header_resp) = stream.next().await {
                     let incoming_block_num = header_resp.number();
                     info!(block_number = incoming_block_num, "Received block header");
-                    if incoming_block_num < current {
-                        continue;
-                    }
 
                     // TODO: Find a way to send this to the subscriber or something (without
                     // blocking)
@@ -641,7 +621,9 @@ impl<N: Network> Service<N> {
                 }
             }
             Err(e) => {
-                let _ = sender.send(Err(e)).await;
+                if sender.send(Err(e)).await.is_err() {
+                    warn!("Downstream channel closed, stopping live blocks task");
+                }
             }
         }
     }
@@ -679,12 +661,53 @@ impl<N: Network> Service<N> {
                     }
                 }
                 Err(e) => {
-                    warn!("Buffered live stream error: {e}");
+                    if sender.send(Err(e)).await.is_err() {
+                        warn!("Subscriber channel closed, cleaning up");
+                        return;
+                    }
                 }
             }
         }
 
         info!(processed = processed, discarded = discarded, "Processed buffered messages");
+    }
+
+    async fn ensure_current_not_reorged(&mut self) -> Result<(), Error> {
+        let current_block = self.provider.get_block_by_hash(self.current.hash).await?;
+        if current_block.is_some() {
+            return Ok(());
+        }
+
+        self.rewind_on_reorg_detected().await
+    }
+
+    async fn rewind_on_reorg_detected(&mut self) -> Result<(), Error> {
+        let mut new_current_height =
+            self.current.number.saturating_sub(self.config.reorg_rewind_depth);
+
+        let head = self.provider.get_block_number().await?;
+        if head < new_current_height {
+            new_current_height = head;
+        }
+
+        let current = self
+            .provider
+            .get_block_by_number(new_current_height.into())
+            .await?
+            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
+            .ok_or(Error::HistoricalSyncError(format!(
+                "Block {new_current_height} not found during rewind",
+            )))?;
+
+        info!(
+            old_current = self.current.number,
+            new_current = current.number,
+            "Rewind on reorg detected"
+        );
+
+        self.current = current;
+
+        Ok(())
     }
 
     async fn get_block_subscription(
@@ -723,6 +746,13 @@ impl<N: Network> Service<N> {
             error_count: self.error_count,
         }
     }
+
+    fn ensure_no_subscriber(&self) -> Result<(), Error> {
+        if self.subscriber.is_some() {
+            return Err(Error::MultipleSubscribers);
+        }
+        Ok(())
+    }
 }
 
 pub struct BlockRangeScannerClient {
@@ -740,25 +770,45 @@ impl BlockRangeScannerClient {
         Self { command_sender }
     }
 
-    /// Subscribes to new blocks.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_height` - The block number to start from.
-    /// * `end_height` - The block number to end at (inclusive).
+    /// Subscribes to live blocks starting from the latest block.
     ///
     /// # Errors
     ///
     /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn subscribe(
+    pub async fn subscribe_live(
         &self,
-        start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command = Command::Subscribe {
+        let command = Command::SubscribeLive { sender: blocks_sender, response: response_tx };
+
+        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| Error::ServiceShutdown)??;
+
+        Ok(ReceiverStream::new(blocks_receiver))
+    }
+
+    /// Subscribes to historical blocks from `start_height` to `end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    /// * `end_height` - The ending block number or tag.
+    ///
+    /// # Errors
+    ///
+    /// * `Error::ServiceShutdown` - if the service is already shutting down.
+    pub async fn subscribe_historical(
+        &self,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
+        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::SubscribeHistorical {
             sender: blocks_sender,
             start_height,
             end_height,
@@ -769,9 +819,33 @@ impl BlockRangeScannerClient {
 
         response_rx.await.map_err(|_| Error::ServiceShutdown)??;
 
-        let stream = ReceiverStream::new(blocks_receiver);
+        Ok(ReceiverStream::new(blocks_receiver))
+    }
 
-        Ok(stream)
+    /// Subscribes to blocks starting from `start_height` and transitions to live mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    ///
+    /// # Errors
+    ///
+    /// * `Error::ServiceShutdown` - if the service is already shutting down.
+    pub async fn subscribe_sync(
+        &self,
+        start_height: BlockNumberOrTag,
+    ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
+        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command =
+            Command::SubscribeSync { sender: blocks_sender, start_height, response: response_tx };
+
+        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| Error::ServiceShutdown)??;
+
+        Ok(ReceiverStream::new(blocks_receiver))
     }
 
     /// Unsubscribes the current subscriber.
@@ -823,7 +897,6 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
     use alloy::{
-        eips::BlockNumberOrTag,
         network::Ethereum,
         primitives::{B256, keccak256},
         rpc::{
@@ -890,7 +963,7 @@ mod tests {
         service.error_count = error_count;
         let hash = keccak256(b"random");
         let block_number = 99;
-        service.current = Some(BlockHashAndNumber { hash, number: block_number });
+        service.current = BlockHashAndNumber { hash, number: block_number };
         service.websocket_connected = true;
         service.subscriber = Some(mpsc::channel(1).0);
 
@@ -900,7 +973,7 @@ mod tests {
         assert!(status.websocket_connected);
         assert_eq!(status.processed_count, processed_count);
         assert_eq!(status.error_count, error_count);
-        let last = status.last_synced_block.expect("last synced block is set");
+        let last = status.last_synced_block;
         assert_eq!(last.number, block_number);
         assert_eq!(last.hash, hash);
     }
@@ -977,8 +1050,7 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver =
-            client.subscribe(BlockNumberOrTag::Latest, None).await?.take(expected_blocks);
+        let mut receiver = client.subscribe_live().await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
@@ -1015,8 +1087,7 @@ mod tests {
         let original_height = 10;
         let original_hash = keccak256(b"original block");
         let original_block = mock_block(original_height, original_hash);
-        service.current =
-            Some(BlockHashAndNumber::from_header::<Ethereum>(original_block.header()));
+        service.current = BlockHashAndNumber::from_header::<Ethereum>(original_block.header());
 
         let expected_rewind_height = original_height - config.reorg_rewind_depth;
         let expected_rewind_hash = keccak256(b"rewound block");
@@ -1032,7 +1103,7 @@ mod tests {
 
         service.ensure_current_not_reorged().await?;
 
-        let current = service.current.expect("current block should be set after rewind");
+        let current = service.current;
         assert_eq!(current.number, expected_rewind_height, "should rewind by reorg_rewind_depth");
         assert_eq!(current.hash, expected_rewind_hash, "should use hash of block at rewind height");
 
@@ -1040,13 +1111,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ranges_entirely_after_cutoff_are_forwarded_unchanged() -> anyhow::Result<()> {
+    async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
         let cutoff = 50;
-
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(51..=55)).await.unwrap();
-        buffer_tx.send(Ok(60..=65)).await.unwrap();
-        buffer_tx.send(Ok(70..=71)).await.unwrap();
+        buffer_tx.send(Ok(55..=60)).await.unwrap();
+        buffer_tx.send(Ok(60..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1058,7 +1128,7 @@ mod tests {
         }
 
         // All ranges should be forwarded as-is since they're after cutoff
-        assert_eq!(forwarded, vec![51..=55, 60..=65, 70..=71]);
+        assert_eq!(forwarded, vec![51..=55, 55..=60, 60..=70]);
         Ok(())
     }
 
@@ -1068,8 +1138,8 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(40..=50)).await.unwrap();
-        buffer_tx.send(Ok(60..=75)).await.unwrap();
-        buffer_tx.send(Ok(90..=99)).await.unwrap();
+        buffer_tx.send(Ok(50..=60)).await.unwrap();
+        buffer_tx.send(Ok(60..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1091,7 +1161,7 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(70..=80)).await.unwrap();
-        buffer_tx.send(Ok(60..=90)).await.unwrap();
+        buffer_tx.send(Ok(60..=80)).await.unwrap();
         buffer_tx.send(Ok(74..=76)).await.unwrap();
         drop(buffer_tx);
 
@@ -1104,7 +1174,7 @@ mod tests {
         }
 
         // All ranges should be trimmed to start at cutoff (75)
-        assert_eq!(forwarded, vec![75..=80, 75..=90, 75..=76]);
+        assert_eq!(forwarded, vec![75..=80, 75..=80, 75..=76]);
         Ok(())
     }
 
@@ -1113,12 +1183,12 @@ mod tests {
         let cutoff = 50;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Ok(30..=40)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Ok(30..=45)).await.unwrap(); // Before cutoff: discard
         buffer_tx.send(Ok(45..=55)).await.unwrap(); // Overlaps: trim to 50..=55
-        buffer_tx.send(Ok(60..=65)).await.unwrap(); // After cutoff: forward as-is
-        buffer_tx.send(Ok(48..=49)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Ok(55..=65)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(Ok(40..=49)).await.unwrap(); // Before cutoff: discard
         buffer_tx.send(Ok(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
-        buffer_tx.send(Ok(100..=110)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(Ok(51..=100)).await.unwrap(); // After cutoff: forward as-is
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1129,7 +1199,7 @@ mod tests {
             forwarded.push(result.unwrap());
         }
 
-        assert_eq!(forwarded, vec![50..=55, 60..=65, 50..=51, 100..=110]);
+        assert_eq!(forwarded, vec![50..=55, 55..=65, 50..=51, 51..=100]);
         Ok(())
     }
 
@@ -1163,8 +1233,8 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(0..=5)).await.unwrap();
-        buffer_tx.send(Ok(1..=10)).await.unwrap();
-        buffer_tx.send(Ok(20..=25)).await.unwrap();
+        buffer_tx.send(Ok(5..=10)).await.unwrap();
+        buffer_tx.send(Ok(10..=25)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1176,7 +1246,7 @@ mod tests {
         }
 
         // All ranges should be forwarded since they're all >= 0
-        assert_eq!(forwarded, vec![0..=5, 1..=10, 20..=25]);
+        assert_eq!(forwarded, vec![0..=5, 5..=10, 10..=25]);
         Ok(())
     }
 
