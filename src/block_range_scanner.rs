@@ -430,12 +430,6 @@ impl<N: Network> Service<N> {
 
         info!("Successfully synced historical data");
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
-        {
-            warn!("Subscriber channel closed, cleaning up");
-        }
-
         Ok(())
     }
 
@@ -552,6 +546,12 @@ impl<N: Network> Service<N> {
             if batch_count % 10 == 0 {
                 debug!(batch_count = batch_count, "Processed historical batches");
             }
+        }
+
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
+        {
+            warn!("Subscriber channel closed, cleaning up");
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
