@@ -175,6 +175,8 @@ impl<N: Network> EventScanner<N> {
             event_channels.insert(unique_event, sender);
         }
 
+        // TODO: Once we have commands in the event scanner we can
+        // use them to start the different subscription
         let client = self.block_range_scanner.run()?;
         let mut stream = if let Some(end_height) = end_height {
             client.subscribe_historical(start_height, end_height).await?
