@@ -356,32 +356,21 @@ impl<N: Network> Service<N> {
     async fn handle_command(&mut self, command: Command) -> Result<(), Error> {
         match command {
             Command::SubscribeLive { sender, response } => {
-                if self.subscriber.is_some() {
-                    return Err(Error::MultipleSubscribers);
-                }
-
+                self.ensure_no_subscriber()?;
                 info!("Starting live subscription");
                 self.subscriber = Some(sender);
-
                 let result = self.handle_live().await;
                 let _ = response.send(result);
             }
             Command::SubscribeHistorical { sender, start_height, end_height, response } => {
-                if self.subscriber.is_some() {
-                    return Err(Error::MultipleSubscribers);
-                }
-
+                self.ensure_no_subscriber()?;
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting historical subscription");
                 self.subscriber = Some(sender);
-
                 let result = self.handle_historical(start_height, end_height).await;
                 let _ = response.send(result);
             }
             Command::SubscribeSync { sender, start_height, response } => {
-                if self.subscriber.is_some() {
-                    return Err(Error::MultipleSubscribers);
-                }
-
+                self.ensure_no_subscriber()?;
                 info!(start_height = ?start_height, "Starting sync subscription");
                 self.subscriber = Some(sender);
                 if matches!(start_height, BlockNumberOrTag::Latest) {
@@ -715,6 +704,13 @@ impl<N: Network> Service<N> {
             processed_count: self.processed_count,
             error_count: self.error_count,
         }
+    }
+
+    fn ensure_no_subscriber(&self) -> Result<(), Error> {
+        if self.subscriber.is_some() {
+            return Err(Error::MultipleSubscribers);
+        }
+        Ok(())
     }
 }
 
