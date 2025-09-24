@@ -14,7 +14,7 @@ use tokio::{sync::Mutex, time::sleep};
 use crate::common::TestCounter;
 
 pub struct BasicCounterCallback {
-    pub count: AtomicUsize,
+    pub count: Arc<AtomicUsize>,
 }
 
 #[async_trait]
