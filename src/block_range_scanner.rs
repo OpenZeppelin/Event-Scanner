@@ -593,11 +593,14 @@ impl<N: Network> Service<N> {
                     if incoming_block_num == current + 1
                         && incoming_block.parent_hash() != prev_hash
                     {
-                        info!("Reorg detected: sending forked range");
-                        if sender.send(Err(Error::ReorgDetected)).await.is_err() {
-                            warn!("Downstream channel closed, stopping live blocks task (reorg)");
-                            return;
-                        }
+                        warn!("Reorg detected: sending forked range");
+
+                        // TODO: re-emit this however this causes an error on the event scanner
+                        //
+                        // if sender.send(Err(Error::ReorgDetected)).await.is_err() {
+                        //     warn!("Downstream channel closed, stopping live blocks task (reorg)");
+                        //     return;
+                        // }
 
                         let mut rewind_block_height = current.saturating_sub(reorg_rewind_depth);
 
@@ -635,7 +638,8 @@ impl<N: Network> Service<N> {
                         // TODO: Maybe also need to think about the processed live block buffer
                         // as it may cut off the reorg rewind range
 
-                        if sender.send(Ok(rewind_block_height..=current)).await.is_err() {
+                        if sender.send(Ok(rewind_block_height..=incoming_block_num)).await.is_err()
+                        {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
@@ -646,11 +650,39 @@ impl<N: Network> Service<N> {
                     }
 
                     if incoming_block_num != current + 1 {
-                        // todo: check for potential reorgs
+                        // let mut latest_block_height = incoming_block_num;
+                        // // todo: check for potential reorgs
+                        // let prev_block = provider
+                        //     .get_block_by_number(BlockNumberOrTag::Number(
+                        //         latest_block_height.saturating_sub(1),
+                        //     ))
+                        //     .await
+                        //     .unwrap()
+                        //     .unwrap();
+                        // let prev_block_hash = prev_block.header().hash();
+                        // let mut parent_hash =
+                        //     provider.get_block_by_hash(prev_block_hash).await.unwrap();
+                        // if parent_hash.is_none() {
+                        //     // find latest finalized block
+                        //     while parent_hash.is_none() {
+                        //         latest_block_height = latest_block_height.saturating_sub(1);
+                        //         let parent_block = provider
+                        //             .get_block_by_number(BlockNumberOrTag::Number(
+                        //                 latest_block_height,
+                        //             ))
+                        //             .await
+                        //             .unwrap()
+                        //             .unwrap();
+                        //         parent_hash = provider
+                        //             .get_block_by_hash(parent_block.header().parent_hash())
+                        //             .await
+                        //             .unwrap();
+                        //     }
+                        // }
                         //
-                        // NOTE: We only check reorg if the incoming header is exactly the next expected block
-                        // If incoming (num) is more than current + 1, we should probably check
-                        // hashes until the prev hash matches the current header's parent hash
+                        // prev_hash = incoming_block.hash();
+                        // current = incoming_block_num + 1;
+                        // continue;
                     }
 
                     // == Normal case ==
