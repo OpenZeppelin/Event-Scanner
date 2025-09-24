@@ -951,7 +951,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn buffered_messages_trim_invalid_ranges() -> anyhow::Result<()> {
+    async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(40..=44).await.unwrap();
         buffer_tx.send(45..=54).await.unwrap();
