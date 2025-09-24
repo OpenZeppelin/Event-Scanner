@@ -74,11 +74,10 @@ impl EventCallback for CounterCallback {
 }
 
 async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: alloy::primitives::Address) -> anyhow::Result<()> {
-    let filter = EventFilter {
-        contract_address: Some(contract),
-        event: Some(MyContract::SomeEvent::SIGNATURE.to_owned()),
-        callback: Arc::new(CounterCallback { processed: Arc::new(AtomicUsize::new(0)) }),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract)
+        .with_event(MyContract::SomeEvent::SIGNATURE)
+        .with_callback(Arc::new(CounterCallback { processed: Arc::new(AtomicUsize::new(0)) }));
 
     let mut scanner = EventScannerBuilder::new()
         .with_event_filter(filter)
@@ -111,7 +110,30 @@ Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `conne
 
 Create an `EventFilter` for each contract/event pair you want to track. The filter bundles the contract address, the event signature (from `SolEvent::SIGNATURE`), and an `Arc<dyn EventCallback + Send + Sync>`.
 
-Both `contract_address` and `event` fields are optional, allowing for flexible event tracking:
+Both `contract_address` and `event` fields are optional, allowing for flexible event tracking.
+
+You can construct EventFilters using either the builder pattern (recommended) or direct struct construction:
+
+### Builder Pattern (Recommended)
+
+```rust
+// Track a specific event from a specific contract
+let specific_filter = EventFilter::new()
+    .with_contract_address(*counter_contract.address())
+    .with_event(Counter::CountIncreased::SIGNATURE)
+    .with_callback(Arc::new(CounterCallback));
+
+// Track ALL events from a specific contract
+let all_contract_events_filter = EventFilter::new()
+    .with_contract_address(*counter_contract.address())
+    .with_callback(Arc::new(AllEventsCallback));
+
+// Track ALL events from ALL contracts in the block range
+let all_events_filter = EventFilter::new()
+    .with_callback(Arc::new(GlobalEventsCallback));
+```
+
+### Direct Struct Construction
 
 ```rust
 // Track a specific event from a specific contract (traditional usage)
