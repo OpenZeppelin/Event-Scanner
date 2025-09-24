@@ -30,8 +30,8 @@ async fn callbacks_slow_processing_does_not_drop_events() -> anyhow::Result<()> 
         Arc::new(SlowProcessorCallback { delay_ms: 100, processed: Arc::clone(&processed) });
 
     let filter = EventFilter {
-        contract_address,
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
     let mut scanner = EventScannerBuilder::new()
@@ -77,8 +77,8 @@ async fn callbacks_failure_then_retry_success() -> anyhow::Result<()> {
     });
 
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
     let cfg = FixedRetryConfig { max_attempts: 3, delay_ms: 50 };
@@ -127,8 +127,8 @@ async fn callbacks_always_failing_respects_max_attempts() -> anyhow::Result<()> 
     let callback = Arc::new(AlwaysFailingCallback { attempts: Arc::clone(&attempts) });
 
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
         callback,
     };
     let cfg = FixedRetryConfig { max_attempts: expected_attempts, delay_ms: 20 };

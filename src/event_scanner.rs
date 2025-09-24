@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
-    types::EventFilter,
+    event_filter::EventFilter,
 };
 use alloy::{
     eips::BlockNumberOrTag,
@@ -134,8 +134,8 @@ pub struct EventScanner<N: Network> {
 
 #[derive(Hash, Eq, PartialEq)]
 struct EventIdentifier {
-    contract_address: Address,
-    event: String,
+    contract_address: Option<Address>,
+    event: Option<String>,
 }
 
 impl<N: Network> EventScanner<N> {
@@ -165,12 +165,8 @@ impl<N: Network> EventScanner<N> {
 
             let callback = filter.callback.clone();
             let strategy = self.callback_strategy.clone();
-            Self::spawn_event_callback_task_executors(
-                receiver,
-                callback,
-                strategy,
-                filter.event.clone(),
-            );
+            let event_name = filter.event.clone().unwrap_or_else(|| "all events".to_string());
+            Self::spawn_event_callback_task_executors(receiver, callback, strategy, event_name);
 
             event_channels.insert(unique_event, sender);
         }
@@ -233,20 +229,31 @@ impl<N: Network> EventScanner<N> {
         event_channels: &HashMap<EventIdentifier, mpsc::Sender<Log>>,
     ) -> anyhow::Result<()> {
         for event_filter in &self.tracked_events {
-            let filter = Filter::new()
-                .address(event_filter.contract_address)
-                .event(event_filter.event.as_str())
-                .from_block(from_block)
-                .to_block(to_block);
+            let mut filter = Filter::new().from_block(from_block).to_block(to_block);
+
+            // Add contract address filter if specified
+            if let Some(contract_address) = event_filter.contract_address {
+                filter = filter.address(contract_address);
+            }
+
+            // Add event signature filter if specified
+            if let Some(event_signature) = &event_filter.event {
+                filter = filter.event(event_signature.as_str());
+            }
 
             match self.block_range_scanner.provider().get_logs(&filter).await {
                 Ok(logs) => {
                     if logs.is_empty() {
                         continue;
                     }
+                    let contract_display = event_filter
+                        .contract_address
+                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
+                    let event_display = event_filter.event.as_deref().map_or("all events", |s| s);
+
                     info!(
-                        contract = ?event_filter.contract_address,
-                        event = %event_filter.event,
+                        contract = %contract_display,
+                        event = %event_display,
                         log_count = logs.len(),
                         from_block,
                         to_block,
@@ -261,17 +268,34 @@ impl<N: Network> EventScanner<N> {
                     if let Some(sender) = event_channels.get(&event_identifier) {
                         for log in logs {
                             if let Err(e) = sender.send(log).await {
-                                warn!(event = %event_filter.event, error = %e, "failed to enqueue log for processing");
+                                let contract_display = event_filter.contract_address.map_or_else(
+                                    || "all contracts".to_string(),
+                                    |addr| format!("{addr:?}"),
+                                );
+                                let event_display =
+                                    event_filter.event.as_deref().map_or("all events", |s| s);
+                                warn!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
                             }
                         }
                     } else {
-                        warn!(event = %event_filter.event, "no channel found for event type");
+                        let contract_display = event_filter.contract_address.map_or_else(
+                            || "all contracts".to_string(),
+                            |addr| format!("{addr:?}"),
+                        );
+                        let event_display =
+                            event_filter.event.as_deref().map_or("all events", |s| s);
+                        warn!(contract = %contract_display, event = %event_display, "no channel found for event type");
                     }
                 }
                 Err(e) => {
+                    let contract_display = event_filter
+                        .contract_address
+                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
+                    let event_display = event_filter.event.as_deref().map_or("all events", |s| s);
+
                     error!(
-                        contract = ?event_filter.contract_address,
-                        event = %event_filter.event,
+                        contract = %contract_display,
+                        event = %event_display,
                         error = %e,
                         from_block,
                         to_block,
