@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
-    types::EventFilter,
+    event_filter::EventFilter,
 };
 use alloy::{
     eips::BlockNumberOrTag, network::Network, providers::Provider, rpc::types::Filter,
@@ -149,35 +149,40 @@ impl<N: Network> EventScanner<N> {
         for filter in &self.tracked_events {
             let provider = self.block_range_scanner.provider().clone();
             let mut sub = range_tx.subscribe();
-            let event_name = filter.event.clone();
-            let contract_address = filter.contract_address;
-            let callback = filter.callback.clone();
+            let filter = filter.clone();
             let strategy = self.callback_strategy.clone();
 
             tokio::spawn(async move {
                 loop {
                     match sub.recv().await {
                         Ok((from_block, to_block)) => {
-                            let filter = Filter::new()
-                                .address(contract_address)
-                                .event(event_name.as_str())
-                                .from_block(from_block)
-                                .to_block(to_block);
+                            let mut log_filter =
+                                Filter::new().from_block(from_block).to_block(to_block);
 
-                            match provider.get_logs(&filter).await {
+                            if let Some(contract_address) = filter.contract_address {
+                                log_filter = log_filter.address(contract_address);
+                            }
+
+                            if let Some(ref event_signature) = filter.event {
+                                log_filter = log_filter.event(event_signature.as_str());
+                            }
+
+                            match provider.get_logs(&log_filter).await {
                                 Ok(logs) => {
                                     if logs.is_empty() {
                                         continue;
                                     }
-                                    info!(contract = ?contract_address, event = %event_name, log_count = logs.len(), from_block, to_block, "found logs for event in block range");
+                                    info!(contract = ?filter.contract_address, event = ?filter.event, log_count = logs.len(), from_block, to_block, "found logs for event in block range");
                                     for log in logs {
-                                        if let Err(e) = strategy.execute(&callback, &log).await {
-                                            error!(event = %event_name, at_block = &log.block_number, error = %e, "failed to invoke callback after retries");
+                                        if let Err(e) =
+                                            strategy.execute(&filter.callback, &log).await
+                                        {
+                                            error!(event = ?filter.event, at_block = &log.block_number, error = %e, "failed to invoke callback after retries");
                                         }
                                     }
                                 }
                                 Err(e) => {
-                                    error!(contract = ?contract_address, event = %event_name, error = %e, from_block, to_block, "failed to get logs for block range");
+                                    error!(contract = ?filter.contract_address, event = ?filter.event, error = %e, from_block, to_block, "failed to get logs for block range");
                                 }
                             }
                         }
