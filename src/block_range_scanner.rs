@@ -1075,8 +1075,8 @@ mod tests {
         let cutoff = 50;
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(51..=55)).await.unwrap();
-        buffer_tx.send(Ok(60..=65)).await.unwrap();
-        buffer_tx.send(Ok(70..=71)).await.unwrap();
+        buffer_tx.send(Ok(55..=60)).await.unwrap();
+        buffer_tx.send(Ok(60..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1088,7 +1088,7 @@ mod tests {
         }
 
         // All ranges should be forwarded as-is since they're after cutoff
-        assert_eq!(forwarded, vec![51..=55, 60..=65, 70..=71]);
+        assert_eq!(forwarded, vec![51..=55, 55..=60, 60..=70]);
         Ok(())
     }
 
@@ -1098,8 +1098,8 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(40..=50)).await.unwrap();
-        buffer_tx.send(Ok(60..=75)).await.unwrap();
-        buffer_tx.send(Ok(90..=99)).await.unwrap();
+        buffer_tx.send(Ok(50..=60)).await.unwrap();
+        buffer_tx.send(Ok(60..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1121,7 +1121,7 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(70..=80)).await.unwrap();
-        buffer_tx.send(Ok(60..=90)).await.unwrap();
+        buffer_tx.send(Ok(60..=80)).await.unwrap();
         buffer_tx.send(Ok(74..=76)).await.unwrap();
         drop(buffer_tx);
 
@@ -1134,7 +1134,7 @@ mod tests {
         }
 
         // All ranges should be trimmed to start at cutoff (75)
-        assert_eq!(forwarded, vec![75..=80, 75..=90, 75..=76]);
+        assert_eq!(forwarded, vec![75..=80, 75..=80, 75..=76]);
         Ok(())
     }
 
@@ -1143,12 +1143,12 @@ mod tests {
         let cutoff = 50;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Ok(30..=40)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Ok(30..=45)).await.unwrap(); // Before cutoff: discard
         buffer_tx.send(Ok(45..=55)).await.unwrap(); // Overlaps: trim to 50..=55
-        buffer_tx.send(Ok(60..=65)).await.unwrap(); // After cutoff: forward as-is
-        buffer_tx.send(Ok(48..=49)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Ok(55..=65)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(Ok(40..=49)).await.unwrap(); // Before cutoff: discard
         buffer_tx.send(Ok(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
-        buffer_tx.send(Ok(100..=110)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(Ok(51..=100)).await.unwrap(); // After cutoff: forward as-is
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1159,7 +1159,7 @@ mod tests {
             forwarded.push(result.unwrap());
         }
 
-        assert_eq!(forwarded, vec![50..=55, 60..=65, 50..=51, 100..=110]);
+        assert_eq!(forwarded, vec![50..=55, 55..=65, 50..=51, 51..=100]);
         Ok(())
     }
 
@@ -1193,8 +1193,8 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(0..=5)).await.unwrap();
-        buffer_tx.send(Ok(1..=10)).await.unwrap();
-        buffer_tx.send(Ok(20..=25)).await.unwrap();
+        buffer_tx.send(Ok(5..=10)).await.unwrap();
+        buffer_tx.send(Ok(10..=25)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1206,7 +1206,7 @@ mod tests {
         }
 
         // All ranges should be forwarded since they're all >= 0
-        assert_eq!(forwarded, vec![0..=5, 1..=10, 20..=25]);
+        assert_eq!(forwarded, vec![0..=5, 5..=10, 10..=25]);
         Ok(())
     }
 
