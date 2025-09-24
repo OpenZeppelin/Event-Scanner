@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use event_scanner::{event_filters::EventFilter, event_scanner::EventScannerBuilder};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScannerBuilder};
 use tokio::time::{sleep, timeout};
 
 #[tokio::test]

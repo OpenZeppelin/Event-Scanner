@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_filters::EventFilter, event_scanner::EventScannerBuilder};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScannerBuilder};
 use tokio::time::{sleep, timeout};
 
 use crate::{

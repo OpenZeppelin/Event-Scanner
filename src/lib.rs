@@ -1,6 +1,6 @@
 pub mod block_range_scanner;
 pub mod callback;
-pub mod event_filters;
+pub mod event_filter;
 pub mod event_scanner;
 
 pub use crate::{
@@ -11,5 +11,5 @@ pub use crate::{
             StateSyncConfig,
         },
     },
-    event_filters::{EventFilter, EventFilterBuilder},
+    event_filter::{EventFilter, EventFilterBuilder},
 };
