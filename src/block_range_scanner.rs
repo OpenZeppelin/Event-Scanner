@@ -65,7 +65,7 @@
 use std::ops::RangeInclusive;
 
 use tokio::sync::{mpsc, oneshot};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use alloy::{
     consensus::BlockHeader,
@@ -563,14 +563,13 @@ impl<N: Network> Service<N> {
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
     ) {
         match Self::get_block_subscription(&provider).await {
-            Ok(mut ws_stream) => {
+            Ok(ws_stream) => {
                 info!("WebSocket connected for live blocks");
 
-                while let Ok(header_resp) = ws_stream.recv().await {
+                let cur = current;
+                let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cur);
+                while let Some(header_resp) = stream.next().await {
                     info!(block_number = header_resp.number(), "Received block header");
-                    if header_resp.number() < current {
-                        continue;
-                    }
 
                     if sender.send(Ok(current..=header_resp.number())).await.is_err() {
                         warn!("Downstream channel closed, stopping live blocks task");
@@ -622,7 +621,10 @@ impl<N: Network> Service<N> {
                     }
                 }
                 Err(e) => {
-                    warn!("Buffered live stream error: {e}");
+                    if sender.send(Err(e)).await.is_err() {
+                        warn!("Subscriber channel closed, cleaning up");
+                        return;
+                    }
                 }
             }
         }
