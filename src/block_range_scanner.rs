@@ -130,6 +130,9 @@ pub enum Error {
 
     #[error("End of block batch")]
     Eof,
+
+    #[error("Reorg detected")]
+    ReorgDetected,
 }
 
 #[derive(Debug)]
@@ -568,13 +571,13 @@ impl<N: Network> Service<N> {
         reorg_rewind_depth: u64,
     ) {
         // Track previous block hash for reorg detection
-        let mut prev_hash: Option<BlockHash> = None;
+        let mut prev_hash = BlockHash::default();
         if current > 0
             && let Ok(Some(prev_block)) = provider
                 .get_block_by_number(BlockNumberOrTag::Number(current.saturating_sub(1)))
                 .await
         {
-            prev_hash = Some(prev_block.header().hash());
+            prev_hash = prev_block.header().hash();
         }
 
         match Self::get_block_subscription(&provider).await {
@@ -583,40 +586,81 @@ impl<N: Network> Service<N> {
 
                 let cur = current;
                 let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cur);
-                while let Some(header_resp) = stream.next().await {
-                    let incoming_block_num = header_resp.number();
+                while let Some(incoming_block) = stream.next().await {
+                    let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
 
-                    // TODO: Find a way to send this to the subscriber or something (without
-                    // blocking)
-                    // NOTE: We only check reorg if the incoming header is exactly the next expected block
-                    // If incoming (num) is more than current + 1, we should probably check
-                    // hashes until the prev hash matches the current header's parent hash
-                    if incoming_block_num == current
-                        && prev_hash.is_some()
-                        && header_resp.parent_hash() != prev_hash.unwrap()
+                    if incoming_block_num == current + 1
+                        && incoming_block.parent_hash() != prev_hash
                     {
-                        let rewind_start = current.saturating_sub(reorg_rewind_depth);
-                        // NOTE: we could just rewind until the parent hash matches or directly
-                        // rewind until latest finalized block until current
-                        // TODO: Maybe also need to think about the processed live block buffer
-                        // as it may cut off the reorg rewind range
-                        info!(current, rewind_start, "Reorg detected: sending rewind range");
-                        if sender.send(Ok(rewind_start..=current)).await.is_err() {
+                        info!("Reorg detected: sending forked range");
+                        if sender.send(Err(Error::ReorgDetected)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
-                        prev_hash = Some(header_resp.hash());
+
+                        let mut rewind_block_height = current.saturating_sub(reorg_rewind_depth);
+
+                        let rewind_block = provider
+                            .get_block_by_number(BlockNumberOrTag::Number(rewind_block_height))
+                            .await
+                            .unwrap()
+                            .unwrap();
+
+                        let rewind_block_hash = rewind_block.header().hash();
+
+                        let mut rewound_block_by_hash =
+                            provider.get_block_by_hash(rewind_block_hash).await.unwrap();
+
+                        // check if we have rewound far enough, if none then the block doesn't exist
+                        // we need to go back further
+                        if rewound_block_by_hash.is_none() {
+                            // find latest finalized block
+                            while rewound_block_by_hash.is_none() {
+                                rewind_block_height = rewind_block_height.saturating_sub(1);
+                                let rewind_block = provider
+                                    .get_block_by_number(BlockNumberOrTag::Number(
+                                        rewind_block_height,
+                                    ))
+                                    .await
+                                    .unwrap()
+                                    .unwrap();
+                                rewound_block_by_hash = provider
+                                    .get_block_by_hash(rewind_block.header().hash())
+                                    .await
+                                    .unwrap();
+                            }
+                        }
+
+                        // TODO: Maybe also need to think about the processed live block buffer
+                        // as it may cut off the reorg rewind range
+
+                        if sender.send(Ok(rewind_block_height..=current)).await.is_err() {
+                            warn!("Downstream channel closed, stopping live blocks task (reorg)");
+                            return;
+                        }
+
+                        prev_hash = incoming_block.hash();
                         current = incoming_block_num + 1;
                         continue;
                     }
+
+                    if incoming_block_num != current + 1 {
+                        // todo: check for potential reorgs
+                        //
+                        // NOTE: We only check reorg if the incoming header is exactly the next expected block
+                        // If incoming (num) is more than current + 1, we should probably check
+                        // hashes until the prev hash matches the current header's parent hash
+                    }
+
+                    // == Normal case ==
 
                     if sender.send(Ok(current..=incoming_block_num)).await.is_err() {
                         warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
 
-                    prev_hash = Some(header_resp.hash());
+                    prev_hash = incoming_block.hash();
                     current = incoming_block_num + 1;
                 }
             }
