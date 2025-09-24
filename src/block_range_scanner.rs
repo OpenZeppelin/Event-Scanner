@@ -579,7 +579,9 @@ impl<N: Network> Service<N> {
                 }
             }
             Err(e) => {
-                let _ = sender.send(Err(e)).await;
+                if sender.send(Err(e)).await.is_err() {
+                    warn!("Downstream channel closed, stopping live blocks task");
+                }
             }
         }
     }
