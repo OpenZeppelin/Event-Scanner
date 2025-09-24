@@ -545,8 +545,8 @@ impl<N: Network> Service<N> {
             }
         }
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -1071,9 +1071,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ranges_entirely_after_cutoff_are_forwarded_unchanged() -> anyhow::Result<()> {
+    async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
         let cutoff = 50;
-
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Ok(51..=55)).await.unwrap();
         buffer_tx.send(Ok(60..=65)).await.unwrap();
