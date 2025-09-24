@@ -22,8 +22,8 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let callback = Arc::new(BasicCounterCallback { count: Arc::clone(&event_count) });
+    let event_count = AtomicUsize::new(0);
+    let callback = Arc::new(BasicCounterCallback { count: event_count });
 
     let filter = EventFilter {
         contract_address,
@@ -53,9 +53,8 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
             .await
     });
 
-    let event_count_clone = Arc::clone(&event_count);
-    let event_counting = async move {
-        while event_count_clone.load(Ordering::SeqCst) < 4 {
+    let event_counting = async {
+        while event_count.load(Ordering::SeqCst) < 4 {
             sleep(Duration::from_millis(100)).await;
         }
     };
