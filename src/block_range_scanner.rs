@@ -414,6 +414,12 @@ impl<N: Network> Service<N> {
             .await?
             .ok_or(Error::HistoricalSyncError(format!("End block {end_height:?} not found")))?;
 
+        if end_block.header().number() < start_block.header().number() {
+            return Err(Error::HistoricalSyncError(format!(
+                "End block {end_height:?} is lower than start block {start_height:?}"
+            )));
+        }
+
         info!(
             start_block = start_block.header().number(),
             end_block = end_block.header().number(),
