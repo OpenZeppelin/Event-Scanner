@@ -189,6 +189,11 @@ impl<N: Network> Client<N> {
         ReceiverStream::new(receiver)
     }
 
+    /// Starts the scanner
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to start
     pub async fn start_scanner(
         self,
         start_height: BlockNumberOrTag,
