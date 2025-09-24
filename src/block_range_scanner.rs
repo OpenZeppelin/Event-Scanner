@@ -164,8 +164,8 @@ pub struct ServiceStatus {
 
 #[derive(Debug, Clone)]
 pub struct BlockHashAndNumber {
-    pub hash: BlockHash,
-    pub number: BlockNumber,
+    hash: BlockHash,
+    number: BlockNumber,
 }
 
 impl BlockHashAndNumber {
