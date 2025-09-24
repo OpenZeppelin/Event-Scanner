@@ -529,9 +529,9 @@ impl<N: Network> Service<N> {
                 .saturating_add(self.config.blocks_read_per_epoch as u64)
                 .min(end.header().number());
 
-            let batch_end_block = self.provider.get_block_by_number(batch_to.into()).await?.ok_or(
-                Error::HistoricalSyncError(format!("Batch end block {batch_to} not found")),
-            )?;
+            // safe unwrap since we've checked end block exists
+            let batch_end_block =
+                self.provider.get_block_by_number(batch_to.into()).await?.unwrap();
 
             self.send_to_subscriber(Ok(self.current.number..=batch_to)).await;
 
@@ -543,13 +543,14 @@ impl<N: Network> Service<N> {
             }
         }
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
+        info!(batch_count = batch_count, "Historical sync completed");
+
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
 
-        info!(batch_count = batch_count, "Historical sync completed");
         Ok(())
     }
 
