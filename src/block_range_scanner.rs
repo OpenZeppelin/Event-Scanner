@@ -163,13 +163,13 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub struct ServiceStatus {
     pub is_subscribed: bool,
-    pub last_synced_block: Option<BlockHashAndNumber>,
+    pub last_synced_block: BlockHashAndNumber,
     pub websocket_connected: bool,
     pub processed_count: u64,
     pub error_count: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct BlockHashAndNumber {
     pub hash: BlockHash,
     pub number: BlockNumber,
@@ -304,7 +304,7 @@ struct Service<N: Network> {
     config: Config,
     provider: RootProvider<N>,
     subscriber: Option<mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>>,
-    current: Option<BlockHashAndNumber>,
+    current: BlockHashAndNumber,
     websocket_connected: bool,
     processed_count: u64,
     error_count: u64,
@@ -320,7 +320,7 @@ impl<N: Network> Service<N> {
             config,
             provider,
             subscriber: None,
-            current: None,
+            current: BlockHashAndNumber::default(),
             websocket_connected: false,
             processed_count: 0,
             error_count: 0,
@@ -518,15 +518,13 @@ impl<N: Network> Service<N> {
     ) -> Result<(), Error> {
         let mut batch_count = 0;
 
-        self.current = Some(BlockHashAndNumber::from_header::<N>(start.header()));
+        self.current = BlockHashAndNumber::from_header::<N>(start.header());
 
-        while self.current.as_ref().unwrap().number < end.header().number() {
+        while self.current.number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
             let batch_to = self
                 .current
-                .as_ref()
-                .unwrap()
                 .number
                 .saturating_add(self.config.blocks_read_per_epoch as u64)
                 .min(end.header().number());
@@ -535,9 +533,9 @@ impl<N: Network> Service<N> {
                 Error::HistoricalSyncError(format!("Batch end block {batch_to} not found")),
             )?;
 
-            self.send_to_subscriber(Ok(self.current.as_ref().unwrap().number..=batch_to)).await;
+            self.send_to_subscriber(Ok(self.current.number..=batch_to)).await;
 
-            self.current = Some(BlockHashAndNumber::from_header::<N>(batch_end_block.header()));
+            self.current = BlockHashAndNumber::from_header::<N>(batch_end_block.header());
 
             batch_count += 1;
             if batch_count % 10 == 0 {
@@ -545,8 +543,8 @@ impl<N: Network> Service<N> {
             }
         }
 
-        if let Some(sender) = &self.subscriber
-            && sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber &&
+            sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -627,8 +625,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn ensure_current_not_reorged(&mut self) -> Result<(), Error> {
-        let current_block =
-            self.provider.get_block_by_hash(self.current.as_ref().unwrap().hash).await?;
+        let current_block = self.provider.get_block_by_hash(self.current.hash).await?;
         if current_block.is_some() {
             return Ok(());
         }
@@ -638,11 +635,7 @@ impl<N: Network> Service<N> {
 
     async fn rewind_on_reorg_detected(&mut self) -> Result<(), Error> {
         let mut new_current_height =
-            if self.current.as_ref().unwrap().number <= self.config.reorg_rewind_depth {
-                0
-            } else {
-                self.current.as_ref().unwrap().number - self.config.reorg_rewind_depth
-            };
+            self.current.number.saturating_sub(self.config.reorg_rewind_depth);
 
         let head = self.provider.get_block_number().await?;
         if head < new_current_height {
@@ -659,12 +652,12 @@ impl<N: Network> Service<N> {
             )))?;
 
         info!(
-            old_current = self.current.as_ref().unwrap().number,
+            old_current = self.current.number,
             new_current = current.number,
             "Rewind on reorg detected"
         );
 
-        self.current = Some(current);
+        self.current = current;
 
         Ok(())
     }
@@ -922,7 +915,7 @@ mod tests {
         service.error_count = error_count;
         let hash = keccak256(b"random");
         let block_number = 99;
-        service.current = Some(BlockHashAndNumber { hash, number: block_number });
+        service.current = BlockHashAndNumber { hash, number: block_number };
         service.websocket_connected = true;
         service.subscriber = Some(mpsc::channel(1).0);
 
@@ -932,7 +925,7 @@ mod tests {
         assert!(status.websocket_connected);
         assert_eq!(status.processed_count, processed_count);
         assert_eq!(status.error_count, error_count);
-        let last = status.last_synced_block.expect("last synced block is set");
+        let last = status.last_synced_block;
         assert_eq!(last.number, block_number);
         assert_eq!(last.hash, hash);
     }
@@ -1046,8 +1039,7 @@ mod tests {
         let original_height = 10;
         let original_hash = keccak256(b"original block");
         let original_block = mock_block(original_height, original_hash);
-        service.current =
-            Some(BlockHashAndNumber::from_header::<Ethereum>(original_block.header()));
+        service.current = BlockHashAndNumber::from_header::<Ethereum>(original_block.header());
 
         let expected_rewind_height = original_height - config.reorg_rewind_depth;
         let expected_rewind_hash = keccak256(b"rewound block");
@@ -1063,7 +1055,7 @@ mod tests {
 
         service.ensure_current_not_reorged().await?;
 
-        let current = service.current.expect("current block should be set after rewind");
+        let current = service.current;
         assert_eq!(current.number, expected_rewind_height, "should rewind by reorg_rewind_depth");
         assert_eq!(current.hash, expected_rewind_hash, "should use hash of block at rewind height");
 
