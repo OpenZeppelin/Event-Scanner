@@ -6,8 +6,8 @@ use alloy::{
 use alloy_node_bindings::Anvil;
 use event_scanner::{EventFilter, event_scanner::EventScanner};
 
-use tokio::{sync::mpsc, time::sleep};
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio::time::sleep;
+use tokio_stream::StreamExt;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -48,24 +48,20 @@ async fn main() -> anyhow::Result<()> {
 
     let contract_address = counter_contract.address();
 
-    let (sender, receiver) = mpsc::channel(100);
     let increase_filter = EventFilter {
         contract_address: *contract_address,
         event: Counter::CountIncreased::SIGNATURE.to_owned(),
-        sender,
     };
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let mut scanner = EventScanner::new()
-        .with_event_filter(increase_filter)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+
+    let mut stream = client.subscribe(increase_filter);
 
     sleep(Duration::from_secs(10)).await;
-    scanner.start(BlockNumberOrTag::Number(0), None).await.expect("failed to start scanner");
+    client.start_scanner(BlockNumberOrTag::Number(0), None).await.expect("failed to start scanner");
 
-    let mut stream = ReceiverStream::new(receiver);
     while let Some(Ok(logs)) = stream.next().await {
         for log in logs {
             info!("Callback successfully executed with event {:?}", log.inner.data);

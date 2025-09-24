@@ -8,8 +8,8 @@ use std::{
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScanner, types::EventFilter};
-use tokio::{sync::mpsc, time::timeout};
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio::time::timeout;
+use tokio_stream::StreamExt;
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 
@@ -20,12 +20,8 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let (sender, receiver) = mpsc::channel(100);
-    let filter = EventFilter {
-        contract_address,
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        sender,
-    };
+    let filter =
+        EventFilter { contract_address, event: TestCounter::CountIncreased::SIGNATURE.to_owned() };
 
     let receipt = contract.increase().send().await?.get_receipt().await?;
     let start_block = receipt.block_number.expect("receipt should contain block number");
@@ -38,18 +34,17 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         end_block = receipt.block_number.expect("receipt should contain block number");
     }
 
-    let mut scanner = EventScanner::new()
-        .with_event_filter(filter)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut stream = client.subscribe(filter).take(expected_event_count);
 
     tokio::spawn(async move {
-        scanner
-            .start(BlockNumberOrTag::Number(start_block), Some(BlockNumberOrTag::Number(end_block)))
+        client
+            .start_scanner(
+                BlockNumberOrTag::Number(start_block),
+                Some(BlockNumberOrTag::Number(end_block)),
+            )
             .await
     });
-
-    let mut stream = ReceiverStream::new(receiver).take(expected_event_count);
 
     let event_count = Arc::new(AtomicUsize::new(0));
     let event_count_clone = Arc::clone(&event_count);

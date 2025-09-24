@@ -5,11 +5,8 @@ use std::sync::{
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{event_scanner::EventScanner, types::EventFilter};
-use tokio::{
-    sync::mpsc,
-    time::{Duration, sleep, timeout},
-};
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio::time::{Duration, sleep, timeout};
+use tokio_stream::StreamExt;
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 
@@ -31,25 +28,18 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let (sender, receiver) = mpsc::channel(100);
-    let filter = EventFilter {
-        contract_address,
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
-        sender,
-    };
+    let filter =
+        EventFilter { contract_address, event: TestCounter::CountIncreased::SIGNATURE.to_owned() };
 
-    let mut scanner = EventScanner::new()
-        .with_event_filter(filter)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+
+    let mut stream = client.subscribe(filter).take(historical_events + live_events);
 
     tokio::spawn(async move {
-        scanner.start(BlockNumberOrTag::Number(first_historical_block), None).await
+        client.start_scanner(BlockNumberOrTag::Number(first_historical_block), None).await
     });
 
     sleep(Duration::from_millis(200)).await;
-
-    let mut stream = ReceiverStream::new(receiver).take(historical_events + live_events);
 
     for _ in 0..live_events {
         contract.increase().send().await?.watch().await?;

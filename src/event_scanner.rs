@@ -1,17 +1,22 @@
 use crate::{
-    block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
-    types::EventFilter,
+    block_range_scanner::{
+        self, BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES,
+    },
+    types::{EventFilter, EventListener},
 };
 use alloy::{
-    eips::BlockNumberOrTag, network::Network, providers::Provider, rpc::types::Filter,
+    eips::BlockNumberOrTag,
+    network::Network,
+    providers::Provider,
+    rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
-use tokio_stream::StreamExt;
+use tokio::sync::mpsc;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info};
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
-    tracked_events: Vec<EventFilter>,
 }
 
 impl Default for EventScanner {
@@ -24,21 +29,7 @@ impl EventScanner {
     #[must_use]
     /// Creates a new builder with default block scanner and callback strategy.
     pub fn new() -> Self {
-        Self { block_range_scanner: BlockRangeScanner::new(), tracked_events: Vec::default() }
-    }
-
-    /// Registers a single event filter for scanning.
-    #[must_use]
-    pub fn with_event_filter(mut self, filter: EventFilter) -> Self {
-        self.tracked_events.push(filter);
-        self
-    }
-
-    /// Registers a collection of event filters for scanning.
-    #[must_use]
-    pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
-        self.tracked_events.extend(filters);
-        self
+        Self { block_range_scanner: BlockRangeScanner::new() }
     }
 
     /// Configures how many blocks are read per epoch during a historical sync.
@@ -73,9 +64,11 @@ impl EventScanner {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> Result<ConnectedEventScanner<N>, block_range_scanner::Error> {
+    ) -> Result<Client<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
-        Ok(ConnectedEventScanner { block_range_scanner, tracked_events: self.tracked_events })
+        let event_scanner =
+            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
+        Ok(Client { event_scanner })
     }
 
     /// Connects to the provider via IPC
@@ -86,15 +79,17 @@ impl EventScanner {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<ConnectedEventScanner<N>, block_range_scanner::Error> {
+    ) -> Result<Client<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
-        Ok(ConnectedEventScanner { block_range_scanner, tracked_events: self.tracked_events })
+        let event_scanner =
+            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
+        Ok(Client { event_scanner })
     }
 }
 
 pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
-    tracked_events: Vec<EventFilter>,
+    event_listeners: Vec<EventListener>,
 }
 
 impl<N: Network> ConnectedEventScanner<N> {
@@ -104,10 +99,10 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///
     /// Returns an error if the scanner fails to start
     pub async fn start(
-        &mut self,
+        &self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), block_range_scanner::Error> {
         let client = self.block_range_scanner.run()?;
         let mut stream = client.subscribe(start_height, end_height).await?;
 
@@ -117,7 +112,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                     let from_block = range.start;
                     let to_block = range.end;
                     info!(from_block, to_block, "processing block range");
-                    self.process_block_range(from_block, to_block).await?;
+                    self.process_block_range(from_block, to_block).await;
                 }
                 Err(e) => {
                     error!(error = %e, "failed to get block range");
@@ -129,11 +124,11 @@ impl<N: Network> ConnectedEventScanner<N> {
     }
 
     /// Fetches logs for the supplied block range and forwards them to the callback channels.
-    async fn process_block_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<()> {
-        for event_filter in &self.tracked_events {
+    async fn process_block_range(&self, from_block: u64, to_block: u64) {
+        for listener in &self.event_listeners {
             let filter = Filter::new()
-                .address(event_filter.contract_address)
-                .event(event_filter.event.as_str())
+                .address(listener.filter.contract_address)
+                .event(listener.filter.event.as_str())
                 .from_block(from_block)
                 .to_block(to_block);
 
@@ -143,35 +138,62 @@ impl<N: Network> ConnectedEventScanner<N> {
                         continue;
                     }
                     info!(
-                        contract = ?event_filter.contract_address,
-                        event = %event_filter.event,
+                        contract = ?listener.filter.contract_address,
+                        event = %listener.filter.event,
                         log_count = logs.len(),
                         from_block,
                         to_block,
                         "found logs for event in block range"
                     );
 
-                    if let Err(e) = event_filter.sender.send(Ok(logs)).await {
-                        error!(event = %event_filter.event, error = %e, "failed to enqueue logs for processing");
+                    if let Err(e) = listener.sender.send(Ok(logs)).await {
+                        error!(event = %listener.filter.event, error = %e, "failed to enqueue logs for processing");
                     }
                 }
                 Err(e) => {
                     error!(
-                        contract = ?event_filter.contract_address,
-                        event = %event_filter.event,
+                        contract = ?listener.filter.contract_address,
+                        event = %listener.filter.event,
                         error = %e,
                         from_block,
                         to_block,
                         "failed to get logs for block range"
                     );
 
-                    if let Err(e) = event_filter.sender.send(Err(e.into())).await {
-                        error!(event = %event_filter.event, error = %e, "failed to enqueue error for processing");
+                    if let Err(e) = listener.sender.send(Err(e.into())).await {
+                        error!(event = %listener.filter.event, error = %e, "failed to enqueue error for processing");
                     }
                 }
             }
         }
+    }
 
-        Ok(())
+    fn add_event_listener(&mut self, event_listener: EventListener) {
+        self.event_listeners.push(event_listener);
+    }
+}
+
+pub struct Client<N: Network> {
+    event_scanner: ConnectedEventScanner<N>,
+}
+
+impl<N: Network> Client<N> {
+    pub fn subscribe(
+        &mut self,
+        event_filter: EventFilter,
+    ) -> ReceiverStream<Result<Vec<Log>, block_range_scanner::Error>> {
+        let (sender, receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+
+        self.event_scanner.add_event_listener(EventListener { filter: event_filter, sender });
+
+        ReceiverStream::new(receiver)
+    }
+
+    pub async fn start_scanner(
+        self,
+        start_height: BlockNumberOrTag,
+        end_height: Option<BlockNumberOrTag>,
+    ) -> Result<(), block_range_scanner::Error> {
+        self.event_scanner.start(start_height, end_height).await
     }
 }
