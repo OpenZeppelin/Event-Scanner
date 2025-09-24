@@ -59,11 +59,10 @@ async fn main() -> anyhow::Result<()> {
 
     let contract_address = counter_contract.address();
 
-    let increase_filter = EventFilter {
-        contract_address: *contract_address,
-        event: Counter::CountIncreased::SIGNATURE.to_owned(),
-        callback: Arc::new(CounterCallback),
-    };
+    let increase_filter = EventFilter::new()
+        .with_contract_address(*contract_address)
+        .with_event(Counter::CountIncreased::SIGNATURE)
+        .with_callback(Arc::new(CounterCallback));
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
