@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
     callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
-    types::EventFilter,
+    event_filters::EventFilter,
 };
 use alloy::{
     eips::BlockNumberOrTag,

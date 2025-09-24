@@ -11,7 +11,7 @@ use crate::{
     mock_callbacks::BasicCounterCallback,
 };
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScannerBuilder, types::EventFilter};
+use event_scanner::{event_scanner::EventScannerBuilder, event_filters::EventFilter};
 use tokio::time::{sleep, timeout};
 
 #[tokio::test]
