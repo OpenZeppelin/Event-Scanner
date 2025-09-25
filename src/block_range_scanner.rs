@@ -374,13 +374,12 @@ impl<N: Network> Service<N> {
                 info!(start_height = ?start_height, "Starting sync subscription");
                 self.subscriber = Some(sender);
                 if matches!(start_height, BlockNumberOrTag::Latest) {
-                    warn!(
-                        "Starting sync subscription from latest block is not recommended, please use live mode instead"
-                    );
-                    // TODO: Return error?
+                    let result = self.handle_live().await;
+                    let _ = response.send(result);
+                } else {
+                    let result = self.handle_sync(start_height).await;
+                    let _ = response.send(result);
                 }
-                let result = self.handle_sync(start_height).await;
-                let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
                 self.handle_unsubscribe();
