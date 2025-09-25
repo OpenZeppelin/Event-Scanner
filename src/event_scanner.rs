@@ -140,7 +140,13 @@ impl<N: Network> EventScanner<N> {
         end_height: Option<BlockNumberOrTag>,
     ) -> anyhow::Result<()> {
         let client = self.block_range_scanner.run()?;
-        let mut stream = client.subscribe(start_height, end_height).await?;
+        let mut stream = if let Some(end_height) = end_height {
+            client.stream_historical(start_height, end_height).await?
+        } else if matches!(start_height, BlockNumberOrTag::Latest) {
+            client.stream_live().await?
+        } else {
+            client.stream_from(start_height).await?
+        };
 
         let (range_tx, _) = broadcast::channel::<(u64, u64)>(1024);
 
