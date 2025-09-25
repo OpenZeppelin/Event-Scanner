@@ -1,18 +1,16 @@
 use alloy::{
-    eips::BlockId,
-    providers::{Provider, ProviderBuilder, RootProvider, WsConnect},
-    rpc::types::{
-        Header,
-        anvil::{ReorgOptions, TransactionData},
-    },
+    providers::Provider,
+    rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use alloy_node_bindings::Anvil;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use tokio::sync::Mutex;
+use tokio::{
+    sync::Mutex,
+    time::{sleep, timeout},
+};
 
 use crate::{
-    common::{TestCounter, deploy_counter},
+    common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
     mock_callbacks::BlockOrderingCallback,
 };
 use alloy::{
@@ -20,24 +18,15 @@ use alloy::{
 };
 use event_scanner::{event_filter::EventFilter, event_scanner::EventScannerBuilder};
 
-pub async fn mine_block(provider: &RootProvider<Ethereum>) -> Header {
-    let _ = provider.evm_mine(None).await;
-    let block = provider.get_block(BlockId::latest()).await.unwrap().unwrap();
-
-    block.header
-}
-
 #[tokio::test]
 async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
-    let anvil = Anvil::new().spawn();
-    let provider =
-        ProviderBuilder::new().connect_ws(WsConnect::new(anvil.ws_endpoint())).await.unwrap();
-    let provider = provider.root().clone();
+    let anvil = spawn_anvil(1.0).unwrap();
+    let provider = build_provider(&anvil).await.unwrap();
 
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
-    let event_blocks = Arc::new(Mutex::new(Vec::new()));
-    let callback = Arc::new(BlockOrderingCallback { blocks: Arc::clone(&event_blocks) });
+    let blocks = Arc::new(Mutex::new(Vec::new()));
+    let callback = Arc::new(BlockOrderingCallback { blocks: Arc::clone(&blocks) });
     let filter = EventFilter {
         contract_address: Some(contract_address),
         event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
@@ -51,34 +40,22 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
         .await?;
 
     tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
-    // Emit initial events
+
     let initial_events = 5;
     for _ in 0..initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        println!("receipt: {:?}", receipt.block_number);
+        contract.increase().send().await.unwrap().watch().await?;
     }
-    let block = provider.get_block(BlockId::latest()).await?.unwrap();
-    println!("head: {:?}", block.header.number);
-    println!("head hash: {:?}", block.header.hash);
-    // Wait for initial events to be processed
-    let event_blocks_clone = Arc::clone(&event_blocks);
-    let initial_processing = async move {
-        loop {
-            let blocks = event_blocks_clone.lock().await;
-            if blocks.len() >= initial_events {
-                break;
-            }
-            drop(blocks);
-            tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let blocks_clone = Arc::clone(&blocks);
+    let event_counting = async move {
+        while blocks_clone.lock().await.len() < initial_events {
+            sleep(Duration::from_millis(100)).await;
         }
     };
 
-    assert!(
-        tokio::time::timeout(Duration::from_secs(5), initial_processing).await.is_ok(),
-        "Initial events not processed in time"
-    );
-    //
-    let _initial_blocks: HashSet<_> = event_blocks.lock().await.clone().into_iter().collect();
+    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
+        anyhow::bail!("expected {initial_events} events, got {}", blocks.lock().await.len());
+    }
 
     let block_3 = provider.get_block_by_number((3).into()).full().await?.unwrap();
     println!("Block 3 transactions:");
@@ -90,7 +67,7 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
     //
     // Perform reorg using anvil_reorg with depth 4 and increase transactions in blocks 0,1,2,3
     let mut tx_block_pairs = vec![];
-    for i in 0..4 {
+    for _ in 0..4 {
         let tx = contract.increase().into_transaction_request();
         tx_block_pairs.push((TransactionData::JSON(tx), 0));
     }
