@@ -134,17 +134,17 @@ pub enum Error {
 
 #[derive(Debug)]
 pub enum Command {
-    SubscribeLive {
+    StreamLive {
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         response: oneshot::Sender<Result<(), Error>>,
     },
-    SubscribeHistorical {
+    StreamHistorical {
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), Error>>,
     },
-    SubscribeSync {
+    StreamFrom {
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         start_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), Error>>,
@@ -355,28 +355,29 @@ impl<N: Network> Service<N> {
 
     async fn handle_command(&mut self, command: Command) -> Result<(), Error> {
         match command {
-            Command::SubscribeLive { sender, response } => {
+            Command::StreamLive { sender, response } => {
                 self.ensure_no_subscriber()?;
-                info!("Starting live subscription");
+                info!("Starting live stream");
                 self.subscriber = Some(sender);
                 let result = self.handle_live().await;
                 let _ = response.send(result);
             }
-            Command::SubscribeHistorical { sender, start_height, end_height, response } => {
+            Command::StreamHistorical { sender, start_height, end_height, response } => {
                 self.ensure_no_subscriber()?;
-                info!(start_height = ?start_height, end_height = ?end_height, "Starting historical subscription");
+                info!(start_height = ?start_height, end_height = ?end_height, "Starting historical stream");
                 self.subscriber = Some(sender);
                 let result = self.handle_historical(start_height, end_height).await;
                 let _ = response.send(result);
             }
-            Command::SubscribeSync { sender, start_height, response } => {
+            Command::StreamFrom { sender, start_height, response } => {
                 self.ensure_no_subscriber()?;
-                info!(start_height = ?start_height, "Starting sync subscription");
                 self.subscriber = Some(sender);
                 if matches!(start_height, BlockNumberOrTag::Latest) {
                     let result = self.handle_live().await;
+                    info!(start_height = ?start_height, "Starting live stream");
                     let _ = response.send(result);
                 } else {
+                    info!(start_height = ?start_height, "Starting sync stream");
                     let result = self.handle_sync(start_height).await;
                     let _ = response.send(result);
                 }
@@ -729,18 +730,18 @@ impl BlockRangeScannerClient {
         Self { command_sender }
     }
 
-    /// Subscribes to live blocks starting from the latest block.
+    /// Streams live blocks starting from the latest block.
     ///
     /// # Errors
     ///
     /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn subscribe_live(
+    pub async fn stream_live(
         &self,
     ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command = Command::SubscribeLive { sender: blocks_sender, response: response_tx };
+        let command = Command::StreamLive { sender: blocks_sender, response: response_tx };
 
         self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
 
@@ -749,7 +750,7 @@ impl BlockRangeScannerClient {
         Ok(ReceiverStream::new(blocks_receiver))
     }
 
-    /// Subscribes to historical blocks from `start_height` to `end_height`.
+    /// Streams a batch of historical blocks from `start_height` to `end_height`.
     ///
     /// # Arguments
     ///
@@ -759,7 +760,7 @@ impl BlockRangeScannerClient {
     /// # Errors
     ///
     /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn subscribe_historical(
+    pub async fn stream_historical(
         &self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
@@ -767,7 +768,7 @@ impl BlockRangeScannerClient {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command = Command::SubscribeHistorical {
+        let command = Command::StreamHistorical {
             sender: blocks_sender,
             start_height,
             end_height,
@@ -781,7 +782,7 @@ impl BlockRangeScannerClient {
         Ok(ReceiverStream::new(blocks_receiver))
     }
 
-    /// Subscribes to blocks starting from `start_height` and transitions to live mode.
+    /// Streams blocks starting from `start_height` and transitions to live mode.
     ///
     /// # Arguments
     ///
@@ -790,7 +791,7 @@ impl BlockRangeScannerClient {
     /// # Errors
     ///
     /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn subscribe_sync(
+    pub async fn stream_from(
         &self,
         start_height: BlockNumberOrTag,
     ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
@@ -798,7 +799,7 @@ impl BlockRangeScannerClient {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command =
-            Command::SubscribeSync { sender: blocks_sender, start_height, response: response_tx };
+            Command::StreamFrom { sender: blocks_sender, start_height, response: response_tx };
 
         self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
 
@@ -1009,7 +1010,7 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver = client.subscribe_live().await?.take(expected_blocks);
+        let mut receiver = client.stream_live().await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
