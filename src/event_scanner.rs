@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use crate::{
     block_range_scanner::{
         self, BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES,
@@ -8,12 +10,13 @@ use crate::{
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
+    primitives::BlockNumber,
     providers::Provider,
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
 use tokio::sync::{
-    broadcast::{self, error::RecvError},
+    broadcast::{self, Sender, error::RecvError},
     mpsc,
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
@@ -116,18 +119,41 @@ impl<N: Network> ConnectedEventScanner<N> {
             client.stream_from(start_height).await?
         };
 
-        let (range_tx, _) = broadcast::channel::<(u64, u64)>(1024);
+        let (range_tx, _) = broadcast::channel::<RangeInclusive<BlockNumber>>(1024);
 
+        self.spawn_log_consumers(range_tx.clone());
+
+        while let Some(range) = stream.next().await {
+            match range {
+                Ok(range) => {
+                    info!(?range, "processing block range");
+                    if let Err(e) = range_tx.send(range) {
+                        error!(error = %e, "failed to send block range to broadcast channel");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, "failed to get block range");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn spawn_log_consumers(&self, range_tx: Sender<RangeInclusive<BlockNumber>>) {
         for listener in &self.event_listeners {
             let provider = self.block_range_scanner.provider().clone();
-            let mut sub = range_tx.subscribe();
             let filter = listener.filter.clone();
             let sender = listener.sender.clone();
+            let mut sub = range_tx.subscribe();
 
             tokio::spawn(async move {
                 loop {
                     match sub.recv().await {
-                        Ok((from_block, to_block)) => {
+                        Ok(range) => {
+                            let (from_block, to_block) = (*range.start(), *range.end());
+
                             let mut log_filter =
                                 Filter::new().from_block(from_block).to_block(to_block);
 
@@ -139,17 +165,17 @@ impl<N: Network> ConnectedEventScanner<N> {
                                 log_filter = log_filter.event(event_signature.as_str());
                             }
 
+                            let contract_display = filter.contract_address.map_or_else(
+                                || "all contracts".to_string(),
+                                |addr| format!("{addr:?}"),
+                            );
+                            let event_display = filter.event.as_deref().map_or("all events", |s| s);
+
                             match provider.get_logs(&log_filter).await {
                                 Ok(logs) => {
                                     if logs.is_empty() {
                                         continue;
                                     }
-                                    let contract_display = filter.contract_address.map_or_else(
-                                        || "all contracts".to_string(),
-                                        |addr| format!("{addr:?}"),
-                                    );
-                                    let event_display =
-                                        filter.event.as_deref().map_or("all events", |s| s);
 
                                     info!(
                                         contract = %contract_display,
@@ -165,13 +191,6 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     }
                                 }
                                 Err(e) => {
-                                    let contract_display = filter.contract_address.map_or_else(
-                                        || "all contracts".to_string(),
-                                        |addr| format!("{addr:?}"),
-                                    );
-                                    let event_display =
-                                        filter.event.as_deref().map_or("all events", |s| s);
-
                                     error!(
                                         contract = %contract_display,
                                         event = %event_display,
@@ -189,30 +208,11 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         // TODO: What happens if the broadcast channel is closed?
                         Err(RecvError::Closed) => break,
-                        Err(RecvError::Lagged(_)) => {}
+                        Err(RecvError::Lagged(_)) => continue,
                     }
                 }
             });
         }
-
-        while let Some(range) = stream.next().await {
-            match range {
-                Ok(range) => {
-                    let from_block = *range.start();
-                    let to_block = *range.end();
-                    info!(from_block, to_block, "processing block range");
-                    if let Err(e) = range_tx.send((from_block, to_block)) {
-                        error!(error = %e, "failed to send block range to broadcast channel");
-                        break;
-                    }
-                }
-                Err(e) => {
-                    error!(error = %e, "failed to get block range");
-                }
-            }
-        }
-
-        Ok(())
     }
 
     fn add_event_listener(&mut self, event_listener: EventListener) {
