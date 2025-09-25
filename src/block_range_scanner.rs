@@ -580,11 +580,16 @@ impl<N: Network> Service<N> {
                     let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
 
-                    println!("Incoming block number: {incoming_block_num}");
-                    println!("Current + 1 block number: {}", current + 1);
                     if incoming_block_num < current {
-                        println!("Reorg detected: sending forked range");
-
+                        // TODO: send reorg err - issue is this causes event scanner to stop
+                        // if sender.send(Err(Error::ReorgDetected)).await.is_err() {
+                        //     warn!("Downstream channel closed, stopping live blocks task");
+                        //     return;
+                        // }
+                        warn!("Reorg detected: sending forked range");
+                        // TODO: should we send the incoming block range or incoming block num - reorg depth?
+                        // The incoming block should be the latest block from the reorg point so no
+                        // real need tbd
                         if sender
                             .send(Ok(incoming_block_num..=incoming_block_num + 1))
                             .await
@@ -593,16 +598,11 @@ impl<N: Network> Service<N> {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
-                        current = incoming_block_num + 1;
-                        continue;
-                    }
-
-                    // == Normal case ==
-
-                    if sender.send(Ok(current..=incoming_block_num)).await.is_err() {
+                    } else if sender.send(Ok(current..=incoming_block_num)).await.is_err() {
                         warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
+
                     current = incoming_block_num + 1;
                 }
             }
