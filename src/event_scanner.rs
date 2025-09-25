@@ -12,7 +12,10 @@ use alloy::{
     rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{
+    broadcast::{self, error::RecvError},
+    mpsc,
+};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info};
 
@@ -105,7 +108,92 @@ impl<N: Network> ConnectedEventScanner<N> {
         end_height: Option<BlockNumberOrTag>,
     ) -> Result<(), block_range_scanner::Error> {
         let client = self.block_range_scanner.run()?;
-        let mut stream = client.subscribe(start_height, end_height).await?;
+        let mut stream = if let Some(end_height) = end_height {
+            client.stream_historical(start_height, end_height).await?
+        } else if matches!(start_height, BlockNumberOrTag::Latest) {
+            client.stream_live().await?
+        } else {
+            client.stream_from(start_height).await?
+        };
+
+        let (range_tx, _) = broadcast::channel::<(u64, u64)>(1024);
+
+        for listener in &self.event_listeners {
+            let provider = self.block_range_scanner.provider().clone();
+            let mut sub = range_tx.subscribe();
+            let filter = listener.filter.clone();
+            let sender = listener.sender.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    match sub.recv().await {
+                        Ok((from_block, to_block)) => {
+                            let mut log_filter =
+                                Filter::new().from_block(from_block).to_block(to_block);
+
+                            if let Some(contract_address) = filter.contract_address {
+                                log_filter = log_filter.address(contract_address);
+                            }
+
+                            if let Some(ref event_signature) = filter.event {
+                                log_filter = log_filter.event(event_signature.as_str());
+                            }
+
+                            match provider.get_logs(&log_filter).await {
+                                Ok(logs) => {
+                                    if logs.is_empty() {
+                                        continue;
+                                    }
+                                    let contract_display = filter.contract_address.map_or_else(
+                                        || "all contracts".to_string(),
+                                        |addr| format!("{addr:?}"),
+                                    );
+                                    let event_display =
+                                        filter.event.as_deref().map_or("all events", |s| s);
+
+                                    info!(
+                                        contract = %contract_display,
+                                        event = %event_display,
+                                        log_count = logs.len(),
+                                        from_block,
+                                        to_block,
+                                        "found logs for event in block range"
+                                    );
+
+                                    if let Err(e) = sender.send(Ok(logs)).await {
+                                        error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
+                                    }
+                                }
+                                Err(e) => {
+                                    let contract_display = filter.contract_address.map_or_else(
+                                        || "all contracts".to_string(),
+                                        |addr| format!("{addr:?}"),
+                                    );
+                                    let event_display =
+                                        filter.event.as_deref().map_or("all events", |s| s);
+
+                                    error!(
+                                        contract = %contract_display,
+                                        event = %event_display,
+                                        error = %e,
+                                        from_block,
+                                        to_block,
+                                        "failed to get logs for block range"
+                                    );
+
+                                    if let Err(e) = sender.send(Err(e.into())).await {
+                                        error!(event = %event_display, error = %e, "failed to enqueue error for processing");
+                                    }
+                                }
+                            }
+                        }
+                        // TODO: What happens if the broadcast channel is closed?
+                        Err(RecvError::Closed) => break,
+                        Err(RecvError::Lagged(_)) => {}
+                    }
+                }
+            });
+        }
 
         while let Some(range) = stream.next().await {
             match range {
@@ -113,7 +201,10 @@ impl<N: Network> ConnectedEventScanner<N> {
                     let from_block = *range.start();
                     let to_block = *range.end();
                     info!(from_block, to_block, "processing block range");
-                    self.process_block_range(from_block, to_block).await;
+                    if let Err(e) = range_tx.send((from_block, to_block)) {
+                        error!(error = %e, "failed to send block range to broadcast channel");
+                        break;
+                    }
                 }
                 Err(e) => {
                     error!(error = %e, "failed to get block range");
@@ -122,72 +213,6 @@ impl<N: Network> ConnectedEventScanner<N> {
         }
 
         Ok(())
-    }
-
-    /// Fetches logs for the supplied inclusive block range [`from_block..=to_block`] and forwards
-    /// them to the appropriate event channels.
-    async fn process_block_range(&self, from_block: u64, to_block: u64) {
-        for listener in &self.event_listeners {
-            let mut filter = Filter::new().from_block(from_block).to_block(to_block);
-
-            // Add contract address filter if specified
-            if let Some(contract_address) = listener.filter.contract_address {
-                filter = filter.address(contract_address);
-            }
-
-            // Add event signature filter if specified
-            if let Some(event_signature) = &listener.filter.event {
-                filter = filter.event(event_signature.as_str());
-            }
-
-            match self.block_range_scanner.provider().get_logs(&filter).await {
-                Ok(logs) => {
-                    if logs.is_empty() {
-                        continue;
-                    }
-                    let contract_display = listener
-                        .filter
-                        .contract_address
-                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
-                    let event_display =
-                        listener.filter.event.as_deref().map_or("all events", |s| s);
-
-                    info!(
-                        contract = %contract_display,
-                        event = %event_display,
-                        log_count = logs.len(),
-                        from_block,
-                        to_block,
-                        "found logs for event in block range"
-                    );
-
-                    if let Err(e) = listener.sender.send(Ok(logs)).await {
-                        error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
-                    }
-                }
-                Err(e) => {
-                    let contract_display = listener
-                        .filter
-                        .contract_address
-                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
-                    let event_display =
-                        listener.filter.event.as_deref().map_or("all events", |s| s);
-
-                    error!(
-                        contract = %contract_display,
-                        event = %event_display,
-                        error = %e,
-                        from_block,
-                        to_block,
-                        "failed to get logs for block range"
-                    );
-
-                    if let Err(e) = listener.sender.send(Err(e.into())).await {
-                        error!(event = %event_display, error = %e, "failed to enqueue error for processing");
-                    }
-                }
-            }
-        }
     }
 
     fn add_event_listener(&mut self, event_listener: EventListener) {
