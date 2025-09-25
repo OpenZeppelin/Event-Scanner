@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScanner, types::EventFilter};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
 use tokio::time::{Duration, sleep, timeout};
 use tokio_stream::StreamExt;
 
@@ -28,8 +28,10 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let filter =
-        EventFilter { contract_address, event: TestCounter::CountIncreased::SIGNATURE.to_owned() };
+    let filter = EventFilter {
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
+    };
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 

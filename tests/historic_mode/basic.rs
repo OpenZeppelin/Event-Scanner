@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScanner, types::EventFilter};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
@@ -20,8 +20,10 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter =
-        EventFilter { contract_address, event: TestCounter::CountIncreased::SIGNATURE.to_owned() };
+    let filter = EventFilter {
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
+    };
 
     let receipt = contract.increase().send().await?.get_receipt().await?;
     let start_block = receipt.block_number.expect("receipt should contain block number");

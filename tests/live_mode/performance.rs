@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_scanner::EventScanner, types::EventFilter};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
@@ -20,8 +20,8 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
     let contract = deploy_counter(provider).await?;
 
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
     };
     let expected_event_count = 100;
 

@@ -2,7 +2,8 @@ use crate::{
     block_range_scanner::{
         self, BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES,
     },
-    types::{EventFilter, EventListener},
+    event_filter::EventFilter,
+    event_listener::EventListener,
 };
 use alloy::{
     eips::BlockNumberOrTag,
@@ -127,20 +128,33 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// them to the appropriate event channels.
     async fn process_block_range(&self, from_block: u64, to_block: u64) {
         for listener in &self.event_listeners {
-            let filter = Filter::new()
-                .address(listener.filter.contract_address)
-                .event(listener.filter.event.as_str())
-                .from_block(from_block)
-                .to_block(to_block);
+            let mut filter = Filter::new().from_block(from_block).to_block(to_block);
+
+            // Add contract address filter if specified
+            if let Some(contract_address) = listener.filter.contract_address {
+                filter = filter.address(contract_address);
+            }
+
+            // Add event signature filter if specified
+            if let Some(event_signature) = &listener.filter.event {
+                filter = filter.event(event_signature.as_str());
+            }
 
             match self.block_range_scanner.provider().get_logs(&filter).await {
                 Ok(logs) => {
                     if logs.is_empty() {
                         continue;
                     }
+                    let contract_display = listener
+                        .filter
+                        .contract_address
+                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
+                    let event_display =
+                        listener.filter.event.as_deref().map_or("all events", |s| s);
+
                     info!(
-                        contract = ?listener.filter.contract_address,
-                        event = %listener.filter.event,
+                        contract = %contract_display,
+                        event = %event_display,
                         log_count = logs.len(),
                         from_block,
                         to_block,
@@ -148,13 +162,20 @@ impl<N: Network> ConnectedEventScanner<N> {
                     );
 
                     if let Err(e) = listener.sender.send(Ok(logs)).await {
-                        error!(event = %listener.filter.event, error = %e, "failed to enqueue logs for processing");
+                        error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
                     }
                 }
                 Err(e) => {
+                    let contract_display = listener
+                        .filter
+                        .contract_address
+                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
+                    let event_display =
+                        listener.filter.event.as_deref().map_or("all events", |s| s);
+
                     error!(
-                        contract = ?listener.filter.contract_address,
-                        event = %listener.filter.event,
+                        contract = %contract_display,
+                        event = %event_display,
                         error = %e,
                         from_block,
                         to_block,
@@ -162,7 +183,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                     );
 
                     if let Err(e) = listener.sender.send(Err(e.into())).await {
-                        error!(event = %listener.filter.event, error = %e, "failed to enqueue error for processing");
+                        error!(event = %event_display, error = %e, "failed to enqueue error for processing");
                     }
                 }
             }

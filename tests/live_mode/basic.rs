@@ -8,7 +8,7 @@ use std::{
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, rpc::types::Log, sol_types::SolEvent};
-use event_scanner::{block_range_scanner, event_scanner::EventScanner, types::EventFilter};
+use event_scanner::{block_range_scanner, event_filter::EventFilter, event_scanner::EventScanner};
 use tokio::time::timeout;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
@@ -19,8 +19,11 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter =
-        EventFilter { contract_address, event: TestCounter::CountIncreased::SIGNATURE.to_owned() };
+    let filter = EventFilter {
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
+    };
+
     let expected_event_count = 5;
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
@@ -62,12 +65,12 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let b = deploy_counter(provider.clone()).await?;
 
     let a_filter = EventFilter {
-        contract_address: *a.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*a.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
     };
     let b_filter = EventFilter {
-        contract_address: *b.address(),
-        event: TestCounter::CountIncreased::SIGNATURE.to_owned(),
+        contract_address: Some(*b.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
     };
     let expected_events_a = 3;
     let expected_events_b = 2;
@@ -126,10 +129,15 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let contract = deploy_counter(provider).await?;
     let contract_address = *contract.address();
 
-    let increase_filter =
-        EventFilter { contract_address, event: TestCounter::CountIncreased::SIGNATURE.to_owned() };
-    let decrease_filter =
-        EventFilter { contract_address, event: TestCounter::CountDecreased::SIGNATURE.to_owned() };
+    let increase_filter = EventFilter {
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
+    };
+    let decrease_filter = EventFilter {
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountDecreased::SIGNATURE.to_owned()),
+    };
+
     let expected_incr_events = 6;
     let expected_decr_events = 2;
 
@@ -196,8 +204,8 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     // Subscribe to CountDecreased but only emit CountIncreased
     let filter = EventFilter {
-        contract_address: *contract.address(),
-        event: TestCounter::CountDecreased::SIGNATURE.to_owned(),
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountDecreased::SIGNATURE.to_owned()),
     };
     let num_of_events = 3;
 
@@ -228,8 +236,10 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let filter =
-        EventFilter { contract_address: *contract.address(), event: "invalid-sig".to_string() };
+    let filter = EventFilter {
+        contract_address: Some(*contract.address()),
+        event: Some("invalid-sig".to_string()),
+    };
     let num_of_events = 3;
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
