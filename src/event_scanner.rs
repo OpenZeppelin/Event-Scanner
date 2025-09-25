@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
@@ -6,16 +6,12 @@ use crate::{
     event_filter::EventFilter,
 };
 use alloy::{
-    eips::BlockNumberOrTag,
-    network::Network,
-    primitives::Address,
-    providers::Provider,
-    rpc::types::{Filter, Log},
+    eips::BlockNumberOrTag, network::Network, providers::Provider, rpc::types::Filter,
     transports::http::reqwest::Url,
 };
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::broadcast::{self, error::RecvError};
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub struct EventScannerBuilder {
     block_range_scanner: BlockRangeScanner,
@@ -132,12 +128,6 @@ pub struct EventScanner<N: Network> {
     callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
-#[derive(Hash, Eq, PartialEq)]
-struct EventIdentifier {
-    contract_address: Option<Address>,
-    event: Option<String>,
-}
-
 impl<N: Network> EventScanner<N> {
     /// Starts the scanner
     ///
@@ -149,30 +139,6 @@ impl<N: Network> EventScanner<N> {
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
     ) -> anyhow::Result<()> {
-        let mut event_channels: HashMap<EventIdentifier, mpsc::Sender<Log>> = HashMap::new();
-
-        for filter in &self.tracked_events {
-            let unique_event = EventIdentifier {
-                contract_address: filter.contract_address,
-                event: filter.event.clone(),
-            };
-
-            if event_channels.contains_key(&unique_event) {
-                continue;
-            }
-
-            let (sender, receiver) = mpsc::channel::<Log>(1024);
-
-            let callback = filter.callback.clone();
-            let strategy = self.callback_strategy.clone();
-            let event_name = filter.event.clone().unwrap_or_else(|| "all events".to_string());
-            Self::spawn_event_callback_task_executors(receiver, callback, strategy, event_name);
-
-            event_channels.insert(unique_event, sender);
-        }
-
-        // TODO: Once we have commands in the event scanner we can
-        // use them to start the different subscription
         let client = self.block_range_scanner.run()?;
         let mut stream = if let Some(end_height) = end_height {
             client.stream_historical(start_height, end_height).await?
@@ -182,125 +148,69 @@ impl<N: Network> EventScanner<N> {
             client.stream_from(start_height).await?
         };
 
+        let (range_tx, _) = broadcast::channel::<(u64, u64)>(1024);
+
+        for filter in &self.tracked_events {
+            let provider = self.block_range_scanner.provider().clone();
+            let mut sub = range_tx.subscribe();
+            let filter = filter.clone();
+            let strategy = self.callback_strategy.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    match sub.recv().await {
+                        Ok((from_block, to_block)) => {
+                            let mut log_filter =
+                                Filter::new().from_block(from_block).to_block(to_block);
+
+                            if let Some(contract_address) = filter.contract_address {
+                                log_filter = log_filter.address(contract_address);
+                            }
+
+                            if let Some(ref event_signature) = filter.event {
+                                log_filter = log_filter.event(event_signature.as_str());
+                            }
+
+                            match provider.get_logs(&log_filter).await {
+                                Ok(logs) => {
+                                    if logs.is_empty() {
+                                        continue;
+                                    }
+                                    info!(contract = ?filter.contract_address, event = ?filter.event, log_count = logs.len(), from_block, to_block, "found logs for event in block range");
+                                    for log in logs {
+                                        if let Err(e) =
+                                            strategy.execute(&filter.callback, &log).await
+                                        {
+                                            error!(event = ?filter.event, at_block = &log.block_number, error = %e, "failed to invoke callback after retries");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(contract = ?filter.contract_address, event = ?filter.event, error = %e, from_block, to_block, "failed to get logs for block range");
+                                }
+                            }
+                        }
+                        // TODO: What happens if the broadcast channel is closed?
+                        Err(RecvError::Closed) => break,
+                        Err(RecvError::Lagged(_)) => {}
+                    }
+                }
+            });
+        }
+
         while let Some(range) = stream.next().await {
             match range {
                 Ok(range) => {
                     let from_block = *range.start();
                     let to_block = *range.end();
                     info!(from_block, to_block, "processing block range");
-                    self.process_block_range(from_block, to_block, &event_channels).await?;
+                    if let Err(e) = range_tx.send((from_block, to_block)) {
+                        error!(error = %e, "failed to send block range to broadcast channel");
+                        break;
+                    }
                 }
                 Err(e) => {
                     error!(error = %e, "failed to get block range");
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Spawns background tasks that drive callback execution for an event type.
-    fn spawn_event_callback_task_executors(
-        mut receiver: Receiver<Log>,
-        callback: Arc<dyn crate::callback::EventCallback + Send + Sync>,
-        strategy: Arc<dyn CallbackStrategy>,
-        event_name: String,
-    ) {
-        tokio::spawn(async move {
-            while let Some(log) = receiver.recv().await {
-                if let Err(e) = strategy.execute(&callback, &log).await {
-                    error!(
-                        event = %event_name,
-                        at_block = &log.block_number,
-                        error = %e,
-                        "failed to invoke callback after retries"
-                    );
-                }
-            }
-        });
-    }
-
-    /// Fetches logs for the supplied inclusive block range [`from_block..=to_block`] and forwards
-    /// them to the callback channels.
-    async fn process_block_range(
-        &self,
-        from_block: u64,
-        to_block: u64,
-        event_channels: &HashMap<EventIdentifier, mpsc::Sender<Log>>,
-    ) -> anyhow::Result<()> {
-        for event_filter in &self.tracked_events {
-            let mut filter = Filter::new().from_block(from_block).to_block(to_block);
-
-            // Add contract address filter if specified
-            if let Some(contract_address) = event_filter.contract_address {
-                filter = filter.address(contract_address);
-            }
-
-            // Add event signature filter if specified
-            if let Some(event_signature) = &event_filter.event {
-                filter = filter.event(event_signature.as_str());
-            }
-
-            match self.block_range_scanner.provider().get_logs(&filter).await {
-                Ok(logs) => {
-                    if logs.is_empty() {
-                        continue;
-                    }
-                    let contract_display = event_filter
-                        .contract_address
-                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
-                    let event_display = event_filter.event.as_deref().map_or("all events", |s| s);
-
-                    info!(
-                        contract = %contract_display,
-                        event = %event_display,
-                        log_count = logs.len(),
-                        from_block,
-                        to_block,
-                        "found logs for event in block range"
-                    );
-
-                    let event_identifier = EventIdentifier {
-                        contract_address: event_filter.contract_address,
-                        event: event_filter.event.clone(),
-                    };
-
-                    if let Some(sender) = event_channels.get(&event_identifier) {
-                        for log in logs {
-                            if let Err(e) = sender.send(log).await {
-                                let contract_display = event_filter.contract_address.map_or_else(
-                                    || "all contracts".to_string(),
-                                    |addr| format!("{addr:?}"),
-                                );
-                                let event_display =
-                                    event_filter.event.as_deref().map_or("all events", |s| s);
-                                warn!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
-                            }
-                        }
-                    } else {
-                        let contract_display = event_filter.contract_address.map_or_else(
-                            || "all contracts".to_string(),
-                            |addr| format!("{addr:?}"),
-                        );
-                        let event_display =
-                            event_filter.event.as_deref().map_or("all events", |s| s);
-                        warn!(contract = %contract_display, event = %event_display, "no channel found for event type");
-                    }
-                }
-                Err(e) => {
-                    let contract_display = event_filter
-                        .contract_address
-                        .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
-                    let event_display = event_filter.event.as_deref().map_or("all events", |s| s);
-
-                    error!(
-                        contract = %contract_display,
-                        event = %event_display,
-                        error = %e,
-                        from_block,
-                        to_block,
-                        "failed to get logs for block range"
-                    );
                 }
             }
         }
