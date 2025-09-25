@@ -28,7 +28,7 @@
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
 //!
-//!     let mut receiver = client.subscribe_live().await?;
+//!     let mut receiver = client.stream_live().await?;
 //!
 //!     while let Some(result) = receiver.next().await {
 //!         match result {
