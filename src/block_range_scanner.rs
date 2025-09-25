@@ -571,14 +571,20 @@ impl<N: Network> Service<N> {
         reorg_rewind_depth: u64,
     ) {
         // Track previous block hash for reorg detection
-        let mut prev_hash = BlockHash::default();
-        if current > 0
-            && let Ok(Some(prev_block)) = provider
-                .get_block_by_number(BlockNumberOrTag::Number(current.saturating_sub(1)))
-                .await
-        {
-            prev_hash = prev_block.header().hash();
-        }
+        // let mut current_hash = BlockHash::default();
+        // if current > 0
+        //     && let Ok(Some(current_block)) =
+        //         provider.get_block_by_number(BlockNumberOrTag::Number(current)).await
+        // {
+        //     current_hash = current_block.header().hash();
+        // }
+        let mut current_hash = provider
+            .get_block_by_number(BlockNumberOrTag::Number(current))
+            .await
+            .unwrap()
+            .unwrap()
+            .header()
+            .hash();
 
         match Self::get_block_subscription(&provider).await {
             Ok(ws_stream) => {
@@ -590,100 +596,116 @@ impl<N: Network> Service<N> {
                     let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
 
-                    if incoming_block_num == current + 1
-                        && incoming_block.parent_hash() != prev_hash
-                    {
-                        warn!("Reorg detected: sending forked range");
+                    println!("Incoming block number: {incoming_block_num}");
+                    println!("Current + 1 block number: {}", current + 1);
+                    println!("Current block hash: {current_hash}");
+                    println!("Incoming parent hash: {}", incoming_block.parent_hash());
+                    if incoming_block_num <= current + 1 {
+                        println!("Reorg detected: sending forked range");
 
-                        // TODO: re-emit this however this causes an error on the event scanner
-                        //
-                        // if sender.send(Err(Error::ReorgDetected)).await.is_err() {
-                        //     warn!("Downstream channel closed, stopping live blocks task (reorg)");
-                        //     return;
-                        // }
-
-                        let mut rewind_block_height = current.saturating_sub(reorg_rewind_depth);
-
-                        let rewind_block = provider
-                            .get_block_by_number(BlockNumberOrTag::Number(rewind_block_height))
+                        if sender
+                            .send(Ok(incoming_block_num..=incoming_block_num + 1))
                             .await
-                            .unwrap()
-                            .unwrap();
-
-                        let rewind_block_hash = rewind_block.header().hash();
-
-                        let mut rewound_block_by_hash =
-                            provider.get_block_by_hash(rewind_block_hash).await.unwrap();
-
-                        // check if we have rewound far enough, if none then the block doesn't exist
-                        // we need to go back further
-                        if rewound_block_by_hash.is_none() {
-                            // find latest finalized block
-                            while rewound_block_by_hash.is_none() {
-                                rewind_block_height = rewind_block_height.saturating_sub(1);
-                                let rewind_block = provider
-                                    .get_block_by_number(BlockNumberOrTag::Number(
-                                        rewind_block_height,
-                                    ))
-                                    .await
-                                    .unwrap()
-                                    .unwrap();
-                                rewound_block_by_hash = provider
-                                    .get_block_by_hash(rewind_block.header().hash())
-                                    .await
-                                    .unwrap();
-                            }
-                        }
-
-                        // TODO: Maybe also need to think about the processed live block buffer
-                        // as it may cut off the reorg rewind range
-
-                        if sender.send(Ok(rewind_block_height..=incoming_block_num)).await.is_err()
+                            .is_err()
                         {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
-
-                        prev_hash = incoming_block.hash();
-                        current = incoming_block_num + 1;
-                        continue;
                     }
+                    // // && incoming_block.parent_hash() != current_hash
+                    // {
+                    //     println!("Reorg detected: sending forked range");
+                    //     warn!("Reorg detected: sending forked range");
+                    //
+                    //     // TODO: re-emit this however this causes an error on the event scanner
+                    //     //
+                    //     // if sender.send(Err(Error::ReorgDetected)).await.is_err() {
+                    //     //     warn!("Downstream channel closed, stopping live blocks task (reorg)");
+                    //     //     return;
+                    //     // }
+                    //
+                    //     let rewind_block_height = current.saturating_sub(reorg_rewind_depth);
+                    //
+                    //     let mut rewind_block = provider
+                    //         .get_block_by_number(BlockNumberOrTag::Number(rewind_block_height))
+                    //         .await
+                    //         .unwrap()
+                    //         .unwrap();
+                    //
+                    //     let mut prev_block = provider
+                    //         .get_block_by_number(BlockNumberOrTag::Number(
+                    //             rewind_block_height.saturating_sub(1),
+                    //         ))
+                    //         .await
+                    //         .unwrap()
+                    //         .unwrap();
+                    //
+                    //     let mut prev_hash = prev_block.header().hash();
+                    //
+                    //     while prev_hash != rewind_block.header().parent_hash() {
+                    //         rewind_block = prev_block.clone();
+                    //         prev_block = provider
+                    //             .get_block_by_number(BlockNumberOrTag::Number(
+                    //                 rewind_block.header().number().saturating_sub(1),
+                    //             ))
+                    //             .await
+                    //             .unwrap()
+                    //             .unwrap();
+                    //         prev_hash = prev_block.header().hash();
+                    //     }
+                    //
+                    //     // TODO: Maybe also need to think about the processed live block buffer
+                    //     // as it may cut off the reorg rewind range
+                    //
+                    //     if sender
+                    //         .send(Ok(rewind_block.header().number()..=incoming_block_num))
+                    //         .await
+                    //         .is_err()
+                    //     {
+                    //         warn!("Downstream channel closed, stopping live blocks task (reorg)");
+                    //         return;
+                    //     }
+                    //
+                    //     current_hash = incoming_block.hash();
+                    //     current = incoming_block_num + 1;
+                    //     continue;
+                    // }
 
-                    if incoming_block_num != current + 1 {
-                        // let mut latest_block_height = incoming_block_num;
-                        // // todo: check for potential reorgs
-                        // let prev_block = provider
-                        //     .get_block_by_number(BlockNumberOrTag::Number(
-                        //         latest_block_height.saturating_sub(1),
-                        //     ))
-                        //     .await
-                        //     .unwrap()
-                        //     .unwrap();
-                        // let prev_block_hash = prev_block.header().hash();
-                        // let mut parent_hash =
-                        //     provider.get_block_by_hash(prev_block_hash).await.unwrap();
-                        // if parent_hash.is_none() {
-                        //     // find latest finalized block
-                        //     while parent_hash.is_none() {
-                        //         latest_block_height = latest_block_height.saturating_sub(1);
-                        //         let parent_block = provider
-                        //             .get_block_by_number(BlockNumberOrTag::Number(
-                        //                 latest_block_height,
-                        //             ))
-                        //             .await
-                        //             .unwrap()
-                        //             .unwrap();
-                        //         parent_hash = provider
-                        //             .get_block_by_hash(parent_block.header().parent_hash())
-                        //             .await
-                        //             .unwrap();
-                        //     }
-                        // }
-                        //
-                        // prev_hash = incoming_block.hash();
-                        // current = incoming_block_num + 1;
-                        // continue;
-                    }
+                    // if incoming_block_num != current + 1 {
+                    // let mut latest_block_height = incoming_block_num;
+                    // // todo: check for potential reorgs
+                    // let prev_block = provider
+                    //     .get_block_by_number(BlockNumberOrTag::Number(
+                    //         latest_block_height.saturating_sub(1),
+                    //     ))
+                    //     .await
+                    //     .unwrap()
+                    //     .unwrap();
+                    // let prev_block_hash = prev_block.header().hash();
+                    // let mut parent_hash =
+                    //     provider.get_block_by_hash(prev_block_hash).await.unwrap();
+                    // if parent_hash.is_none() {
+                    //     // find latest finalized block
+                    //     while parent_hash.is_none() {
+                    //         latest_block_height = latest_block_height.saturating_sub(1);
+                    //         let parent_block = provider
+                    //             .get_block_by_number(BlockNumberOrTag::Number(
+                    //                 latest_block_height,
+                    //             ))
+                    //             .await
+                    //             .unwrap()
+                    //             .unwrap();
+                    //         parent_hash = provider
+                    //             .get_block_by_hash(parent_block.header().parent_hash())
+                    //             .await
+                    //             .unwrap();
+                    //     }
+                    // }
+                    //
+                    // prev_hash = incoming_block.hash();
+                    // current = incoming_block_num + 1;
+                    // continue;
+                    // }
 
                     // == Normal case ==
 
@@ -692,7 +714,7 @@ impl<N: Network> Service<N> {
                         return;
                     }
 
-                    prev_hash = incoming_block.hash();
+                    current_hash = incoming_block.hash();
                     current = incoming_block_num + 1;
                 }
             }
