@@ -121,7 +121,7 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         let (range_tx, _) = broadcast::channel::<RangeInclusive<BlockNumber>>(1024);
 
-        self.spawn_log_consumers(range_tx.clone());
+        self.spawn_log_consumers(&range_tx);
 
         while let Some(range) = stream.next().await {
             match range {
@@ -141,7 +141,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
-    fn spawn_log_consumers(&self, range_tx: Sender<RangeInclusive<BlockNumber>>) {
+    fn spawn_log_consumers(&self, range_tx: &Sender<RangeInclusive<BlockNumber>>) {
         for listener in &self.event_listeners {
             let provider = self.block_range_scanner.provider().clone();
             let filter = listener.filter.clone();
@@ -208,7 +208,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         // TODO: What happens if the broadcast channel is closed?
                         Err(RecvError::Closed) => break,
-                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Lagged(_)) => {}
                     }
                 }
             });
