@@ -142,8 +142,6 @@ impl<N: Network> EventScanner<N> {
         let client = self.block_range_scanner.run()?;
         let mut stream = client.subscribe(start_height, end_height).await?;
 
-        // CHECK: How big should the broadcast channel be?
-        // Also do we need a way to shutdown the broadcast channel?
         let (range_tx, _) = broadcast::channel::<(u64, u64)>(1024);
 
         for filter in &self.tracked_events {
