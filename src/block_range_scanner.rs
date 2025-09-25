@@ -555,8 +555,8 @@ impl<N: Network> Service<N> {
 
         info!(batch_count = batch_count, "Historical sync completed");
 
-        if let Some(sender) = &self.subscriber
-            && sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber &&
+            sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -587,9 +587,10 @@ impl<N: Network> Service<N> {
                         //     return;
                         // }
                         warn!("Reorg detected: sending forked range");
-                        // TODO: should we send the incoming block range or incoming block num - reorg depth?
-                        // The incoming block should be the latest block from the reorg point so no
-                        // real need tbd
+                        // TODO: should we send the incoming block range or incoming block num -
+                        // reorg depth? The incoming block should be the
+                        // latest block from the reorg point so no real need
+                        // tbd
                         if sender
                             .send(Ok(incoming_block_num..=incoming_block_num + 1))
                             .await
