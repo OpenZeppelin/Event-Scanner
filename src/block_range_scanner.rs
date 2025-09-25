@@ -374,10 +374,10 @@ impl<N: Network> Service<N> {
                 self.subscriber = Some(sender);
                 if matches!(start_height, BlockNumberOrTag::Latest) {
                     let result = self.handle_live().await;
-                    info!(start_height = ?start_height, "Starting live stream");
+                    info!("Starting live stream");
                     let _ = response.send(result);
                 } else {
-                    info!(start_height = ?start_height, "Starting sync stream");
+                    info!(start_height = ?start_height, "Starting streaming from");
                     let result = self.handle_sync(start_height).await;
                     let _ = response.send(result);
                 }
