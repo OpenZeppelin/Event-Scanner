@@ -555,8 +555,8 @@ impl<N: Network> Service<N> {
 
         info!(batch_count = batch_count, "Historical sync completed");
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -580,7 +580,7 @@ impl<N: Network> Service<N> {
                     let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
 
-                    if incoming_block_num < current {
+                    if incoming_block_num <= current {
                         // TODO: send reorg err - issue is this causes event scanner to stop
                         // if sender.send(Err(Error::ReorgDetected)).await.is_err() {
                         //     warn!("Downstream channel closed, stopping live blocks task");
@@ -591,11 +591,7 @@ impl<N: Network> Service<N> {
                         // reorg depth? The incoming block should be the
                         // latest block from the reorg point so no real need
                         // tbd
-                        if sender
-                            .send(Ok(incoming_block_num..=incoming_block_num + 1))
-                            .await
-                            .is_err()
-                        {
+                        if sender.send(Ok(incoming_block_num..=current)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
