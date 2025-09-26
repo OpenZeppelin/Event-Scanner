@@ -21,7 +21,6 @@ Event Scanner is a Rust library for monitoring EVM-based smart contract events. 
   - [Building a Scanner](#building-a-scanner)
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
-  - [Working with Callbacks](#working-with-callbacks)
 - [Examples](#examples)
 - [Testing](#testing)
 
@@ -33,7 +32,6 @@ Event Scanner is a Rust library for monitoring EVM-based smart contract events. 
 - **Live subscriptions** – stay up to date with latest blocks via WebSocket or IPC transports.
 - **Hybrid flow** – automatically transition from historical catch-up into streaming mode.
 - **Composable filters** – register one or many contract + event signature pairs with their own callbacks.
-- **Retry strategies** – built-in retryable callback backoff strategies
 - **No database** – processing happens in-memory; persistence is left to the host application.
 
 ---
@@ -45,7 +43,6 @@ The library exposes two primary layers:
 - `EventScannerBuilder` / `EventScanner` – the main module the application will interact with. 
 - `BlockRangeScanner` – lower-level component that streams block ranges, handles reorg, batching, and provider subscriptions.
 
-Callbacks implement the `EventCallback` trait. They are executed through a `CallbackStrategy` that performs retries when necessary before reporting failures.
 
 ---
 
@@ -57,7 +54,6 @@ Add `event-scanner` to your `Cargo.toml`:
 [dependencies]
 event-scanner = "0.1.0-alpha.1"
 ```
-Create a callback implementing `EventCallback` and register it with the builder:
 
 ```rust
 use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}};
@@ -100,7 +96,6 @@ async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: al
 `EventScannerBuilder` supports:
 
 - `with_event_filter(s)` – attach [filters](#defining-event-filters).
-- `with_callback_strategy(strategy)` – override retry behaviour (`StateSyncAwareStrategy` by default).
 - `with_blocks_read_per_epoch` - how many blocks are read at a time in a single batch (taken into consideration when fetching historical blocks)
 - `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected
 - `with_block_confirmations` - how many confirmations to wait for before considering a block final
@@ -110,7 +105,7 @@ Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `conne
 
 ### Defining Event Filters
 
-Create an `EventFilter` for each contract/event pair you want to track. The filter bundles the contract address, the event signature (from `SolEvent::SIGNATURE`), and an `Arc<dyn EventCallback + Send + Sync>`.
+Create an `EventFilter` for each contract/event pair you want to track. The filter bundles the contract address, the event signature (from `SolEvent::SIGNATURE`).
 
 Both `contract_address` and `event` fields are optional, allowing for flexible event tracking.
 
@@ -123,16 +118,13 @@ You can construct EventFilters using either the builder pattern (recommended) or
 let specific_filter = EventFilter::new()
     .with_contract_address(*counter_contract.address())
     .with_event(Counter::CountIncreased::SIGNATURE)
-    .with_callback(Arc::new(CounterCallback));
 
 // Track ALL events from a specific contract
 let all_contract_events_filter = EventFilter::new()
     .with_contract_address(*counter_contract.address())
-    .with_callback(Arc::new(AllEventsCallback));
 
 // Track ALL events from ALL contracts in the block range
-let all_events_filter = EventFilter::new()
-    .with_callback(Arc::new(GlobalEventsCallback));
+let all_events_filter = EventFilter::new();
 ```
 
 ### Direct Struct Construction
@@ -142,21 +134,18 @@ let all_events_filter = EventFilter::new()
 let specific_filter = EventFilter {
     contract_address: Some(*counter_contract.address()),
     event: Some(Counter::CountIncreased::SIGNATURE.to_owned()),
-    callback: Arc::new(CounterCallback),
 };
 
 // Track ALL events from a specific contract
 let all_contract_events_filter = EventFilter {
     contract_address: Some(*counter_contract.address()),
     event: None, // Will track all events from this contract
-    callback: Arc::new(AllEventsCallback),
 };
 
 // Track ALL events from ALL contracts in the block range
 let all_events_filter = EventFilter {
     contract_address: None, // Will track events from all contracts
     event: None,            // Will track all event types
-    callback: Arc::new(GlobalEventsCallback),
 };
 ```
 
@@ -183,33 +172,6 @@ This flexibility allows you to build sophisticated event monitoring systems that
 For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
 
 See the integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
-
-### Working with Callbacks
-
-Implement `EventCallback`:
-
-```rust
-#[async_trait]
-impl EventCallback for RollupCallback {
-    async fn on_event(&self, log: &Log) -> anyhow::Result<()> {
-        // decode event, send to EL etc.
-        Ok(())
-    }
-}
-```
-
-Advanced users can write custom retry behaviour by implementing the `CallbackStrategy` trait. The default `StateSyncAwareStrategy` automatically detects state-sync errors and performs exponential backoff ([smart retry mechanism](https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L149) from the geth driver) before falling back to a fixed retry policy configured via `FixedRetryConfig`.
-
-```rust
-#[async_trait]
-pub trait CallbackStrategy: Send + Sync {
-    async fn execute(
-        &self,
-        callback: &Arc<dyn EventCallback + Send + Sync>,
-        log: &Log,
-    ) -> anyhow::Result<()>;
-}
-```
 
 ---
 
