@@ -3,17 +3,15 @@ use alloy::{
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
 use std::{sync::Arc, time::Duration};
+use tokio_stream::StreamExt;
 
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::timeout};
 
-use crate::{
-    common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
-    mock_callbacks::BlockOrderingCallback,
-};
+use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{
     eips::BlockNumberOrTag, network::Ethereum, providers::ext::AnvilApi, sol_types::SolEvent,
 };
-use event_scanner::{event_filter::EventFilter, event_scanner::EventScannerBuilder};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
 
 #[tokio::test]
 async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
@@ -22,21 +20,17 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
 
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
-    let blocks = Arc::new(Mutex::new(Vec::new()));
-    let callback = Arc::new(BlockOrderingCallback { blocks: Arc::clone(&blocks) });
+
     let filter = EventFilter {
         contract_address: Some(contract_address),
         event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-        callback,
     };
 
-    let mut scanner = EventScannerBuilder::new()
-        .with_event_filter(filter)
-        .with_reorg_rewind_depth(6)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
+    let mut stream = client.create_event_stream(filter);
+
+    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
     let mut expected_event_block_numbers = vec![];
 
@@ -71,29 +65,22 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
         .unwrap();
     assert_eq!(new_block.transactions.len(), num_new_events);
 
-    let event_blocks_clone = Arc::clone(&blocks);
-
-    let post_reorg_processing = async move {
-        loop {
-            let blocks = event_blocks_clone.lock().await;
-            if blocks.len() >= initial_events + num_new_events {
-                break;
+    let event_block_count = Arc::new(Mutex::new(Vec::new()));
+    let event_block_count_clone = Arc::clone(&event_block_count);
+    let event_counting = async move {
+        while let Some(Ok(logs)) = stream.next().await {
+            let mut guard = event_block_count_clone.lock().await;
+            for log in logs {
+                if let Some(n) = log.block_number {
+                    guard.push(n);
+                }
             }
-            drop(blocks);
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     };
 
-    if tokio::time::timeout(Duration::from_secs(5), post_reorg_processing).await.is_err() {
-        let current_len = blocks.lock().await.len();
-        panic!(
-            "Post-reorg events not rescanned in time. Expected at least {}, got {}",
-            initial_events + num_new_events,
-            current_len
-        );
-    }
+    _ = timeout(Duration::from_secs(2), event_counting).await;
 
-    let final_blocks: Vec<_> = blocks.lock().await.clone();
+    let final_blocks: Vec<_> = event_block_count.lock().await.clone();
     assert!(final_blocks.len() == initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
     // sanity check that the block number after the reorg is smaller than the previous block
