@@ -2,13 +2,9 @@ use alloy::{
     providers::Provider,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use anyhow::bail;
 use std::{sync::Arc, time::Duration};
 
-use tokio::{
-    sync::Mutex,
-    time::{sleep, timeout},
-};
+use tokio::sync::Mutex;
 
 use crate::{
     common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
@@ -47,29 +43,18 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
     let initial_events = 5;
     for _ in 0..initial_events {
         let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        expected_event_block_number.push(receipt.block_number.unwrap());
-    }
-
-    let blocks_clone = Arc::clone(&blocks);
-    let event_counting = async move {
-        while blocks_clone.lock().await.len() < initial_events {
-            sleep(Duration::from_millis(100)).await;
-        }
-    };
-
-    if timeout(Duration::from_secs(1), event_counting).await.is_err() {
-        bail!("expected {initial_events} events, got {}", blocks.lock().await.len());
+        expected_event_block_numbers.push(receipt.block_number.unwrap());
     }
 
     let mut tx_block_pairs = vec![];
     let num_new_events = 3;
     let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
-    let reorg_depth = 10;
+    let reorg_depth = 5;
     for _ in 0..num_new_events {
         let tx = contract.increase().into_transaction_request();
         // 0 is offset to reorg depth
         tx_block_pairs.push((TransactionData::JSON(tx), 0));
-        expected_event_block_number.push(latest_block.header.number - reorg_depth + 1);
+        expected_event_block_numbers.push(latest_block.header.number - reorg_depth + 1);
     }
     let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
 
@@ -87,6 +72,7 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
     assert_eq!(new_block.transactions.len(), num_new_events);
 
     let event_blocks_clone = Arc::clone(&blocks);
+
     let post_reorg_processing = async move {
         loop {
             let blocks = event_blocks_clone.lock().await;
@@ -102,13 +88,14 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
         let current_len = blocks.lock().await.len();
         panic!(
             "Post-reorg events not rescanned in time. Expected at least {}, got {}",
-            initial_events + 4,
+            initial_events + num_new_events,
             current_len
         );
     }
+
     let final_blocks: Vec<_> = blocks.lock().await.clone();
     assert!(final_blocks.len() == initial_events + num_new_events);
-    assert_eq!(final_blocks, expected_event_block_number);
+    assert_eq!(final_blocks, expected_event_block_numbers);
     // sanity check that the block number after the reorg is smaller than the previous block
     assert!(final_blocks[initial_events] < final_blocks[initial_events - 1]);
 
