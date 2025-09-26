@@ -62,7 +62,7 @@
 //! }
 //! ```
 
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
@@ -97,18 +97,18 @@ const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 // const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 // const STATE_SYNC_MAX_RETRIES: u64 = 12;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum Error {
     #[error("HTTP request failed: {0}")]
-    HttpError(#[from] reqwest::Error),
+    HttpError(Arc<reqwest::Error>),
 
     // #[error("WebSocket error: {0}")]
     // WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("Serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
+    SerializationError(Arc<serde_json::Error>),
 
     #[error("RPC error: {0}")]
-    RpcError(#[from] RpcError<TransportErrorKind>),
+    RpcError(Arc<RpcError<TransportErrorKind>>),
 
     #[error("Channel send error")]
     ChannelError,
@@ -133,6 +133,24 @@ pub enum Error {
 
     #[error("Reorg detected")]
     ReorgDetected,
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Error::HttpError(Arc::new(error))
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
+        Error::SerializationError(Arc::new(error))
+    }
+}
+
+impl From<RpcError<TransportErrorKind>> for Error {
+    fn from(error: RpcError<TransportErrorKind>) -> Self {
+        Error::RpcError(Arc::new(error))
+    }
 }
 
 #[derive(Debug)]
