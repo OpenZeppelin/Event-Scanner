@@ -1584,7 +1584,7 @@ dependencies = [
 
 [[package]]
 name = "event-scanner"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "alloy",
  "alloy-node-bindings",
@@ -1906,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "historical_scanning"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "alloy",
  "alloy-node-bindings",
@@ -3461,7 +3461,7 @@ dependencies = [
 
 [[package]]
 name = "simple_counter"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "alloy",
  "alloy-node-bindings",
