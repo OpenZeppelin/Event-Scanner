@@ -8,7 +8,7 @@
 
 ## About
 
-Event Scanner is a Rust library for streaming EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters and get events back as streams of data; the scanner takes care of fetching historical ranges, bridging into live streaming mode, and delivering events.
+Event Scanner is a Rust library for streaming EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters; the scanner takes care of fetching historical ranges, bridging into live streaming mode, all whilst delivering the events as streams of data.
 
 ---
 
@@ -100,12 +100,11 @@ async fn run_scanner(
 - `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected
 - `with_block_confirmations` - how many confirmations to wait for before considering a block final
 
-Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to run it in various [modes](#scanning-Modes).
-
+Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-Modes).
 
 ### Defining Event Filters
 
-Create an `EventFilter` for each contract/event pair you want to track. The filter bundles the contract address, and the event signature (from `SolEvent::SIGNATURE`).
+Create an `EventFilter` for each contract/event pair you want to track. The filter specifies the contract address where events originated, and the event signature (from `SolEvent::SIGNATURE`).
 
 Both `contract_address` and `event` fields are optional, allowing for flexible event tracking.
 
@@ -113,20 +112,17 @@ Both `contract_address` and `event` fields are optional, allowing for flexible e
 // Track a specific event from a specific contract
 let specific_filter = EventFilter::new()
     .with_contract_address(*counter_contract.address())
-    .with_event(Counter::CountIncreased::SIGNATURE)
-    .with_callback(Arc::new(CounterCallback));
+    .with_event(Counter::CountIncreased::SIGNATURE);
 
 // Track ALL events from a specific contract
 let all_contract_events_filter = EventFilter::new()
-    .with_contract_address(*counter_contract.address())
-    .with_callback(Arc::new(AllEventsCallback));
+    .with_contract_address(*counter_contract.address());
 
 // Track ALL events from ALL contracts in the block range
-let all_events_filter = EventFilter::new()
-    .with_callback(Arc::new(GlobalEventsCallback));
+let all_events_filter = EventFilter::new();
 ```
 
-Register multiple filters by creating`create_event_stream` repeatedly.
+Register multiple filters by invoking `create_event_stream` repeatedly.
 
 Event filters enable several powerful use cases:
 
@@ -162,7 +158,7 @@ RUST_LOG=info cargo run -p simple_counter
 RUST_LOG=info cargo run -p historical_scanning
 ```
 
-Both examples spin up a local `anvil` instance and deploy a demo counter contract before starting the scanner.
+Both examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
 
 ---
 
