@@ -565,7 +565,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn stream_live_blocks<P: Provider<N>>(
-        mut current: BlockNumber,
+        mut expected_next_block: BlockNumber,
         provider: P,
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         reorg_rewind_depth: u64,
@@ -574,13 +574,14 @@ impl<N: Network> Service<N> {
             Ok(ws_stream) => {
                 info!("WebSocket connected for live blocks");
 
-                let cur = current;
+                let cur = expected_next_block;
                 let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cur);
                 while let Some(incoming_block) = stream.next().await {
                     let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
 
-                    if incoming_block_num <= current {
+                    if incoming_block_num < expected_next_block {
+                        println!("reorg detected");
                         // TODO: send reorg err - issue is this causes event scanner to stop
                         // if sender.send(Err(Error::ReorgDetected)).await.is_err() {
                         //     warn!("Downstream channel closed, stopping live blocks task");
@@ -591,16 +592,21 @@ impl<N: Network> Service<N> {
                         // reorg depth? The incoming block should be the
                         // latest block from the reorg point so no real need
                         // tbd
-                        if sender.send(Ok(incoming_block_num..=current)).await.is_err() {
+                        if sender.send(Ok(incoming_block_num..=expected_next_block)).await.is_err()
+                        {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
-                    } else if sender.send(Ok(current..=incoming_block_num)).await.is_err() {
+                    } else if sender
+                        .send(Ok(expected_next_block..=incoming_block_num))
+                        .await
+                        .is_err()
+                    {
                         warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
 
-                    current = incoming_block_num + 1;
+                    expected_next_block = incoming_block_num + 1;
                 }
             }
             Err(e) => {
