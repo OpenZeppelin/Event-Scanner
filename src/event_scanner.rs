@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use crate::{
     block_range_scanner::{
-        self, BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES,
+        self, BlockRangeScanner, ConnectedBlockRangeScanner, Error, MAX_BUFFERED_MESSAGES,
     },
     event_filter::EventFilter,
     event_listener::EventListener,
@@ -20,7 +20,7 @@ use tokio::sync::{
     mpsc,
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
@@ -133,7 +133,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                     }
                 }
                 Err(e) => {
-                    error!(error = %e, "failed to get block range");
+                    warn!(error = %e, "failed to get block range");
+
+                    // range_tx.send(Err(e)).await.unwrap();
                 }
             }
         }

@@ -582,17 +582,16 @@ impl<N: Network> Service<N> {
 
                     if incoming_block_num < expected_next_block {
                         // TODO: send reorg err - issue is this causes event scanner to stop
-                        // if sender.send(Err(Error::ReorgDetected)).await.is_err() {
-                        //     warn!("Downstream channel closed, stopping live blocks task");
-                        //     return;
-                        // }
+                        if sender.send(Err(Error::ReorgDetected)).await.is_err() {
+                            warn!("Downstream channel closed, stopping live blocks task");
+                            return;
+                        }
                         warn!("Reorg detected: sending forked range");
                         // TODO: should we send the incoming block range or incoming block num -
                         // reorg depth? The incoming block should be the
                         // latest block from the reorg point so no real need
                         // tbd
-                        if sender.send(Ok(incoming_block_num..=expected_next_block)).await.is_err()
-                        {
+                        if sender.send(Ok(incoming_block_num..=incoming_block_num)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
                         }
