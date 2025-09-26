@@ -225,7 +225,7 @@ pub struct Client<N: Network> {
 }
 
 impl<N: Network> Client<N> {
-    pub fn subscribe(
+    pub fn create_event_stream(
         &mut self,
         event_filter: EventFilter,
     ) -> ReceiverStream<Result<Vec<Log>, block_range_scanner::Error>> {

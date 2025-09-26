@@ -37,7 +37,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     }
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let mut stream = client.subscribe(filter).take(expected_event_count);
+    let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
     tokio::spawn(async move {
         client

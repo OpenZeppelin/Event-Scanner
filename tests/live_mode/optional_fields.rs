@@ -28,7 +28,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     };
     let expected_event_count = 5;
 
-    let mut stream = client.subscribe(filter).take(expected_event_count);
+    let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -71,7 +71,7 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.subscribe(filter).take(expected_event_count);
+    let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -115,8 +115,9 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut specific_stream = client.subscribe(specific_filter).take(expected_specific_count);
-    let mut all_stream = client.subscribe(all_events_filter).take(expected_all_count);
+    let mut specific_stream =
+        client.create_event_stream(specific_filter).take(expected_specific_count);
+    let mut all_stream = client.create_event_stream(all_events_filter).take(expected_all_count);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 

@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.subscribe(increase_filter);
+    let mut stream = client.create_event_stream(increase_filter);
 
     sleep(Duration::from_secs(10)).await;
     client.start_scanner(BlockNumberOrTag::Number(0), None).await.expect("failed to start scanner");

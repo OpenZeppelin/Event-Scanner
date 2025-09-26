@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.subscribe(increase_filter);
+    let mut stream = client.create_event_stream(increase_filter);
 
     let task_1 = tokio::spawn(async move {
         client

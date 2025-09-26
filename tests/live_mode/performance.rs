@@ -27,7 +27,7 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.subscribe(filter).take(expected_event_count);
+    let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 

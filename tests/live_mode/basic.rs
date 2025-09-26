@@ -27,7 +27,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let expected_event_count = 5;
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let mut stream = client.subscribe(filter).take(expected_event_count);
+    let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -77,8 +77,8 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let a_stream = client.subscribe(a_filter);
-    let b_stream = client.subscribe(b_filter);
+    let a_stream = client.create_event_stream(a_filter);
+    let b_stream = client.create_event_stream(b_filter);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -143,8 +143,8 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut incr_stream = client.subscribe(increase_filter).take(expected_incr_events);
-    let mut decr_stream = client.subscribe(decrease_filter).take(expected_decr_events);
+    let mut incr_stream = client.create_event_stream(increase_filter).take(expected_incr_events);
+    let mut decr_stream = client.create_event_stream(decrease_filter).take(expected_decr_events);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -211,7 +211,7 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.subscribe(filter).take(num_of_events);
+    let mut stream = client.create_event_stream(filter).take(num_of_events);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -244,7 +244,7 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.subscribe(filter).take(num_of_events);
+    let mut stream = client.create_event_stream(filter).take(num_of_events);
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
