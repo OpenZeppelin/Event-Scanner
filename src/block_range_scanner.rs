@@ -568,7 +568,7 @@ impl<N: Network> Service<N> {
         mut expected_next_block: BlockNumber,
         provider: P,
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
-        reorg_rewind_depth: u64,
+        _reorg_rewind_depth: u64,
     ) {
         match Self::get_block_subscription(&provider).await {
             Ok(ws_stream) => {
@@ -589,7 +589,6 @@ impl<N: Network> Service<N> {
                         // TODO: should we send the incoming block range or incoming block num -
                         // reorg depth? The incoming block should be the
                         // latest block from the reorg point so no real need
-                        // tbd
                         if sender.send(Ok(incoming_block_num..=incoming_block_num)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task (reorg)");
                             return;
