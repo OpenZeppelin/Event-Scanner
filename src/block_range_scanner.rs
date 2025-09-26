@@ -581,7 +581,6 @@ impl<N: Network> Service<N> {
                     info!(block_number = incoming_block_num, "Received block header");
 
                     if incoming_block_num < expected_next_block {
-                        // TODO: send reorg err - issue is this causes event scanner to stop
                         if sender.send(Err(Error::ReorgDetected)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
