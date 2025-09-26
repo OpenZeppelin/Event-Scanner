@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Fetch Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5.0.0
 
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
