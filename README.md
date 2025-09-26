@@ -97,8 +97,8 @@ async fn run_scanner(
 `EventScanner` supports:
 
 - `with_blocks_read_per_epoch` - how many blocks are read at a time in a single batch (taken into consideration when fetching historical blocks)
-- `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected
-- `with_block_confirmations` - how many confirmations to wait for before considering a block final
+- `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected (NOTE ⚠️: still WIP)
+- `with_block_confirmations` - how many confirmations to wait for before considering a block final (NOTE ⚠️: still WIP)
 
 Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-Modes).
 
