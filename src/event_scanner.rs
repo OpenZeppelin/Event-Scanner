@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use crate::{
     block_range_scanner::{
-        self, BlockRangeScanner, ConnectedBlockRangeScanner, Error, MAX_BUFFERED_MESSAGES,
+        self, BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES,
     },
     event_filter::EventFilter,
     event_listener::EventListener,
