@@ -118,6 +118,8 @@ impl<N: Network> ConnectedEventScanner<N> {
             client.stream_from(start_height).await?
         };
 
+        // TODO: I think this channel should accept event scanner errors
+        // we should convert them from block range scanner errors
         let (range_tx, _) = broadcast::channel::<
             Result<RangeInclusive<u64>, Arc<block_range_scanner::Error>>,
         >(1024);
@@ -134,8 +136,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                     }
                 }
                 Err(e) => {
-                    warn!(error = %e, "failed to get block range");
-                    // Propagate the error
+                    warn!(error = %e, "block range scanner error");
+                    // Propagate the error to the range channel
                     if let Err(send_err) = range_tx.send(Err(Arc::new(e))) {
                         error!(error = %send_err, "failed to send error to broadcast channel");
                     }
@@ -208,6 +210,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                                         "failed to get logs for block range"
                                     );
 
+                                    // TODO: Current we are sending only block range scanner errors
+                                    // by converting event scanner errors to block range scanner errors.
                                     if let Err(e) = sender
                                         .send(Err(Arc::new(block_range_scanner::Error::from(e))))
                                         .await
@@ -219,7 +223,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         Ok(Err(e)) => {
                             error!("Received error from block range scanner: {}", e);
-                            // event forwarding
+                            // send error back to event stream
                             if let Err(send_err) = sender.send(Err(e)).await {
                                 error!(
                                     error = %send_err,
