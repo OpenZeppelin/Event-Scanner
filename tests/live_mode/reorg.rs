@@ -42,7 +42,7 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
 
     tokio::spawn(async move { scanner.start(BlockNumberOrTag::Latest, None).await });
 
-    let mut expected_event_block_number = vec![];
+    let mut expected_event_block_numbers = vec![];
 
     let initial_events = 5;
     for _ in 0..initial_events {
