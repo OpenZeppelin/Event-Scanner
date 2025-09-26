@@ -1,6 +1,6 @@
 # Event Scanner
 
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/event-scanner/badge)](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/event-scanner)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner/badge)](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner)
 
 > ⚠️ **WARNING: ACTIVE DEVELOPMENT** ⚠️
 >
