@@ -91,7 +91,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     }
 
     let make_assertion =
-        async |stream: ReceiverStream<Result<Vec<Log>, block_range_scanner::Error>>,
+        async |stream: ReceiverStream<Result<Vec<Log>, Arc<block_range_scanner::Error>>>,
                expected_events| {
             let mut stream = stream.take(expected_events);
 
