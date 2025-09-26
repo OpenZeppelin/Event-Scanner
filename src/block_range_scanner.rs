@@ -89,7 +89,7 @@ const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
 const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 // const BACK_OFF_MAX_RETRIES: u64 = 5;
 
-const MAX_BUFFERED_MESSAGES: usize = 50000;
+pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 
 const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 
@@ -294,7 +294,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     /// # Errors
     ///
     /// Returns an error if the subscription service fails to start.
-    pub fn run(&self) -> anyhow::Result<BlockRangeScannerClient> {
+    pub fn run(&self) -> Result<BlockRangeScannerClient, Error> {
         let (service, cmd_tx) = Service::new(self.config.clone(), self.provider.clone());
         tokio::spawn(async move {
             service.run().await;
@@ -1044,7 +1044,7 @@ mod tests {
         while let Some(result) = receiver.next().await {
             match result {
                 Ok(range) => {
-                    println!("Received block range: [{range:?}]");
+                    info!("Received block range: [{range:?}]");
                     if block_range_start == 0 {
                         block_range_start = *range.start();
                     }

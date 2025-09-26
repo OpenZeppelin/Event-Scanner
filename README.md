@@ -1,5 +1,7 @@
 # Event Scanner
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/event-scanner/badge)](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/event-scanner)
+
 > ⚠️ **WARNING: ACTIVE DEVELOPMENT** ⚠️
 >
 > This project is under active development and likely contains bugs. APIs and behaviour may change without notice. Use at your own risk.
@@ -79,12 +81,12 @@ async fn run_scanner(ws_url: alloy::transports::http::reqwest::Url, contract: al
         .with_event(MyContract::SomeEvent::SIGNATURE)
         .with_callback(Arc::new(CounterCallback { processed: Arc::new(AtomicUsize::new(0)) }));
 
-    let mut scanner = EventScannerBuilder::new()
+    let mut client = EventScannerBuilder::new()
         .with_event_filter(filter)
         .connect_ws::<Ethereum>(ws_url)
         .await?;
 
-    scanner.start(BlockNumberOrTag::Latest, None).await?;
+    client.start_scanner(BlockNumberOrTag::Latest, None).await?;
     Ok(())
 }
 ```

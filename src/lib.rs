@@ -1,15 +1,6 @@
 pub mod block_range_scanner;
-pub mod callback;
 pub mod event_filter;
+pub mod event_listener;
 pub mod event_scanner;
 
-pub use crate::{
-    callback::{
-        EventCallback, strategy as callback_strategy,
-        strategy::{
-            CallbackStrategy, FixedRetryConfig, FixedRetryStrategy, StateSyncAwareStrategy,
-            StateSyncConfig,
-        },
-    },
-    event_filter::{EventFilter, EventFilterBuilder},
-};
+pub use event_filter::EventFilter;

@@ -6,7 +6,7 @@ Thanks for your interest in contributing! This guide explains how to set up your
 
 ## Project Overview
 
-`event-scanner` is a Rust library for monitoring EVM-based smart contract events. It is built on the `alloy` ecosystem and provides in-memory scanning with retry-aware callback execution. See `README.md` for features, usage, examples, and testing notes.
+`event-scanner` is a Rust library for monitoring and streaming EVM-based smart contract events. It is built on the `alloy` ecosystem and provides in-memory scanning. See `README.md` for features, usage, examples, and testing notes.
 
 - Workspace manifest: `Cargo.toml`
 - Library code: `src/`

@@ -1911,10 +1911,9 @@ dependencies = [
  "alloy",
  "alloy-node-bindings",
  "anyhow",
- "async-trait",
  "event-scanner",
- "hex",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3467,10 +3466,9 @@ dependencies = [
  "alloy",
  "alloy-node-bindings",
  "anyhow",
- "async-trait",
  "event-scanner",
- "hex",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
 ]
