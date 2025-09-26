@@ -21,7 +21,7 @@ jobs:
     name: Publish event-scanner on crates.io
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
