@@ -80,6 +80,7 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
     // sanity checks, block numb stays the same but hash changes
     assert_eq!(new_latest_block.header.number, latest_block.header.number);
     assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
+
     let new_block = provider
         .get_block_by_number(BlockNumberOrTag::Number(latest_block.header.number - reorg_depth + 1))
         .await?
