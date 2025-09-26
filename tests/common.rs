@@ -1,8 +1,6 @@
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol};
 use alloy_node_bindings::{Anvil, AnvilInstance};
 
-pub mod mock_callbacks;
-
 // Shared test contract used across integration tests
 sol! {
     #[allow(missing_docs)]

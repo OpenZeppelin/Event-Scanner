@@ -1,60 +1,42 @@
-use std::sync::Arc;
+use std::ops::RangeInclusive;
 
 use crate::{
-    block_range_scanner::{self, BlockRangeScanner, ConnectedBlockRangeScanner},
-    callback::strategy::{CallbackStrategy, StateSyncAwareStrategy},
+    block_range_scanner::{
+        self, BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES,
+    },
     event_filter::EventFilter,
+    event_listener::EventListener,
 };
 use alloy::{
-    eips::BlockNumberOrTag, network::Network, providers::Provider, rpc::types::Filter,
+    eips::BlockNumberOrTag,
+    network::Network,
+    primitives::BlockNumber,
+    providers::Provider,
+    rpc::types::{Filter, Log},
     transports::http::reqwest::Url,
 };
-use tokio::sync::broadcast::{self, error::RecvError};
-use tokio_stream::StreamExt;
+use tokio::sync::{
+    broadcast::{self, Sender, error::RecvError},
+    mpsc,
+};
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info};
 
-pub struct EventScannerBuilder {
+pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
-    tracked_events: Vec<EventFilter>,
-    callback_strategy: Arc<dyn CallbackStrategy>,
 }
 
-impl Default for EventScannerBuilder {
+impl Default for EventScanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl EventScannerBuilder {
+impl EventScanner {
     #[must_use]
     /// Creates a new builder with default block scanner and callback strategy.
     pub fn new() -> Self {
-        Self {
-            block_range_scanner: BlockRangeScanner::new(),
-            tracked_events: Vec::new(),
-            callback_strategy: Self::get_default_callback_strategy(),
-        }
-    }
-
-    /// Registers a single event filter for scanning.
-    #[must_use]
-    pub fn with_event_filter(mut self, filter: EventFilter) -> Self {
-        self.tracked_events.push(filter);
-        self
-    }
-
-    /// Registers a collection of event filters for scanning.
-    #[must_use]
-    pub fn with_event_filters(mut self, filters: Vec<EventFilter>) -> Self {
-        self.tracked_events.extend(filters);
-        self
-    }
-
-    /// Overrides the callback execution strategy used by the scanner.
-    #[must_use]
-    pub fn with_callback_strategy(mut self, strategy: Arc<dyn CallbackStrategy>) -> Self {
-        self.callback_strategy = strategy;
-        self
+        Self { block_range_scanner: BlockRangeScanner::new() }
     }
 
     /// Configures how many blocks are read per epoch during a historical sync.
@@ -89,13 +71,11 @@ impl EventScannerBuilder {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
+    ) -> Result<Client<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
-        Ok(EventScanner {
-            block_range_scanner,
-            tracked_events: self.tracked_events,
-            callback_strategy: self.callback_strategy,
-        })
+        let event_scanner =
+            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
+        Ok(Client { event_scanner })
     }
 
     /// Connects to the provider via IPC
@@ -106,39 +86,30 @@ impl EventScannerBuilder {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<EventScanner<N>, block_range_scanner::Error> {
+    ) -> Result<Client<N>, block_range_scanner::Error> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
-        Ok(EventScanner {
-            block_range_scanner,
-            tracked_events: self.tracked_events,
-            callback_strategy: self.callback_strategy,
-        })
-    }
-
-    /// Builds the default callback strategy used when none is provided.
-    fn get_default_callback_strategy() -> Arc<dyn CallbackStrategy> {
-        let state_sync_aware_strategy = StateSyncAwareStrategy::new();
-        Arc::new(state_sync_aware_strategy)
+        let event_scanner =
+            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
+        Ok(Client { event_scanner })
     }
 }
 
-pub struct EventScanner<N: Network> {
+pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
-    tracked_events: Vec<EventFilter>,
-    callback_strategy: Arc<dyn CallbackStrategy>,
+    event_listeners: Vec<EventListener>,
 }
 
-impl<N: Network> EventScanner<N> {
+impl<N: Network> ConnectedEventScanner<N> {
     /// Starts the scanner
     ///
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
     pub async fn start(
-        &mut self,
+        &self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), block_range_scanner::Error> {
         let client = self.block_range_scanner.run()?;
         let mut stream = if let Some(end_height) = end_height {
             client.stream_historical(start_height, end_height).await?
@@ -148,63 +119,15 @@ impl<N: Network> EventScanner<N> {
             client.stream_from(start_height).await?
         };
 
-        let (range_tx, _) = broadcast::channel::<(u64, u64)>(1024);
+        let (range_tx, _) = broadcast::channel::<RangeInclusive<BlockNumber>>(1024);
 
-        for filter in &self.tracked_events {
-            let provider = self.block_range_scanner.provider().clone();
-            let mut sub = range_tx.subscribe();
-            let filter = filter.clone();
-            let strategy = self.callback_strategy.clone();
-
-            tokio::spawn(async move {
-                loop {
-                    match sub.recv().await {
-                        Ok((from_block, to_block)) => {
-                            let mut log_filter =
-                                Filter::new().from_block(from_block).to_block(to_block);
-
-                            if let Some(contract_address) = filter.contract_address {
-                                log_filter = log_filter.address(contract_address);
-                            }
-
-                            if let Some(ref event_signature) = filter.event {
-                                log_filter = log_filter.event(event_signature.as_str());
-                            }
-
-                            match provider.get_logs(&log_filter).await {
-                                Ok(logs) => {
-                                    if logs.is_empty() {
-                                        continue;
-                                    }
-                                    info!(contract = ?filter.contract_address, event = ?filter.event, log_count = logs.len(), from_block, to_block, "found logs for event in block range");
-                                    for log in logs {
-                                        if let Err(e) =
-                                            strategy.execute(&filter.callback, &log).await
-                                        {
-                                            error!(event = ?filter.event, at_block = &log.block_number, error = %e, "failed to invoke callback after retries");
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    error!(contract = ?filter.contract_address, event = ?filter.event, error = %e, from_block, to_block, "failed to get logs for block range");
-                                }
-                            }
-                        }
-                        // TODO: What happens if the broadcast channel is closed?
-                        Err(RecvError::Closed) => break,
-                        Err(RecvError::Lagged(_)) => {}
-                    }
-                }
-            });
-        }
+        self.spawn_log_consumers(&range_tx);
 
         while let Some(range) = stream.next().await {
             match range {
                 Ok(range) => {
-                    let from_block = *range.start();
-                    let to_block = *range.end();
-                    info!(from_block, to_block, "processing block range");
-                    if let Err(e) = range_tx.send((from_block, to_block)) {
+                    info!(?range, "processing block range");
+                    if let Err(e) = range_tx.send(range) {
                         error!(error = %e, "failed to send block range to broadcast channel");
                         break;
                     }
@@ -216,5 +139,113 @@ impl<N: Network> EventScanner<N> {
         }
 
         Ok(())
+    }
+
+    fn spawn_log_consumers(&self, range_tx: &Sender<RangeInclusive<BlockNumber>>) {
+        for listener in &self.event_listeners {
+            let provider = self.block_range_scanner.provider().clone();
+            let filter = listener.filter.clone();
+            let sender = listener.sender.clone();
+            let mut sub = range_tx.subscribe();
+
+            tokio::spawn(async move {
+                loop {
+                    match sub.recv().await {
+                        Ok(range) => {
+                            let (from_block, to_block) = (*range.start(), *range.end());
+
+                            let mut log_filter =
+                                Filter::new().from_block(from_block).to_block(to_block);
+
+                            if let Some(contract_address) = filter.contract_address {
+                                log_filter = log_filter.address(contract_address);
+                            }
+
+                            if let Some(ref event_signature) = filter.event {
+                                log_filter = log_filter.event(event_signature.as_str());
+                            }
+
+                            let contract_display = filter.contract_address.map_or_else(
+                                || "all contracts".to_string(),
+                                |addr| format!("{addr:?}"),
+                            );
+                            let event_display = filter.event.as_deref().map_or("all events", |s| s);
+
+                            match provider.get_logs(&log_filter).await {
+                                Ok(logs) => {
+                                    if logs.is_empty() {
+                                        continue;
+                                    }
+
+                                    info!(
+                                        contract = %contract_display,
+                                        event = %event_display,
+                                        log_count = logs.len(),
+                                        from_block,
+                                        to_block,
+                                        "found logs for event in block range"
+                                    );
+
+                                    if let Err(e) = sender.send(Ok(logs)).await {
+                                        error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(
+                                        contract = %contract_display,
+                                        event = %event_display,
+                                        error = %e,
+                                        from_block,
+                                        to_block,
+                                        "failed to get logs for block range"
+                                    );
+
+                                    if let Err(e) = sender.send(Err(e.into())).await {
+                                        error!(event = %event_display, error = %e, "failed to enqueue error for processing");
+                                    }
+                                }
+                            }
+                        }
+                        // TODO: What happens if the broadcast channel is closed?
+                        Err(RecvError::Closed) => break,
+                        Err(RecvError::Lagged(_)) => {}
+                    }
+                }
+            });
+        }
+    }
+
+    fn add_event_listener(&mut self, event_listener: EventListener) {
+        self.event_listeners.push(event_listener);
+    }
+}
+
+pub struct Client<N: Network> {
+    event_scanner: ConnectedEventScanner<N>,
+}
+
+impl<N: Network> Client<N> {
+    pub fn create_event_stream(
+        &mut self,
+        event_filter: EventFilter,
+    ) -> ReceiverStream<Result<Vec<Log>, block_range_scanner::Error>> {
+        let (sender, receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+
+        self.event_scanner.add_event_listener(EventListener { filter: event_filter, sender });
+
+        ReceiverStream::new(receiver)
+    }
+
+    /// Starts the scanner
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to start
+    pub async fn start_scanner(
+        self,
+        start_height: BlockNumberOrTag,
+        end_height: Option<BlockNumberOrTag>,
+    ) -> Result<(), block_range_scanner::Error> {
+        self.event_scanner.start(start_height, end_height).await
     }
 }

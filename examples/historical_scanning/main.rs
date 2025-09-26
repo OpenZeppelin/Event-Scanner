@@ -1,26 +1,15 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use alloy::{
-    eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, rpc::types::Log, sol,
-    sol_types::SolEvent,
+    eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent,
 };
 use alloy_node_bindings::Anvil;
-use async_trait::async_trait;
-use event_scanner::{EventCallback, EventFilter, event_scanner::EventScannerBuilder};
+use event_scanner::{EventFilter, event_scanner::EventScanner};
 
 use tokio::time::sleep;
+use tokio_stream::StreamExt;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-struct CounterCallback;
-
-#[async_trait]
-impl EventCallback for CounterCallback {
-    async fn on_event(&self, log: &Log) -> anyhow::Result<()> {
-        info!("Callback successfully executed with event {:?}", log.inner.data);
-        Ok(())
-    }
-}
 
 sol! {
     #[allow(missing_docs)]
@@ -61,18 +50,22 @@ async fn main() -> anyhow::Result<()> {
 
     let increase_filter = EventFilter::new()
         .with_contract_address(*contract_address)
-        .with_event(Counter::CountIncreased::SIGNATURE)
-        .with_callback(Arc::new(CounterCallback));
+        .with_event(Counter::CountIncreased::SIGNATURE);
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let mut scanner = EventScannerBuilder::new()
-        .with_event_filter(increase_filter)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+
+    let mut stream = client.create_event_stream(increase_filter);
 
     sleep(Duration::from_secs(10)).await;
-    scanner.start(BlockNumberOrTag::Number(0), None).await.expect("failed to start scanner");
+    client.start_scanner(BlockNumberOrTag::Number(0), None).await.expect("failed to start scanner");
+
+    while let Some(Ok(logs)) = stream.next().await {
+        for log in logs {
+            info!("Callback successfully executed with event {:?}", log.inner.data);
+        }
+    }
 
     Ok(())
 }
