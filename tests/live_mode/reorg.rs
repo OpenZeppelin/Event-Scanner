@@ -69,7 +69,6 @@ async fn reorg_rescans_events_with_rewind_depth() -> anyhow::Result<()> {
         let tx = contract.increase().into_transaction_request();
         // 0 is offset to reorg depth
         tx_block_pairs.push((TransactionData::JSON(tx), 0));
-        // pushing to latest block - roerg depth + 1;
         expected_event_block_number.push(latest_block.header.number - reorg_depth + 1);
     }
     let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
