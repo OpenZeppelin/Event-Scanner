@@ -411,8 +411,10 @@ impl<N: Network> Service<N> {
         };
 
         let reorg_rewind = self.config.reorg_rewind_depth;
+        let block_confirmations = self.config.block_confirmations;
         tokio::spawn(async move {
-            Self::stream_live_blocks(start, provider, sender, reorg_rewind).await;
+            Self::stream_live_blocks(start, provider, sender, reorg_rewind, block_confirmations)
+                .await;
         });
 
         Ok(())
@@ -484,11 +486,18 @@ impl<N: Network> Service<N> {
         let cutoff = end_block.header().number();
 
         let reorg_rewind = self.config.reorg_rewind_depth;
+        let block_confirmations = self.config.block_confirmations;
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
-            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender, reorg_rewind)
-                .await;
+            Self::stream_live_blocks(
+                cutoff + 1,
+                provider,
+                live_block_buffer_sender,
+                reorg_rewind,
+                block_confirmations,
+            )
+            .await;
         });
 
         // Step 4: Perform historical synchronization
@@ -555,8 +564,8 @@ impl<N: Network> Service<N> {
 
         info!(batch_count = batch_count, "Historical sync completed");
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber
+            && sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -569,6 +578,7 @@ impl<N: Network> Service<N> {
         provider: P,
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
         _reorg_rewind_depth: u64,
+        block_confirmations: u64,
     ) {
         match Self::get_block_subscription(&provider).await {
             Ok(ws_stream) => {
@@ -594,12 +604,15 @@ impl<N: Network> Service<N> {
                         expected_next_block = incoming_block_num;
                     }
 
-                    if sender.send(Ok(expected_next_block..=incoming_block_num)).await.is_err() {
-                        warn!("Downstream channel closed, stopping live blocks task");
-                        return;
-                    }
+                    let confirmed = incoming_block_num.saturating_sub(block_confirmations);
+                    if confirmed >= expected_next_block {
+                        if sender.send(Ok(expected_next_block..=confirmed)).await.is_err() {
+                            warn!("Downstream channel closed, stopping live blocks task");
+                            return;
+                        }
 
-                    expected_next_block = incoming_block_num + 1;
+                        expected_next_block = confirmed + 1;
+                    }
                 }
             }
             Err(e) => {
