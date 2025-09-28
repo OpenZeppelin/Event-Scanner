@@ -211,7 +211,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     );
 
                                     // TODO: Current we are sending only block range scanner errors
-                                    // by converting event scanner errors to block range scanner errors.
+                                    // by converting event scanner errors to block range scanner
+                                    // errors.
                                     if let Err(e) = sender
                                         .send(Err(Arc::new(block_range_scanner::Error::from(e))))
                                         .await
