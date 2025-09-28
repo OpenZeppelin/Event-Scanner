@@ -607,15 +607,12 @@ impl<N: Network> Service<N> {
                         // TODO: should we send the incoming block range or incoming block num -
                         // reorg depth? The incoming block should be the
                         // latest block from the reorg point so no real need
-                        if sender.send(Ok(incoming_block_num..=incoming_block_num)).await.is_err() {
-                            warn!("Downstream channel closed, stopping live blocks task (reorg)");
-                            return;
-                        }
-                    } else if sender
-                        .send(Ok(expected_next_block..=incoming_block_num))
-                        .await
-                        .is_err()
-                    {
+
+                        // resets cursor to incoming block num
+                        expected_next_block = incoming_block_num;
+                    }
+
+                    if sender.send(Ok(expected_next_block..=incoming_block_num)).await.is_err() {
                         warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
