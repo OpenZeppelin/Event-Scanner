@@ -7,13 +7,13 @@
 //!
 //! use alloy::transports::http::reqwest::Url;
 //! use event_scanner::block_range_scanner::{
-//!     BlockRangeScanner, BlockRangeScannerClient, Error as BlockRangeScannerError,
+//!     BlockRangeScanner, BlockRangeScannerClient, BlockRangeScannerError,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! async fn main() -> Result<(), Box<dyn std::error::BlockRangeScannerError>> {
 //!     // Initialize logging
 //!     tracing_subscriber::fmt::init();
 //!
@@ -98,7 +98,7 @@ const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 // const STATE_SYNC_MAX_RETRIES: u64 = 12;
 
 #[derive(Error, Debug, Clone)]
-pub enum Error {
+pub enum BlockRangeScannerError {
     #[error("HTTP request failed: {0}")]
     HttpError(Arc<reqwest::Error>),
 
@@ -132,49 +132,49 @@ pub enum Error {
     ReorgDetected,
 }
 
-impl From<reqwest::Error> for Error {
+impl From<reqwest::Error> for BlockRangeScannerError {
     fn from(error: reqwest::Error) -> Self {
-        Error::HttpError(Arc::new(error))
+        BlockRangeScannerError::HttpError(Arc::new(error))
     }
 }
 
-impl From<serde_json::Error> for Error {
+impl From<serde_json::Error> for BlockRangeScannerError {
     fn from(error: serde_json::Error) -> Self {
-        Error::SerializationError(Arc::new(error))
+        BlockRangeScannerError::SerializationError(Arc::new(error))
     }
 }
 
-impl From<RpcError<TransportErrorKind>> for Error {
+impl From<RpcError<TransportErrorKind>> for BlockRangeScannerError {
     fn from(error: RpcError<TransportErrorKind>) -> Self {
-        Error::RpcError(Arc::new(error))
+        BlockRangeScannerError::RpcError(Arc::new(error))
     }
 }
 
 #[derive(Debug)]
 pub enum Command {
     StreamLive {
-        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
-        response: oneshot::Sender<Result<(), Error>>,
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
+        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     StreamHistorical {
-        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     StreamFrom {
-        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
         start_height: BlockNumberOrTag,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     Unsubscribe {
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     GetStatus {
         response: oneshot::Sender<ServiceStatus>,
     },
     Shutdown {
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
 }
 
@@ -309,7 +309,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     /// # Errors
     ///
     /// Returns an error if the subscription service fails to start.
-    pub fn run(&self) -> Result<BlockRangeScannerClient, Error> {
+    pub fn run(&self) -> Result<BlockRangeScannerClient, BlockRangeScannerError> {
         let (service, cmd_tx) = Service::new(self.config.clone(), self.provider.clone());
         tokio::spawn(async move {
             service.run().await;
@@ -321,7 +321,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
 struct Service<N: Network> {
     config: Config,
     provider: RootProvider<N>,
-    subscriber: Option<mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>>,
+    subscriber: Option<mpsc::Sender<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>>,
     current: BlockHashAndNumber,
     websocket_connected: bool,
     processed_count: u64,
@@ -371,7 +371,7 @@ impl<N: Network> Service<N> {
         info!("Subscription service stopped");
     }
 
-    async fn handle_command(&mut self, command: Command) -> Result<(), Error> {
+    async fn handle_command(&mut self, command: Command) -> Result<(), BlockRangeScannerError> {
         match command {
             Command::StreamLive { sender, response } => {
                 self.ensure_no_subscriber()?;
@@ -417,12 +417,12 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn handle_live(&mut self) -> Result<(), Error> {
+    async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
         let provider = self.provider.clone();
         let start = self.provider.get_block_number().await?;
 
         let Some(sender) = self.subscriber.clone() else {
-            return Err(Error::ServiceShutdown);
+            return Err(BlockRangeScannerError::ServiceShutdown);
         };
 
         let reorg_rewind = self.config.reorg_rewind_depth;
@@ -437,19 +437,20 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-    ) -> Result<(), Error> {
-        let start_block =
-            self.provider.get_block_by_number(start_height).await?.ok_or(
-                Error::HistoricalSyncError(format!("Start block {start_height:?} not found")),
-            )?;
-        let end_block = self
-            .provider
-            .get_block_by_number(end_height)
-            .await?
-            .ok_or(Error::HistoricalSyncError(format!("End block {end_height:?} not found")))?;
+    ) -> Result<(), BlockRangeScannerError> {
+        let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
+            BlockRangeScannerError::HistoricalSyncError(format!(
+                "Start block {start_height:?} not found"
+            )),
+        )?;
+        let end_block = self.provider.get_block_by_number(end_height).await?.ok_or(
+            BlockRangeScannerError::HistoricalSyncError(format!(
+                "End block {end_height:?} not found"
+            )),
+        )?;
 
         if end_block.header().number() < start_block.header().number() {
-            return Err(Error::HistoricalSyncError(format!(
+            return Err(BlockRangeScannerError::HistoricalSyncError(format!(
                 "End block {end_height:?} is lower than start block {start_height:?}"
             )));
         }
@@ -469,19 +470,21 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn handle_sync(&mut self, start_height: BlockNumberOrTag) -> Result<(), Error> {
+    async fn handle_sync(
+        &mut self,
+        start_height: BlockNumberOrTag,
+    ) -> Result<(), BlockRangeScannerError> {
         // Step 1:
         // Fetches the starting block and end block for historical sync
-        let start_block =
-            self.provider.get_block_by_number(start_height).await?.ok_or(
-                Error::HistoricalSyncError(format!("Start block {start_height:?} not found")),
-            )?;
+        let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
+            BlockRangeScannerError::HistoricalSyncError(format!(
+                "Start block {start_height:?} not found"
+            )),
+        )?;
 
-        let end_block = self
-            .provider
-            .get_block_by_number(BlockNumberOrTag::Latest)
-            .await?
-            .ok_or(Error::HistoricalSyncError("Latest block not found".to_string()))?;
+        let end_block = self.provider.get_block_by_number(BlockNumberOrTag::Latest).await?.ok_or(
+            BlockRangeScannerError::HistoricalSyncError("Latest block not found".to_string()),
+        )?;
 
         info!(
             start_block = start_block.header().number(),
@@ -492,7 +495,9 @@ impl<N: Network> Service<N> {
         // Step 2: Setup the live streaming buffer
         // This channel will accumulate while historical sync is running
         let (live_block_buffer_sender, live_block_buffer_receiver) =
-            mpsc::channel::<Result<RangeInclusive<BlockNumber>, Error>>(MAX_BUFFERED_MESSAGES);
+            mpsc::channel::<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>(
+                MAX_BUFFERED_MESSAGES,
+            );
 
         let provider = self.provider.clone();
 
@@ -514,11 +519,11 @@ impl<N: Network> Service<N> {
         if let Err(e) = self.sync_historical_data(start_block, end_block).await {
             warn!("aborting live_subscription_task");
             live_subscription_task.abort();
-            return Err(Error::HistoricalSyncError(e.to_string()));
+            return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
         }
 
         let Some(sender) = self.subscriber.clone() else {
-            return Err(Error::ServiceShutdown);
+            return Err(BlockRangeScannerError::ServiceShutdown);
         };
         // Step 5:
         // Spawn the buffer processor task
@@ -539,7 +544,7 @@ impl<N: Network> Service<N> {
         &mut self,
         start: N::BlockResponse,
         end: N::BlockResponse,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BlockRangeScannerError> {
         let mut batch_count = 0;
 
         self.current = BlockHashAndNumber::from_header::<N>(start.header());
@@ -578,7 +583,7 @@ impl<N: Network> Service<N> {
     async fn stream_live_blocks<P: Provider<N>>(
         mut expected_next_block: BlockNumber,
         provider: P,
-        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
         _reorg_rewind_depth: u64,
     ) {
         match Self::get_block_subscription(&provider).await {
@@ -593,7 +598,7 @@ impl<N: Network> Service<N> {
 
                     if incoming_block_num < expected_next_block {
                         warn!("Reorg detected: sending forked range");
-                        if sender.send(Err(Error::ReorgDetected)).await.is_err() {
+                        if sender.send(Err(BlockRangeScannerError::ReorgDetected)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
                         }
@@ -619,8 +624,8 @@ impl<N: Network> Service<N> {
     }
 
     async fn process_live_block_buffer(
-        mut buffer_rx: mpsc::Receiver<Result<RangeInclusive<BlockNumber>, Error>>,
-        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        mut buffer_rx: mpsc::Receiver<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
+        sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
         cutoff: BlockNumber,
     ) {
         let mut processed = 0;
@@ -662,7 +667,7 @@ impl<N: Network> Service<N> {
         info!(processed = processed, discarded = discarded, "Processed buffered messages");
     }
 
-    async fn ensure_current_not_reorged(&mut self) -> Result<(), Error> {
+    async fn ensure_current_not_reorged(&mut self) -> Result<(), BlockRangeScannerError> {
         let current_block = self.provider.get_block_by_hash(self.current.hash).await?;
         if current_block.is_some() {
             return Ok(());
@@ -671,7 +676,7 @@ impl<N: Network> Service<N> {
         self.rewind_on_reorg_detected().await
     }
 
-    async fn rewind_on_reorg_detected(&mut self) -> Result<(), Error> {
+    async fn rewind_on_reorg_detected(&mut self) -> Result<(), BlockRangeScannerError> {
         let mut new_current_height =
             self.current.number.saturating_sub(self.config.reorg_rewind_depth);
 
@@ -685,7 +690,7 @@ impl<N: Network> Service<N> {
             .get_block_by_number(new_current_height.into())
             .await?
             .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
-            .ok_or(Error::HistoricalSyncError(format!(
+            .ok_or(BlockRangeScannerError::HistoricalSyncError(format!(
                 "Block {new_current_height} not found during rewind",
             )))?;
 
@@ -702,14 +707,19 @@ impl<N: Network> Service<N> {
 
     async fn get_block_subscription(
         provider: &impl Provider<N>,
-    ) -> Result<Subscription<N::HeaderResponse>, Error> {
-        let ws_stream =
-            provider.subscribe_blocks().await.map_err(|_| Error::WebSocketConnectionFailed(1))?;
+    ) -> Result<Subscription<N::HeaderResponse>, BlockRangeScannerError> {
+        let ws_stream = provider
+            .subscribe_blocks()
+            .await
+            .map_err(|_| BlockRangeScannerError::WebSocketConnectionFailed(1))?;
 
         Ok(ws_stream)
     }
 
-    async fn send_to_subscriber(&mut self, result: Result<RangeInclusive<BlockNumber>, Error>) {
+    async fn send_to_subscriber(
+        &mut self,
+        result: Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>,
+    ) {
         if let Some(ref sender) = self.subscriber {
             if sender.send(result).await.is_err() {
                 self.subscriber = None;
@@ -737,9 +747,9 @@ impl<N: Network> Service<N> {
         }
     }
 
-    fn ensure_no_subscriber(&self) -> Result<(), Error> {
+    fn ensure_no_subscriber(&self) -> Result<(), BlockRangeScannerError> {
         if self.subscriber.is_some() {
-            return Err(Error::MultipleSubscribers);
+            return Err(BlockRangeScannerError::MultipleSubscribers);
         }
         Ok(())
     }
@@ -764,18 +774,24 @@ impl BlockRangeScannerClient {
     ///
     /// # Errors
     ///
-    /// * `Error::ServiceShutdown` - if the service is already shutting down.
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_live(
         &self,
-    ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
+    ) -> Result<
+        ReceiverStream<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
+        BlockRangeScannerError,
+    > {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamLive { sender: blocks_sender, response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| Error::ServiceShutdown)??;
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
@@ -789,12 +805,15 @@ impl BlockRangeScannerClient {
     ///
     /// # Errors
     ///
-    /// * `Error::ServiceShutdown` - if the service is already shutting down.
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_historical(
         &self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-    ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
+    ) -> Result<
+        ReceiverStream<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
+        BlockRangeScannerError,
+    > {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -805,9 +824,12 @@ impl BlockRangeScannerClient {
             response: response_tx,
         };
 
-        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| Error::ServiceShutdown)??;
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
@@ -820,20 +842,26 @@ impl BlockRangeScannerClient {
     ///
     /// # Errors
     ///
-    /// * `Error::ServiceShutdown` - if the service is already shutting down.
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_from(
         &self,
         start_height: BlockNumberOrTag,
-    ) -> Result<ReceiverStream<Result<RangeInclusive<BlockNumber>, Error>>, Error> {
+    ) -> Result<
+        ReceiverStream<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>>,
+        BlockRangeScannerError,
+    > {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command =
             Command::StreamFrom { sender: blocks_sender, start_height, response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| Error::ServiceShutdown)??;
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
@@ -842,45 +870,54 @@ impl BlockRangeScannerClient {
     ///
     /// # Errors
     ///
-    /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn unsubscribe(&self) -> Result<(), Error> {
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn unsubscribe(&self) -> Result<(), BlockRangeScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Unsubscribe { response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| Error::ServiceShutdown)?
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)?
     }
 
     /// Returns the current status of the subscription service.
     ///
     /// # Errors
     ///
-    /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn get_status(&self) -> Result<ServiceStatus, Error> {
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn get_status(&self) -> Result<ServiceStatus, BlockRangeScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::GetStatus { response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| Error::ServiceShutdown)
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)
     }
 
     /// Shuts down the subscription service and unsubscribes the current subscriber.
     ///
     /// # Errors
     ///
-    /// * `Error::ServiceShutdown` - if the service is already shutting down.
-    pub async fn shutdown(&self) -> Result<(), Error> {
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn shutdown(&self) -> Result<(), BlockRangeScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Shutdown { response: response_tx };
 
-        self.command_sender.send(command).await.map_err(|_| Error::ServiceShutdown)?;
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| Error::ServiceShutdown)?
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)?
     }
 }
 
@@ -1249,10 +1286,12 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
 
-        service.send_to_subscriber(Err(Error::WebSocketConnectionFailed(4))).await;
+        service.send_to_subscriber(Err(BlockRangeScannerError::WebSocketConnectionFailed(4))).await;
 
         match rx.recv().await.expect("subscriber should stay open") {
-            Err(Error::WebSocketConnectionFailed(attempts)) => assert_eq!(attempts, 4),
+            Err(BlockRangeScannerError::WebSocketConnectionFailed(attempts)) => {
+                assert_eq!(attempts, 4)
+            }
             other => panic!("unexpected message: {other:?}"),
         }
 
