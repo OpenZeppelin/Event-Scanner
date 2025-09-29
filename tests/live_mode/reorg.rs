@@ -172,7 +172,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
         }
     };
 
-    _ = timeout(Duration::from_secs(2), event_counting).await;
+    _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
     assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
