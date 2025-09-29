@@ -33,15 +33,9 @@ pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
 #[derive(Error, Debug, Clone)]
 pub enum EventScannerError {
     #[error("Block range scanner error: {0}")]
-    BlockRangeScanner(BlockRangeScannerError),
+    BlockRangeScanner(#[from] BlockRangeScannerError),
     #[error("Provider error: {0}")]
     Provider(Arc<RpcError<TransportErrorKind>>),
-}
-
-impl From<BlockRangeScannerError> for EventScannerError {
-    fn from(e: BlockRangeScannerError) -> Self {
-        EventScannerError::BlockRangeScanner(e)
-    }
 }
 
 impl From<RpcError<TransportErrorKind>> for EventScannerError {

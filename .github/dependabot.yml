@@ -3,11 +3,16 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+    groups:
+      actions-deps:
+        patterns:
+          - "*"
+
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
     ignore:
       - dependency-name: "*"
         update-types:
