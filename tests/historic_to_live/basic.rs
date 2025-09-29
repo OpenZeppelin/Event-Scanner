@@ -51,24 +51,13 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
         let mut expected_new_count = 1;
-        while let Some(res) = stream.next().await {
-            match res {
-                Ok(logs) => {
-                    event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        while let Some(Ok(logs)) = stream.next().await {
+            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
-                    for log in logs {
-                        let TestCounter::CountIncreased { newCount } =
-                            log.log_decode().unwrap().inner.data;
-                        assert_eq!(newCount, expected_new_count);
-                        expected_new_count += 1;
-                    }
-                }
-                Err(e) => match e.as_ref() {
-                    event_scanner::block_range_scanner::Error::Eof => {}
-                    _ => {
-                        break;
-                    }
-                },
+            for log in logs {
+                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
+                assert_eq!(newCount, expected_new_count);
+                expected_new_count += 1;
             }
         }
     };
