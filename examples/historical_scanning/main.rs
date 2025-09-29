@@ -4,7 +4,10 @@ use alloy::{
     eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent,
 };
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, event_scanner::{EventScanner, EventScannerMessage}};
+use event_scanner::{
+    EventFilter,
+    event_scanner::{EventScanner, EventScannerMessage},
+};
 
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
@@ -63,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
 
     while let Some(message) = stream.next().await {
         match message {
-            EventScannerMessage::Logs(logs) => {
+            EventScannerMessage::Message(logs) => {
                 for log in logs {
                     info!("Callback successfully executed with event {:?}", log.inner.data);
                 }

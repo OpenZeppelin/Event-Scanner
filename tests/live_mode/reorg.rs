@@ -12,9 +12,9 @@ use alloy::{
     eips::BlockNumberOrTag, network::Ethereum, providers::ext::AnvilApi, sol_types::SolEvent,
 };
 use event_scanner::{
-    block_range_scanner::BlockRangeScannerError,
     event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerError, EventScannerMessage},
+    event_scanner::{EventScanner, EventScannerMessage},
+    types::ScannerInfo,
 };
 
 #[tokio::test]
@@ -71,10 +71,13 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
 
+    let reorg_detected = Arc::new(Mutex::new(false));
+    let reorg_detected_clone = reorg_detected.clone();
+
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {
@@ -82,23 +85,24 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => match e {
-                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                EventScannerMessage::Error(e) => {
+                    panic!("panic with error {e}");
+                }
+                EventScannerMessage::Info(info) => {
+                    if matches!(info, ScannerInfo::ReorgDetected) {
+                        *reorg_detected_clone.lock().await = true;
                     }
-                    _ => {
-                        break;
-                    }
-                },
-                EventScannerMessage::Info(_) => {},
+                }
             }
         }
     };
 
-    _ = timeout(Duration::from_secs(2), event_counting).await;
+    let _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
     assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
+    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
@@ -151,10 +155,13 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
 
+    let reorg_detected = Arc::new(Mutex::new(false));
+    let reorg_detected_clone = reorg_detected.clone();
+
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {
@@ -162,23 +169,24 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => match e {
-                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                EventScannerMessage::Error(e) => {
+                    panic!("panic with error {e}");
+                }
+                EventScannerMessage::Info(info) => {
+                    if matches!(info, ScannerInfo::ReorgDetected) {
+                        *reorg_detected_clone.lock().await = true;
                     }
-                    _ => {
-                        break;
-                    }
-                },
-                EventScannerMessage::Info(_) => {},
+                }
             }
         }
     };
 
-    _ = timeout(Duration::from_secs(2), event_counting).await;
+    let _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
     assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
+    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
@@ -238,10 +246,13 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
 
+    let reorg_detected = Arc::new(Mutex::new(false));
+    let reorg_detected_clone = reorg_detected.clone();
+
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {
@@ -249,23 +260,24 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => match e {
-                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                EventScannerMessage::Error(e) => {
+                    panic!("panic with error {e}");
+                }
+                EventScannerMessage::Info(info) => {
+                    if matches!(info, ScannerInfo::ReorgDetected) {
+                        *reorg_detected_clone.lock().await = true;
                     }
-                    _ => {
-                        break;
-                    }
-                },
-                EventScannerMessage::Info(_) => {},
+                }
             }
         }
     };
 
-    _ = timeout(Duration::from_secs(2), event_counting).await;
+    let _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert!(final_blocks.len() == initial_events + num_new_events);
+    assert_eq!(final_blocks.len(), initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
+    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
@@ -325,10 +337,13 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
 
+    let reorg_detected = Arc::new(Mutex::new(false));
+    let reorg_detected_clone = reorg_detected.clone();
+
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {
@@ -336,23 +351,24 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => match e {
-                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                EventScannerMessage::Error(e) => {
+                    panic!("panic with error {e}");
+                }
+                EventScannerMessage::Info(info) => {
+                    if matches!(info, ScannerInfo::ReorgDetected) {
+                        *reorg_detected_clone.lock().await = true;
                     }
-                    _ => {
-                        break;
-                    }
-                },
-                EventScannerMessage::Info(_) => {},
+                }
             }
         }
     };
 
-    _ = timeout(Duration::from_secs(2), event_counting).await;
+    let _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert!(final_blocks.len() == initial_events + num_new_events);
+    assert_eq!(final_blocks.len(), initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
+    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }

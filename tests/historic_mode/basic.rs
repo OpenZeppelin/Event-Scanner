@@ -7,7 +7,10 @@ use std::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_filter::EventFilter, event_scanner::{EventScanner, EventScannerMessage}};
+use event_scanner::{
+    event_filter::EventFilter,
+    event_scanner::{EventScanner, EventScannerMessage},
+};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
@@ -54,17 +57,18 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         let mut expected_new_count = 1;
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {
-                        let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
+                        let TestCounter::CountIncreased { newCount } =
+                            log.log_decode().unwrap().inner.data;
                         assert_eq!(newCount, expected_new_count);
                         expected_new_count += 1;
                     }
                 }
                 EventScannerMessage::Error(e) => {
-                    panic!("Received error: {}", e);
+                    panic!("panicked with error: {e}");
                 }
                 EventScannerMessage::Info(_) => {
                     // Handle info if needed

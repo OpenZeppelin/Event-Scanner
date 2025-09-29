@@ -8,7 +8,10 @@ use std::{
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{event_filter::EventFilter, event_scanner::{EventScanner, EventScannerMessage}};
+use event_scanner::{
+    event_filter::EventFilter,
+    event_scanner::{EventScanner, EventScannerMessage},
+};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
@@ -45,10 +48,12 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
-                EventScannerMessage::Error(_) => {}
+                EventScannerMessage::Error(e) => {
+                    panic!("panicked with error {e}");
+                }
                 EventScannerMessage::Info(_) => {}
             }
         }
@@ -91,10 +96,12 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
-                EventScannerMessage::Error(_) => {}
+                EventScannerMessage::Error(e) => {
+                    panic!("panicked with error {e}");
+                }
                 EventScannerMessage::Info(_) => {}
             }
         }
@@ -156,19 +163,23 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = all_stream.next().await {
             match message {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     all_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
-                EventScannerMessage::Error(_) => {}
+                EventScannerMessage::Error(e) => {
+                    panic!("panicked with error {e}");
+                }
                 EventScannerMessage::Info(_) => {}
             }
         }
         while let Some(message) = specific_stream.next().await {
             match message {
-                EventScannerMessage::Logs(logs) => {
+                EventScannerMessage::Message(logs) => {
                     specific_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
-                EventScannerMessage::Error(_) => {}
+                EventScannerMessage::Error(e) => {
+                    panic!("panicked with error {e}");
+                }
                 EventScannerMessage::Info(_) => {}
             }
         }
