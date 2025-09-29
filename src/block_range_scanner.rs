@@ -7,7 +7,7 @@
 //!
 //! use alloy::transports::http::reqwest::Url;
 //! use event_scanner::block_range_scanner::{
-//!     BlockRangeScanner, BlockRangeScannerClient, BlockRangeScannerError,
+//!     BlockRangeMessage, BlockRangeScanner, BlockRangeScannerClient, BlockRangeScannerError,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -32,7 +32,7 @@
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
-//!             BlockRangeMessage::BlockRange(range) => {
+//!             BlockRangeMessage::Message(range) => {
 //!                 // process range
 //!             }
 //!             BlockRangeMessage::Error(e) => {
