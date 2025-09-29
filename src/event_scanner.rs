@@ -1,4 +1,4 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     block_range_scanner::{
@@ -7,6 +7,7 @@ use crate::{
     },
     event_filter::EventFilter,
     event_listener::EventListener,
+    types::ScannerMessage,
 };
 use alloy::{
     eips::BlockNumberOrTag,
@@ -23,18 +24,18 @@ use tokio::sync::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
-#[derive(Debug, Clone)]
-pub enum EventScannerMessage {
-    Logs(Vec<Log>),
-    Error(EventScannerError),
-    Info(EventScannerInfo),
-}
-
-#[derive(Debug, Clone)]
-pub enum EventScannerInfo {
-    ChainTipReached,
-    HistoricalSyncCompleted,
-}
+// #[derive(Debug, Clone)]
+// pub enum EventScannerMessage {
+//     Logs(Vec<Log>),
+//     Error(EventScannerError),
+//     Info(EventScannerInfo),
+// }
+//
+// #[derive(Debug, Clone)]
+// pub enum EventScannerInfo {
+//     ChainTipReached,
+//     HistoricalSyncCompleted,
+// }
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
@@ -130,6 +131,8 @@ pub struct ConnectedEventScanner<N: Network> {
     event_listeners: Vec<EventListener>,
 }
 
+pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
+
 impl<N: Network> ConnectedEventScanner<N> {
     /// Starts the scanner
     ///
@@ -150,43 +153,20 @@ impl<N: Network> ConnectedEventScanner<N> {
             client.stream_from(start_height).await?
         };
 
-        let (range_tx, _) =
-            broadcast::channel::<Result<RangeInclusive<u64>, Arc<EventScannerError>>>(1024);
+        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
 
         self.spawn_log_consumers(&range_tx);
 
         while let Some(message) = stream.next().await {
-            match message {
-                BlockRangeMessage::BlockRange(range) => {
-                    info!(?range, "processing block range");
-                    if let Err(e) = range_tx.send(Ok(range)) {
-                        error!(error = %e, "failed to send block range to broadcast channel");
-                        break;
-                    }
-                }
-                BlockRangeMessage::Error(e) => {
-                    warn!(error = %e, "block range scanner error");
-                    // Propagate the error to the range channel
-                    if let Err(send_err) =
-                        range_tx.send(Err(Arc::new(EventScannerError::BlockRangeScanner(e))))
-                    {
-                        error!(error = %send_err, "failed to send error to broadcast channel");
-                    }
-                }
-                BlockRangeMessage::Info(info) => {
-                    info!("Received info from block range scanner: {:?}", info);
-                    // Could send info messages if needed
-                }
+            if let Err(send_err) = range_tx.send(message) {
+                error!(error = %send_err, "failed to send error");
             }
         }
 
         Ok(())
     }
 
-    fn spawn_log_consumers(
-        &self,
-        range_tx: &Sender<Result<RangeInclusive<u64>, Arc<EventScannerError>>>,
-    ) {
+    fn spawn_log_consumers(&self, range_tx: &Sender<BlockRangeMessage>) {
         for listener in &self.event_listeners {
             let provider = self.block_range_scanner.provider().clone();
             let filter = listener.filter.clone();
@@ -196,7 +176,7 @@ impl<N: Network> ConnectedEventScanner<N> {
             tokio::spawn(async move {
                 loop {
                     match sub.recv().await {
-                        Ok(Ok(range)) => {
+                        Ok(BlockRangeMessage::Message(range)) => {
                             let (from_block, to_block) = (*range.start(), *range.end());
 
                             let mut log_filter =
@@ -232,7 +212,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     );
 
                                     if let Err(e) =
-                                        sender.send(EventScannerMessage::Logs(logs)).await
+                                        sender.send(EventScannerMessage::Message(logs)).await
                                     {
                                         error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
                                     }
@@ -258,16 +238,22 @@ impl<N: Network> ConnectedEventScanner<N> {
                                 }
                             }
                         }
-                        Ok(Err(e)) => {
-                            error!("Received error from block range scanner: {}", e);
-                            // send error back to event stream
-                            if let Err(send_err) =
-                                sender.send(EventScannerMessage::Error((*e).clone())).await
+                        Ok(BlockRangeMessage::Error(e)) => {
+                            warn!(error = %e, "block range scanner error");
+                            // Propagate the error to the range channel
+                            if let Err(send_err) = sender
+                                .send(EventScannerMessage::Error(
+                                    EventScannerError::BlockRangeScanner(e),
+                                ))
+                                .await
                             {
-                                error!(
-                                    error = %send_err,
-                                    "Failed to forward block range scanner error to event listener"
-                                );
+                                error!(error = %send_err, "failed to send error to broadcast channel");
+                            }
+                        }
+                        Ok(BlockRangeMessage::Info(info)) => {
+                            info!("Received info from block range scanner: {:?}", info);
+                            if let Err(send_err) = range_tx.send(ScannerMessage::Info(info)) {
+                                error!(error = %send_err, "failed to send error to");
                             }
                         }
                         // TODO: What happens if the broadcast channel is closed?
