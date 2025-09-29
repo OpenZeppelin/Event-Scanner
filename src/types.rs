@@ -11,5 +11,5 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
 pub enum ScannerInfo {
     ChainTipReached,
     HistoricalSyncCompleted,
-    ReorgHandled,
+    ReorgDetected,
 }

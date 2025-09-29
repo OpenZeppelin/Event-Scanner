@@ -101,20 +101,6 @@ const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 // const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 // const STATE_SYNC_MAX_RETRIES: u64 = 12;
 
-// #[derive(Debug, Clone)]
-// pub enum BlockRangeMessage {
-//     Range(RangeInclusive<BlockNumber>),
-//     Error(BlockRangeScannerError),
-//     Info(BlockRangeInfo),
-// }
-//
-// #[derive(Debug, Clone)]
-// pub enum BlockRangeInfo {
-//     ChainTipReached,
-//     HistoricalSyncCompleted,
-//     ReorgHandled,
-// }
-
 pub type BlockRangeMessage = ScannerMessage<RangeInclusive<BlockNumber>, BlockRangeScannerError>;
 
 #[derive(Error, Debug, Clone)]
@@ -147,9 +133,6 @@ pub enum BlockRangeScannerError {
 
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
-
-    #[error("Reorg Detected")]
-    ReorgDetected,
 }
 
 impl From<reqwest::Error> for BlockRangeScannerError {
@@ -618,7 +601,7 @@ impl<N: Network> Service<N> {
                     if incoming_block_num < expected_next_block {
                         warn!("Reorg detected: sending forked range");
                         if sender
-                            .send(BlockRangeMessage::Error(BlockRangeScannerError::ReorgDetected))
+                            .send(BlockRangeMessage::Info(ScannerInfo::ReorgDetected))
                             .await
                             .is_err()
                         {

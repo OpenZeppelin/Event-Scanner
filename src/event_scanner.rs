@@ -24,22 +24,11 @@ use tokio::sync::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
-// #[derive(Debug, Clone)]
-// pub enum EventScannerMessage {
-//     Logs(Vec<Log>),
-//     Error(EventScannerError),
-//     Info(EventScannerInfo),
-// }
-//
-// #[derive(Debug, Clone)]
-// pub enum EventScannerInfo {
-//     ChainTipReached,
-//     HistoricalSyncCompleted,
-// }
-
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
 }
+
+pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
 
 #[derive(Error, Debug, Clone)]
 pub enum EventScannerError {
@@ -130,8 +119,6 @@ pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     event_listeners: Vec<EventListener>,
 }
-
-pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
 
 impl<N: Network> ConnectedEventScanner<N> {
     /// Starts the scanner
@@ -240,7 +227,6 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
                             warn!(error = %e, "block range scanner error");
-                            // Propagate the error to the range channel
                             if let Err(send_err) = sender
                                 .send(EventScannerMessage::Error(
                                     EventScannerError::BlockRangeScanner(e),
@@ -252,7 +238,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         Ok(BlockRangeMessage::Info(info)) => {
                             info!("Received info from block range scanner: {:?}", info);
-                            if let Err(send_err) = range_tx.send(ScannerMessage::Info(info)) {
+                            if let Err(send_err) = sender.send(ScannerMessage::Info(info)).await {
                                 error!(error = %send_err, "failed to send error to");
                             }
                         }
