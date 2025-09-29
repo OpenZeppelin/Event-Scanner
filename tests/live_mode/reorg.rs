@@ -11,7 +11,11 @@ use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{
     eips::BlockNumberOrTag, network::Ethereum, providers::ext::AnvilApi, sol_types::SolEvent,
 };
-use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
+use event_scanner::{
+    block_range_scanner::BlockRangeScannerError,
+    event_filter::EventFilter,
+    event_scanner::{EventScanner, EventScannerError},
+};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
@@ -66,13 +70,25 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
+
     let event_counting = async move {
-        while let Some(Ok(logs)) = stream.next().await {
-            let mut guard = event_block_count_clone.lock().await;
-            for log in logs {
-                if let Some(n) = log.block_number {
-                    guard.push(n);
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(logs) => {
+                    let mut guard = event_block_count_clone.lock().await;
+                    for log in logs {
+                        if let Some(n) = log.block_number {
+                            guard.push(n);
+                        }
+                    }
                 }
+                Err(e) => match e.as_ref() {
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
+                    _ => {
+                        break;
+                    }
+                },
             }
         }
     };
@@ -133,13 +149,25 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
+
     let event_counting = async move {
-        while let Some(Ok(logs)) = stream.next().await {
-            let mut guard = event_block_count_clone.lock().await;
-            for log in logs {
-                if let Some(n) = log.block_number {
-                    guard.push(n);
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(logs) => {
+                    let mut guard = event_block_count_clone.lock().await;
+                    for log in logs {
+                        if let Some(n) = log.block_number {
+                            guard.push(n);
+                        }
+                    }
                 }
+                Err(e) => match e.as_ref() {
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
+                    _ => {
+                        break;
+                    }
+                },
             }
         }
     };
@@ -207,13 +235,25 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
 
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
+
     let event_counting = async move {
-        while let Some(Ok(logs)) = stream.next().await {
-            let mut guard = event_block_count_clone.lock().await;
-            for log in logs {
-                if let Some(n) = log.block_number {
-                    guard.push(n);
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(logs) => {
+                    let mut guard = event_block_count_clone.lock().await;
+                    for log in logs {
+                        if let Some(n) = log.block_number {
+                            guard.push(n);
+                        }
+                    }
                 }
+                Err(e) => match e.as_ref() {
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
+                    _ => {
+                        break;
+                    }
+                },
             }
         }
     };
@@ -282,12 +322,23 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
     let event_counting = async move {
-        while let Some(Ok(logs)) = stream.next().await {
-            let mut guard = event_block_count_clone.lock().await;
-            for log in logs {
-                if let Some(n) = log.block_number {
-                    guard.push(n);
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(logs) => {
+                    let mut guard = event_block_count_clone.lock().await;
+                    for log in logs {
+                        if let Some(n) = log.block_number {
+                            guard.push(n);
+                        }
+                    }
                 }
+                Err(e) => match e.as_ref() {
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
+                    _ => {
+                        break;
+                    }
+                },
             }
         }
     };
