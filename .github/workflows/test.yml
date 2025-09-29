@@ -42,7 +42,7 @@ jobs:
 
       - name: Install cargo-nextest
         if: steps.cache-cargo-nextest.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@71d339ebf191fcbc3d49cd04b9484a4261f29975 # v2.62.9
+        uses: taiki-e/install-action@5ab30948b991e8d6aa5a6c1e33c6aea130c6de65 # v2.62.12
         with:
           tool: cargo-nextest
 
