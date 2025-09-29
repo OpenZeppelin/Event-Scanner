@@ -127,6 +127,9 @@ pub enum Error {
 
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
+
+    #[error("Reorg Detected")]
+    ReorgDetected,
 }
 
 #[derive(Debug)]
@@ -404,8 +407,9 @@ impl<N: Network> Service<N> {
             return Err(Error::ServiceShutdown);
         };
 
+        let reorg_rewind = self.config.reorg_rewind_depth;
         tokio::spawn(async move {
-            Self::stream_live_blocks(start, provider, sender).await;
+            Self::stream_live_blocks(start, provider, sender, reorg_rewind).await;
         });
 
         Ok(())
@@ -478,9 +482,12 @@ impl<N: Network> Service<N> {
         // Any block > cutoff will come from the live stream
         let cutoff = end_block.header().number();
 
+        let reorg_rewind = self.config.reorg_rewind_depth;
+
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
-            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender).await;
+            Self::stream_live_blocks(cutoff + 1, provider, live_block_buffer_sender, reorg_rewind)
+                .await;
         });
 
         // Step 4: Perform historical synchronization
@@ -551,26 +558,38 @@ impl<N: Network> Service<N> {
     }
 
     async fn stream_live_blocks<P: Provider<N>>(
-        mut current: BlockNumber,
+        mut expected_next_block: BlockNumber,
         provider: P,
         sender: mpsc::Sender<Result<RangeInclusive<BlockNumber>, Error>>,
+        _reorg_rewind_depth: u64,
     ) {
         match Self::get_block_subscription(&provider).await {
             Ok(ws_stream) => {
                 info!("WebSocket connected for live blocks");
 
-                let cur = current;
+                let cur = expected_next_block;
                 let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cur);
-                while let Some(header_resp) = stream.next().await {
-                    info!(block_number = header_resp.number(), "Received block header");
+                while let Some(incoming_block) = stream.next().await {
+                    let incoming_block_num = incoming_block.number();
+                    info!(block_number = incoming_block_num, "Received block header");
 
-                    if sender.send(Ok(current..=header_resp.number())).await.is_err() {
+                    if incoming_block_num < expected_next_block {
+                        warn!("Reorg detected: sending forked range");
+                        if sender.send(Err(Error::ReorgDetected)).await.is_err() {
+                            warn!("Downstream channel closed, stopping live blocks task");
+                            return;
+                        }
+
+                        // resets cursor to incoming block num
+                        expected_next_block = incoming_block_num;
+                    }
+
+                    if sender.send(Ok(expected_next_block..=incoming_block_num)).await.is_err() {
                         warn!("Downstream channel closed, stopping live blocks task");
                         return;
                     }
 
-                    // next block will be processed in the next batch
-                    current = header_resp.number() + 1;
+                    expected_next_block = incoming_block_num + 1;
                 }
             }
             Err(e) => {
