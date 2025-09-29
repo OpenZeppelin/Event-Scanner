@@ -23,23 +23,16 @@ use tokio::sync::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
-/// Messages sent by the EventScanner
 #[derive(Debug, Clone)]
 pub enum EventScannerMessage {
-    /// A batch of logs found in a block range
     Logs(Vec<Log>),
-    /// An error occurred during scanning
     Error(EventScannerError),
-    /// Informational message about scanner state
     Info(EventScannerInfo),
 }
 
-/// Informational messages from the EventScanner
 #[derive(Debug, Clone)]
 pub enum EventScannerInfo {
-    /// The scanner has reached the current chain tip
     ChainTipReached,
-    /// Historical sync has completed
     HistoricalSyncCompleted,
 }
 
@@ -174,7 +167,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                 BlockRangeMessage::Error(e) => {
                     warn!(error = %e, "block range scanner error");
                     // Propagate the error to the range channel
-                    if let Err(send_err) = range_tx.send(Err(Arc::new(EventScannerError::BlockRangeScanner(e)))) {
+                    if let Err(send_err) =
+                        range_tx.send(Err(Arc::new(EventScannerError::BlockRangeScanner(e))))
+                    {
                         error!(error = %send_err, "failed to send error to broadcast channel");
                     }
                 }
@@ -236,7 +231,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                                         "found logs for event in block range"
                                     );
 
-                                    if let Err(e) = sender.send(EventScannerMessage::Logs(logs)).await {
+                                    if let Err(e) =
+                                        sender.send(EventScannerMessage::Logs(logs)).await
+                                    {
                                         error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
                                     }
                                 }
@@ -250,8 +247,11 @@ impl<N: Network> ConnectedEventScanner<N> {
                                         "failed to get logs for block range"
                                     );
 
-                                    if let Err(send_err) =
-                                        sender.send(EventScannerMessage::Error(EventScannerError::from(e))).await
+                                    if let Err(send_err) = sender
+                                        .send(EventScannerMessage::Error(EventScannerError::from(
+                                            e,
+                                        )))
+                                        .await
                                     {
                                         error!(event = %event_display, error = %send_err, "failed to enqueue error for processing");
                                     }
@@ -261,7 +261,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                         Ok(Err(e)) => {
                             error!("Received error from block range scanner: {}", e);
                             // send error back to event stream
-                            if let Err(send_err) = sender.send(EventScannerMessage::Error((*e).clone())).await {
+                            if let Err(send_err) =
+                                sender.send(EventScannerMessage::Error((*e).clone())).await
+                            {
                                 error!(
                                     error = %send_err,
                                     "Failed to forward block range scanner error to event listener"

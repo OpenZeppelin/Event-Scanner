@@ -1040,11 +1040,11 @@ mod tests {
         assert_eq!(service.processed_count, 1);
         assert!(service.subscriber.is_some());
 
-        let received = rx.recv().await.expect("range received");
-        match received {
-            BlockRangeMessage::BlockRange(range) => assert_eq!(range, expected_range),
-            _ => panic!("Unexpected message type"),
-        }
+        let BlockRangeMessage::BlockRange(received) = rx.recv().await.expect("range received")
+        else {
+            panic!("expected BlockRange message")
+        };
+        assert_eq!(received, expected_range);
 
         Ok(())
     }
@@ -1104,8 +1104,8 @@ mod tests {
 
         let mut block_range_start = 0;
 
-        while let Some(message) = receiver.next().await {
-            match message {
+        while let Some(result) = receiver.next().await {
+            match result {
                 BlockRangeMessage::BlockRange(range) => {
                     info!("Received block range: [{range:?}]");
                     if block_range_start == 0 {
@@ -1116,11 +1116,9 @@ mod tests {
                     assert!(*range.end() >= *range.start());
                     block_range_start = *range.end() + 1;
                 }
+                BlockRangeMessage::Info(_) => {}
                 BlockRangeMessage::Error(e) => {
                     panic!("Received error from subscription: {e}");
-                }
-                BlockRangeMessage::Info(_) => {
-                    // Handle info messages if needed
                 }
             }
         }
@@ -1166,20 +1164,23 @@ mod tests {
     #[tokio::test]
     async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
         let cutoff = 50;
-        let (buffer_tx, buffer_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::BlockRange(51..=55)).await.unwrap();
         buffer_tx.send(BlockRangeMessage::BlockRange(55..=60)).await.unwrap();
         buffer_tx.send(BlockRangeMessage::BlockRange(60..=70)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(message) = out_rx.recv().await {
-            match message {
-                BlockRangeMessage::BlockRange(range) => forwarded.push(range),
-                _ => panic!("Unexpected message type"),
+        while let Some(result) = out_rx.recv().await {
+            match result {
+                BlockRangeMessage::BlockRange(range) => {
+                    forwarded.push(range);
+                }
+                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Error(_) => break,
             }
         }
 
@@ -1192,7 +1193,7 @@ mod tests {
     async fn ranges_entirely_before_cutoff_are_discarded() -> anyhow::Result<()> {
         let cutoff = 100;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::BlockRange(40..=50)).await.unwrap();
         buffer_tx.send(BlockRangeMessage::BlockRange(50..=60)).await.unwrap();
         buffer_tx.send(BlockRangeMessage::BlockRange(60..=70)).await.unwrap();
@@ -1202,10 +1203,13 @@ mod tests {
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(message) = out_rx.recv().await {
-            match message {
-                BlockRangeMessage::BlockRange(range) => forwarded.push(range),
-                _ => panic!("Unexpected message type"),
+        while let Some(result) = out_rx.recv().await {
+            match result {
+                BlockRangeMessage::BlockRange(range) => {
+                    forwarded.push(range);
+                }
+                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Error(_) => break,
             }
         }
 
@@ -1215,28 +1219,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cutoff_at_zero_handles_all_ranges() -> anyhow::Result<()> {
-        let cutoff = 0;
+    async fn ranges_overlapping_cutoff_are_trimmed() -> anyhow::Result<()> {
+        let cutoff = 75;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel::<BlockRangeMessage>(8);
-        buffer_tx.send(BlockRangeMessage::BlockRange(0..=5)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::BlockRange(5..=10)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::BlockRange(10..=25)).await.unwrap();
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(BlockRangeMessage::BlockRange(70..=80)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::BlockRange(60..=80)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::BlockRange(74..=76)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(message) = out_rx.recv().await {
-            match message {
-                BlockRangeMessage::BlockRange(range) => forwarded.push(range),
-                _ => panic!("Unexpected message type"),
+        while let Some(result) = out_rx.recv().await {
+            match result {
+                BlockRangeMessage::BlockRange(range) => {
+                    forwarded.push(range);
+                }
+                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Error(_) => break,
             }
         }
 
-        // All ranges should be forwarded since they're all >= 0
-        assert_eq!(forwarded, vec![0..=5, 5..=10, 10..=25]);
+        // All ranges should be trimmed to start at cutoff (75)
+        assert_eq!(forwarded, vec![75..=80, 75..=80, 75..=76]);
         Ok(())
     }
 
@@ -1244,7 +1251,7 @@ mod tests {
     async fn mixed_ranges_are_handled_correctly() -> anyhow::Result<()> {
         let cutoff = 50;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::BlockRange(30..=45)).await.unwrap(); // Before cutoff: discard
         buffer_tx.send(BlockRangeMessage::BlockRange(45..=55)).await.unwrap(); // Overlaps: trim to 50..=55
         buffer_tx.send(BlockRangeMessage::BlockRange(55..=65)).await.unwrap(); // After cutoff: forward as-is
@@ -1253,14 +1260,17 @@ mod tests {
         buffer_tx.send(BlockRangeMessage::BlockRange(51..=100)).await.unwrap(); // After cutoff: forward as-is
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(message) = out_rx.recv().await {
-            match message {
-                BlockRangeMessage::BlockRange(range) => forwarded.push(range),
-                _ => panic!("Unexpected message type"),
+        while let Some(result) = out_rx.recv().await {
+            match result {
+                BlockRangeMessage::BlockRange(range) => {
+                    forwarded.push(range);
+                }
+                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Error(_) => break,
             }
         }
 
@@ -1272,21 +1282,24 @@ mod tests {
     async fn edge_case_range_exactly_at_cutoff() -> anyhow::Result<()> {
         let cutoff = 100;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::BlockRange(99..=99)).await.unwrap(); // Just before: discard
         buffer_tx.send(BlockRangeMessage::BlockRange(100..=100)).await.unwrap(); // Exactly at: forward
         buffer_tx.send(BlockRangeMessage::BlockRange(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
         buffer_tx.send(BlockRangeMessage::BlockRange(100..=101)).await.unwrap(); // Starts at cutoff: forward
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(message) = out_rx.recv().await {
-            match message {
-                BlockRangeMessage::BlockRange(range) => forwarded.push(range),
-                _ => panic!("Unexpected message type"),
+        while let Some(result) = out_rx.recv().await {
+            match result {
+                BlockRangeMessage::BlockRange(range) => {
+                    forwarded.push(range);
+                }
+                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Error(_) => break,
             }
         }
 
@@ -1296,28 +1309,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ranges_overlapping_cutoff_are_trimmed() -> anyhow::Result<()> {
-        let cutoff = 75;
+    async fn cutoff_at_zero_handles_all_ranges() -> anyhow::Result<()> {
+        let cutoff = 0;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel::<BlockRangeMessage>(8);
-        buffer_tx.send(BlockRangeMessage::BlockRange(70..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::BlockRange(60..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::BlockRange(74..=76)).await.unwrap();
+        let (buffer_tx, buffer_rx) = mpsc::channel(8);
+        buffer_tx.send(BlockRangeMessage::BlockRange(0..=5)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::BlockRange(5..=10)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::BlockRange(10..=25)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel::<BlockRangeMessage>(8);
+        let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(message) = out_rx.recv().await {
-            match message {
-                BlockRangeMessage::BlockRange(range) => forwarded.push(range),
-                _ => panic!("Unexpected message type"),
+        while let Some(result) = out_rx.recv().await {
+            match result {
+                BlockRangeMessage::BlockRange(range) => {
+                    forwarded.push(range);
+                }
+                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Error(_) => break,
             }
         }
 
-        // All ranges should be trimmed to start at cutoff (75)
-        assert_eq!(forwarded, vec![75..=80, 75..=80, 75..=76]);
+        // All ranges should be forwarded since they're all >= 0
+        assert_eq!(forwarded, vec![0..=5, 5..=10, 10..=25]);
         Ok(())
     }
 
