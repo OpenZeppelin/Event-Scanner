@@ -440,7 +440,9 @@ impl<N: Network> Service<N> {
 
         self.sync_historical_data(start_block, end_block).await?;
 
-        info!("Successfully synced historical data");
+        _ = self.subscriber.take();
+
+        info!("Successfully synced historical data, closing the stream");
 
         Ok(())
     }
@@ -543,9 +545,7 @@ impl<N: Network> Service<N> {
             }
         }
 
-        info!(batch_count = batch_count, "Historical sync completed, closing the stream");
-
-        _ = self.subscriber.take();
+        info!(batch_count = batch_count, "Historical sync completed");
 
         Ok(())
     }
