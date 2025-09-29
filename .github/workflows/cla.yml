@@ -6,14 +6,15 @@ on:
     types: [opened, closed, synchronize]
 
 permissions:
-  actions: write
-  contents: write 
-  pull-requests: write
-  statuses: write
+  contents: read
 
 jobs:
   CLAAssistant:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: write
+      statuses: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
