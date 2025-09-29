@@ -128,10 +128,7 @@ pub enum Error {
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
 
-    #[error("End of block batch")]
-    Eof,
-
-    #[error("Reorg detected")]
+    #[error("Reorg Detected")]
     ReorgDetected,
 }
 
@@ -465,7 +462,9 @@ impl<N: Network> Service<N> {
 
         self.sync_historical_data(start_block, end_block).await?;
 
-        info!("Successfully synced historical data");
+        _ = self.subscriber.take();
+
+        info!("Successfully synced historical data, closing the stream");
 
         Ok(())
     }
@@ -573,12 +572,6 @@ impl<N: Network> Service<N> {
 
         info!(batch_count = batch_count, "Historical sync completed");
 
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
-        {
-            warn!("Subscriber channel closed, cleaning up");
-        }
-
         Ok(())
     }
 
@@ -599,14 +592,11 @@ impl<N: Network> Service<N> {
                     info!(block_number = incoming_block_num, "Received block header");
 
                     if incoming_block_num < expected_next_block {
+                        warn!("Reorg detected: sending forked range");
                         if sender.send(Err(Error::ReorgDetected)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
                         }
-                        warn!("Reorg detected: sending forked range");
-                        // TODO: should we send the incoming block range or incoming block num -
-                        // reorg depth? The incoming block should be the
-                        // latest block from the reorg point so no real need
 
                         // resets cursor to incoming block num
                         expected_next_block = incoming_block_num;
