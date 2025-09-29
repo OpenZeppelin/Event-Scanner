@@ -8,7 +8,10 @@ use std::{
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, rpc::types::Log, sol_types::SolEvent};
-use event_scanner::{block_range_scanner, event_filter::EventFilter, event_scanner::EventScanner};
+use event_scanner::{
+    event_filter::EventFilter,
+    event_scanner::{EventScanner, EventScannerError},
+};
 use tokio::time::timeout;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
@@ -91,7 +94,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     }
 
     let make_assertion =
-        async |stream: ReceiverStream<Result<Vec<Log>, Arc<block_range_scanner::Error>>>,
+        async |stream: ReceiverStream<Result<Vec<Log>, Arc<EventScannerError>>>,
                expected_events| {
             let mut stream = stream.take(expected_events);
 

@@ -11,7 +11,11 @@ use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{
     eips::BlockNumberOrTag, network::Ethereum, providers::ext::AnvilApi, sol_types::SolEvent,
 };
-use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
+use event_scanner::{
+    block_range_scanner::BlockRangeScannerError,
+    event_filter::EventFilter,
+    event_scanner::{EventScanner, EventScannerError},
+};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
@@ -79,7 +83,8 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => match e.as_ref() {
-                    event_scanner::block_range_scanner::Error::ReorgDetected => {}
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
                     _ => {
                         break;
                     }
@@ -157,7 +162,8 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => match e.as_ref() {
-                    event_scanner::block_range_scanner::Error::ReorgDetected => {}
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
                     _ => {
                         break;
                     }
@@ -242,7 +248,8 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => match e.as_ref() {
-                    event_scanner::block_range_scanner::Error::ReorgDetected => {}
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
                     _ => {
                         break;
                     }
@@ -326,7 +333,8 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => match e.as_ref() {
-                    event_scanner::block_range_scanner::Error::ReorgDetected => {}
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
                     _ => {
                         break;
                     }

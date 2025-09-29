@@ -1,4 +1,5 @@
 use alloy::rpc::types::anvil::{ReorgOptions, TransactionData};
+use event_scanner::event_scanner::EventScannerError;
 use std::{sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
@@ -9,6 +10,8 @@ use alloy::{
     eips::BlockNumberOrTag, network::Ethereum, providers::ext::AnvilApi, sol_types::SolEvent,
 };
 use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
+
+use event_scanner::block_range_scanner::BlockRangeScannerError;
 
 #[tokio::test]
 async fn reorg_error_propagation_to_event_stream() -> anyhow::Result<()> {
@@ -46,7 +49,10 @@ async fn reorg_error_propagation_to_event_stream() -> anyhow::Result<()> {
             match res {
                 Ok(_) => {}
                 Err(e) => {
-                    if let event_scanner::block_range_scanner::Error::ReorgDetected = e.as_ref() {
+                    if let EventScannerError::BlockRangeScanner(
+                        BlockRangeScannerError::ReorgDetected,
+                    ) = e.as_ref()
+                    {
                         let mut errors = reorg_errors_clone.lock().await;
                         errors.push("ReorgDetected");
                     } else {

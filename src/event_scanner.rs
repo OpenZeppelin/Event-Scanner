@@ -2,7 +2,8 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use crate::{
     block_range_scanner::{
-        self, BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES,
+        BlockRangeScanner, BlockRangeScannerError, ConnectedBlockRangeScanner,
+        MAX_BUFFERED_MESSAGES,
     },
     event_filter::EventFilter,
     event_listener::EventListener,
@@ -12,8 +13,9 @@ use alloy::{
     network::Network,
     providers::Provider,
     rpc::types::{Filter, Log},
-    transports::http::reqwest::Url,
+    transports::{RpcError, TransportErrorKind, http::reqwest::Url},
 };
+use thiserror::Error;
 use tokio::sync::{
     broadcast::{self, Sender, error::RecvError},
     mpsc,
@@ -23,6 +25,26 @@ use tracing::{error, info, warn};
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum EventScannerError {
+    #[error("Block range scanner error: {0}")]
+    BlockRangeScanner(BlockRangeScannerError),
+    #[error("Provider error: {0}")]
+    Provider(Arc<RpcError<TransportErrorKind>>),
+}
+
+impl From<BlockRangeScannerError> for EventScannerError {
+    fn from(e: BlockRangeScannerError) -> Self {
+        EventScannerError::BlockRangeScanner(e)
+    }
+}
+
+impl From<RpcError<TransportErrorKind>> for EventScannerError {
+    fn from(e: RpcError<TransportErrorKind>) -> Self {
+        EventScannerError::Provider(Arc::new(e))
+    }
 }
 
 impl Default for EventScanner {
@@ -67,10 +89,7 @@ impl EventScanner {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> Result<Client<N>, block_range_scanner::Error> {
+    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> Result<Client<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         let event_scanner =
             ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
@@ -85,7 +104,7 @@ impl EventScanner {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<Client<N>, block_range_scanner::Error> {
+    ) -> Result<Client<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
         let event_scanner =
             ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
@@ -108,7 +127,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         &self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), block_range_scanner::Error> {
+    ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let mut stream = if let Some(end_height) = end_height {
             client.stream_historical(start_height, end_height).await?
@@ -118,11 +137,8 @@ impl<N: Network> ConnectedEventScanner<N> {
             client.stream_from(start_height).await?
         };
 
-        // TODO: I think this channel should accept event scanner errors
-        // we should convert them from block range scanner errors
-        let (range_tx, _) = broadcast::channel::<
-            Result<RangeInclusive<u64>, Arc<block_range_scanner::Error>>,
-        >(1024);
+        let (range_tx, _) =
+            broadcast::channel::<Result<RangeInclusive<u64>, Arc<EventScannerError>>>(1024);
 
         self.spawn_log_consumers(&range_tx);
 
@@ -138,7 +154,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                 Err(e) => {
                     warn!(error = %e, "block range scanner error");
                     // Propagate the error to the range channel
-                    if let Err(send_err) = range_tx.send(Err(Arc::new(e))) {
+                    if let Err(send_err) = range_tx.send(Err(Arc::new(e.into()))) {
                         error!(error = %send_err, "failed to send error to broadcast channel");
                     }
                 }
@@ -150,7 +166,7 @@ impl<N: Network> ConnectedEventScanner<N> {
 
     fn spawn_log_consumers(
         &self,
-        range_tx: &Sender<Result<RangeInclusive<u64>, Arc<block_range_scanner::Error>>>,
+        range_tx: &Sender<Result<RangeInclusive<u64>, Arc<EventScannerError>>>,
     ) {
         for listener in &self.event_listeners {
             let provider = self.block_range_scanner.provider().clone();
@@ -210,14 +226,10 @@ impl<N: Network> ConnectedEventScanner<N> {
                                         "failed to get logs for block range"
                                     );
 
-                                    // TODO: Current we are sending only block range scanner errors
-                                    // by converting event scanner errors to block range scanner
-                                    // errors.
-                                    if let Err(e) = sender
-                                        .send(Err(Arc::new(block_range_scanner::Error::from(e))))
-                                        .await
+                                    if let Err(send_err) =
+                                        sender.send(Err(Arc::new(EventScannerError::from(e)))).await
                                     {
-                                        error!(event = %event_display, error = %e, "failed to enqueue error for processing");
+                                        error!(event = %event_display, error = %send_err, "failed to enqueue error for processing");
                                     }
                                 }
                             }
@@ -254,8 +266,9 @@ impl<N: Network> Client<N> {
     pub fn create_event_stream(
         &mut self,
         event_filter: EventFilter,
-    ) -> ReceiverStream<Result<Vec<Log>, Arc<block_range_scanner::Error>>> {
-        let (sender, receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+    ) -> ReceiverStream<Result<Vec<Log>, Arc<EventScannerError>>> {
+        let (sender, receiver) =
+            mpsc::channel::<Result<Vec<Log>, Arc<EventScannerError>>>(MAX_BUFFERED_MESSAGES);
 
         self.event_scanner.add_event_listener(EventListener { filter: event_filter, sender });
 
@@ -271,7 +284,7 @@ impl<N: Network> Client<N> {
         self,
         start_height: BlockNumberOrTag,
         end_height: Option<BlockNumberOrTag>,
-    ) -> Result<(), block_range_scanner::Error> {
+    ) -> Result<(), EventScannerError> {
         self.event_scanner.start(start_height, end_height).await
     }
 }
