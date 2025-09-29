@@ -13,7 +13,7 @@
 //! use tracing::{error, info};
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::BlockRangeScannerError>> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Initialize logging
 //!     tracing_subscriber::fmt::init();
 //!
