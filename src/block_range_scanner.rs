@@ -581,14 +581,11 @@ impl<N: Network> Service<N> {
                     info!(block_number = incoming_block_num, "Received block header");
 
                     if incoming_block_num < expected_next_block {
+                        warn!("Reorg detected: sending forked range");
                         if sender.send(Err(Error::ReorgDetected)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
                         }
-                        warn!("Reorg detected: sending forked range");
-                        // TODO: should we send the incoming block range or incoming block num -
-                        // reorg depth? The incoming block should be the
-                        // latest block from the reorg point so no real need
 
                         // resets cursor to incoming block num
                         expected_next_block = incoming_block_num;
