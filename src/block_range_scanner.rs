@@ -564,8 +564,8 @@ impl<N: Network> Service<N> {
 
         info!(batch_count = batch_count, "Historical sync completed");
 
-        if let Some(sender) = &self.subscriber
-            && sender.send(Err(Error::Eof)).await.is_err()
+        if let Some(sender) = &self.subscriber &&
+            sender.send(Err(Error::Eof)).await.is_err()
         {
             warn!("Subscriber channel closed, cleaning up");
         }
@@ -894,6 +894,7 @@ mod tests {
     use alloy::{
         network::Ethereum,
         primitives::{B256, keccak256},
+        providers::ProviderBuilder,
         rpc::{
             client::RpcClient,
             types::{Block as RpcBlock, Header, Transaction},
@@ -1056,6 +1057,53 @@ mod tests {
                     if block_range_start == 0 {
                         block_range_start = *range.start();
                     }
+
+                    assert_eq!(block_range_start, *range.start());
+                    assert!(*range.end() >= *range.start());
+                    block_range_start = *range.end() + 1;
+                }
+                Err(e) => {
+                    panic!("Received error from subscription: {e}");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn live_mode_respected_block_confirmations() -> anyhow::Result<()> {
+        let anvil = Anvil::new().block_time_f64(0.1).try_spawn()?;
+
+        let block_confirmations = 5;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(3)
+            .with_reorg_rewind_depth(5)
+            .with_block_confirmations(block_confirmations)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let expected_blocks = 10;
+
+        let mut receiver = client.stream_live().await?.take(expected_blocks);
+
+        let mut block_range_start = 0;
+
+        while let Some(result) = receiver.next().await {
+            match result {
+                Ok(range) => {
+                    info!("Received block range: [{range:?}]");
+                    if block_range_start == 0 {
+                        block_range_start = *range.start();
+                    }
+
+                    let provider =
+                        ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+                    let latest_head = provider.get_block_number().await?;
+                    // println!("latest head {latest_head}");
+                    // println!("range start {}, range end {}", *range.start(), *range.end());
 
                     assert_eq!(block_range_start, *range.start());
                     assert!(*range.end() >= *range.start());
