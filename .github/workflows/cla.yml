@@ -47,7 +47,7 @@ jobs:
           remote-organization-name: 'OpenZeppelin'
           remote-repository-name: 'cla-sigs'
           custom-notsigned-prcomment: >
-            Thank you for your contribution to OpenZeppelin Safe Utils.
+            Thank you for your contribution to OpenZeppelin Event Scanner.
             Before being able to integrate those changes, we would like you to
             sign our [Contributor License Agreement](https://github.com/OpenZeppelin/cla-assistant/blob/main/openzeppelin_2025_cla.md).
 
