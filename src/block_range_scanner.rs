@@ -1290,7 +1290,7 @@ mod tests {
 
         match rx.recv().await.expect("subscriber should stay open") {
             Err(BlockRangeScannerError::WebSocketConnectionFailed(attempts)) => {
-                assert_eq!(attempts, 4)
+                assert_eq!(attempts, 4);
             }
             other => panic!("unexpected message: {other:?}"),
         }
