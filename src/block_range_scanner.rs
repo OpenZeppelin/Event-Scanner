@@ -127,9 +127,6 @@ pub enum Error {
 
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
-
-    #[error("End of block batch")]
-    Eof,
 }
 
 #[derive(Debug)]
@@ -443,7 +440,9 @@ impl<N: Network> Service<N> {
 
         self.sync_historical_data(start_block, end_block).await?;
 
-        info!("Successfully synced historical data");
+        _ = self.subscriber.take();
+
+        info!("Successfully synced historical data, closing the stream");
 
         Ok(())
     }
@@ -547,12 +546,6 @@ impl<N: Network> Service<N> {
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
-
-        if let Some(sender) = &self.subscriber &&
-            sender.send(Err(Error::Eof)).await.is_err()
-        {
-            warn!("Subscriber channel closed, cleaning up");
-        }
 
         Ok(())
     }
