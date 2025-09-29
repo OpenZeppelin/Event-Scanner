@@ -2,7 +2,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use crate::{
     block_range_scanner::{
-        BlockRangeScanner, BlockRangeScannerError, ConnectedBlockRangeScanner,
+        BlockRangeMessage, BlockRangeScanner, BlockRangeScannerError, ConnectedBlockRangeScanner,
         MAX_BUFFERED_MESSAGES,
     },
     event_filter::EventFilter,
@@ -22,6 +22,26 @@ use tokio::sync::{
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
+
+/// Messages sent by the EventScanner
+#[derive(Debug, Clone)]
+pub enum EventScannerMessage {
+    /// A batch of logs found in a block range
+    Logs(Vec<Log>),
+    /// An error occurred during scanning
+    Error(EventScannerError),
+    /// Informational message about scanner state
+    Info(EventScannerInfo),
+}
+
+/// Informational messages from the EventScanner
+#[derive(Debug, Clone)]
+pub enum EventScannerInfo {
+    /// The scanner has reached the current chain tip
+    ChainTipReached,
+    /// Historical sync has completed
+    HistoricalSyncCompleted,
+}
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
@@ -142,21 +162,25 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         self.spawn_log_consumers(&range_tx);
 
-        while let Some(range) = stream.next().await {
-            match range {
-                Ok(range) => {
+        while let Some(message) = stream.next().await {
+            match message {
+                BlockRangeMessage::BlockRange(range) => {
                     info!(?range, "processing block range");
                     if let Err(e) = range_tx.send(Ok(range)) {
                         error!(error = %e, "failed to send block range to broadcast channel");
                         break;
                     }
                 }
-                Err(e) => {
+                BlockRangeMessage::Error(e) => {
                     warn!(error = %e, "block range scanner error");
                     // Propagate the error to the range channel
-                    if let Err(send_err) = range_tx.send(Err(Arc::new(e.into()))) {
+                    if let Err(send_err) = range_tx.send(Err(Arc::new(EventScannerError::BlockRangeScanner(e)))) {
                         error!(error = %send_err, "failed to send error to broadcast channel");
                     }
+                }
+                BlockRangeMessage::Info(info) => {
+                    info!("Received info from block range scanner: {:?}", info);
+                    // Could send info messages if needed
                 }
             }
         }
@@ -212,7 +236,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                                         "found logs for event in block range"
                                     );
 
-                                    if let Err(e) = sender.send(Ok(logs)).await {
+                                    if let Err(e) = sender.send(EventScannerMessage::Logs(logs)).await {
                                         error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
                                     }
                                 }
@@ -227,7 +251,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     );
 
                                     if let Err(send_err) =
-                                        sender.send(Err(Arc::new(EventScannerError::from(e)))).await
+                                        sender.send(EventScannerMessage::Error(EventScannerError::from(e))).await
                                     {
                                         error!(event = %event_display, error = %send_err, "failed to enqueue error for processing");
                                     }
@@ -237,7 +261,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                         Ok(Err(e)) => {
                             error!("Received error from block range scanner: {}", e);
                             // send error back to event stream
-                            if let Err(send_err) = sender.send(Err(e)).await {
+                            if let Err(send_err) = sender.send(EventScannerMessage::Error((*e).clone())).await {
                                 error!(
                                     error = %send_err,
                                     "Failed to forward block range scanner error to event listener"
@@ -266,9 +290,8 @@ impl<N: Network> Client<N> {
     pub fn create_event_stream(
         &mut self,
         event_filter: EventFilter,
-    ) -> ReceiverStream<Result<Vec<Log>, Arc<EventScannerError>>> {
-        let (sender, receiver) =
-            mpsc::channel::<Result<Vec<Log>, Arc<EventScannerError>>>(MAX_BUFFERED_MESSAGES);
+    ) -> ReceiverStream<EventScannerMessage> {
+        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
 
         self.event_scanner.add_event_listener(EventListener { filter: event_filter, sender });
 

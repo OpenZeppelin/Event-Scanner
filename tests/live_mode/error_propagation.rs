@@ -9,7 +9,7 @@ use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{
     eips::BlockNumberOrTag, network::Ethereum, providers::ext::AnvilApi, sol_types::SolEvent,
 };
-use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
+use event_scanner::{event_filter::EventFilter, event_scanner::{EventScanner, EventScannerMessage}};
 
 use event_scanner::block_range_scanner::BlockRangeScannerError;
 
@@ -45,13 +45,13 @@ async fn reorg_error_propagation_to_event_stream() -> anyhow::Result<()> {
     let reorg_errors_clone = Arc::clone(&reorg_errors);
 
     let error_monitoring = async move {
-        while let Some(res) = stream.next().await {
-            match res {
-                Ok(_) => {}
-                Err(e) => {
+        while let Some(message) = stream.next().await {
+            match message {
+                EventScannerMessage::Logs(_) => {}
+                EventScannerMessage::Error(e) => {
                     if let EventScannerError::BlockRangeScanner(
                         BlockRangeScannerError::ReorgDetected,
-                    ) = e.as_ref()
+                    ) = e
                     {
                         let mut errors = reorg_errors_clone.lock().await;
                         errors.push("ReorgDetected");
@@ -60,6 +60,7 @@ async fn reorg_error_propagation_to_event_stream() -> anyhow::Result<()> {
                         errors.push("Other");
                     }
                 }
+                EventScannerMessage::Info(_) => {}
             }
         }
     };
