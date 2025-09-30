@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use alloy::primitives::Address;
 
@@ -30,14 +30,18 @@ pub struct EventFilter {
 
 impl Display for EventFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let address = self
-            .contract_address
-            .map(|addr| format!("{addr:?}"))
-            .unwrap_or("all contracts".to_string());
+        let address =
+            self.contract_address.map_or("all contracts".to_string(), |addr| format!("{addr:?}"));
         let events =
             if self.events.is_empty() { "all events".to_string() } else { self.events.join(", ") };
 
-        write!(f, "EventFilter(contract: {}, events: {})", address, events)
+        write!(f, "EventFilter(contract: {address}, events: {events})")
+    }
+}
+
+impl Debug for EventFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 }
 
