@@ -1081,22 +1081,15 @@ mod tests {
 
         let mut block_range_start = 0;
 
-        while let Some(result) = receiver.next().await {
-            match result {
-                BlockRangeMessage::Data(range) => {
-                    info!("Received block range: [{range:?}]");
-                    if block_range_start == 0 {
-                        block_range_start = *range.start();
-                    }
-
-                    assert_eq!(block_range_start, *range.start());
-                    assert!(*range.end() >= *range.start());
-                    block_range_start = *range.end() + 1;
-                }
-                _ => {
-                    panic!("Didnt Receive Range");
-                }
+        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+            info!("Received block range: [{range:?}]");
+            if block_range_start == 0 {
+                block_range_start = *range.start();
             }
+
+            assert_eq!(block_range_start, *range.start());
+            assert!(*range.end() >= *range.start());
+            block_range_start = *range.end() + 1;
         }
 
         Ok(())
@@ -1150,15 +1143,8 @@ mod tests {
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(result) = out_rx.recv().await {
-            match result {
-                BlockRangeMessage::Data(range) => {
-                    forwarded.push(range);
-                }
-                _ => {
-                    panic!("Didnt Receive Range");
-                }
-            }
+        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+            forwarded.push(range);
         }
 
         // All ranges should be forwarded as-is since they're after cutoff
@@ -1180,15 +1166,8 @@ mod tests {
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(result) = out_rx.recv().await {
-            match result {
-                BlockRangeMessage::Data(range) => {
-                    forwarded.push(range);
-                }
-                _ => {
-                    panic!("Didnt Receive Range");
-                }
-            }
+        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+            forwarded.push(range);
         }
 
         // All ranges should be discarded since they're before cutoff
@@ -1210,15 +1189,8 @@ mod tests {
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(result) = out_rx.recv().await {
-            match result {
-                BlockRangeMessage::Data(range) => {
-                    forwarded.push(range);
-                }
-                _ => {
-                    panic!("Didnt Receive Range");
-                }
-            }
+        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+            forwarded.push(range);
         }
 
         // All ranges should be trimmed to start at cutoff (75)
@@ -1243,15 +1215,8 @@ mod tests {
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(result) = out_rx.recv().await {
-            match result {
-                BlockRangeMessage::Data(range) => {
-                    forwarded.push(range);
-                }
-                _ => {
-                    panic!("Didnt Receive Range");
-                }
-            }
+        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+            forwarded.push(range);
         }
 
         assert_eq!(forwarded, vec![50..=55, 56..=65, 50..=51, 51..=100]);
@@ -1273,15 +1238,8 @@ mod tests {
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(result) = out_rx.recv().await {
-            match result {
-                BlockRangeMessage::Data(range) => {
-                    forwarded.push(range);
-                }
-                _ => {
-                    panic!("Didnt Receive Range");
-                }
-            }
+        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+            forwarded.push(range);
         }
 
         // ensure no duplicates
@@ -1303,15 +1261,8 @@ mod tests {
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(result) = out_rx.recv().await {
-            match result {
-                BlockRangeMessage::Data(range) => {
-                    forwarded.push(range);
-                }
-                _ => {
-                    panic!("Didnt Receive Range");
-                }
-            }
+        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+            forwarded.push(range);
         }
 
         // All ranges should be forwarded since they're all >= 0

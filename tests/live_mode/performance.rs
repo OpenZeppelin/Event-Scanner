@@ -42,22 +42,13 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
         let mut expected_new_count = 1;
-        while let Some(message) = stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
+            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
-                    for log in logs {
-                        let TestCounter::CountIncreased { newCount } =
-                            log.log_decode().unwrap().inner.data;
-                        assert_eq!(newCount, expected_new_count);
-                        expected_new_count += 1;
-                    }
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("Received error: {e}");
-                }
-                EventScannerMessage::Status(_) => {}
+            for log in logs {
+                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
+                assert_eq!(newCount, expected_new_count);
+                expected_new_count += 1;
             }
         }
     };

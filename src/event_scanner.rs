@@ -22,7 +22,7 @@ use tokio::sync::{
     mpsc,
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,

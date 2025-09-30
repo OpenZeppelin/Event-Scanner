@@ -46,16 +46,8 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     let event_count = Arc::new(AtomicUsize::new(0));
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while let Some(message) = stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("panicked with error {e}");
-                }
-                EventScannerMessage::Status(_) => {}
-            }
+        while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
+            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
         }
     };
 
@@ -94,16 +86,8 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
     let event_count = Arc::new(AtomicUsize::new(0));
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
-        while let Some(message) = stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("panicked with error {e}");
-                }
-                EventScannerMessage::Status(_) => {}
-            }
+        while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
+            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
         }
     };
 
@@ -161,27 +145,11 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
     let all_count_clone = Arc::clone(&all_events_count);
 
     let event_counting = async move {
-        while let Some(message) = all_stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    all_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("panicked with error {e}");
-                }
-                EventScannerMessage::Status(_) => {}
-            }
+        while let Some(EventScannerMessage::Data(logs)) = all_stream.next().await {
+            all_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
         }
-        while let Some(message) = specific_stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    specific_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("panicked with error {e}");
-                }
-                EventScannerMessage::Status(_) => {}
-            }
+        while let Some(EventScannerMessage::Data(logs)) = specific_stream.next().await {
+            specific_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
         }
     };
 

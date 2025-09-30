@@ -186,48 +186,26 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         let mut expected_new_count = 0;
 
         // process CountIncreased
-        while let Some(message) = incr_stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        while let Some(EventScannerMessage::Data(logs)) = incr_stream.next().await {
+            incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
-                    for log in logs {
-                        expected_new_count += 1;
-                        let TestCounter::CountIncreased { newCount } =
-                            log.log_decode().unwrap().inner.data;
-                        assert_eq!(newCount, expected_new_count);
-                    }
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("panicked with error {e}");
-                }
-                EventScannerMessage::Status(_) => {
-                    // Handle info if needed
-                }
+            for log in logs {
+                expected_new_count += 1;
+                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
+                assert_eq!(newCount, expected_new_count);
             }
         }
 
         expected_new_count -= 1;
 
         // process CountDecreased
-        while let Some(message) = decr_stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        while let Some(EventScannerMessage::Data(logs)) = decr_stream.next().await {
+            decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
-                    for log in logs {
-                        let TestCounter::CountDecreased { newCount } =
-                            log.log_decode().unwrap().inner.data;
-                        assert_eq!(newCount, expected_new_count);
-                        expected_new_count -= 1;
-                    }
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("panicked with error {e}");
-                }
-                EventScannerMessage::Status(_) => {
-                    // Handle info if needed
-                }
+            for log in logs {
+                let TestCounter::CountDecreased { newCount } = log.log_decode().unwrap().inner.data;
+                assert_eq!(newCount, expected_new_count);
+                expected_new_count -= 1;
             }
         }
     };
