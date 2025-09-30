@@ -88,8 +88,8 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Status(info) => {
-                    if matches!(info, ScannerStatus::ReorgDetected) {
+                EventScannerMessage::Status(status) => {
+                    if matches!(status, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
                 }

@@ -578,6 +578,8 @@ impl<N: Network> Service<N> {
 
         info!(batch_count = batch_count, "Historical sync completed");
 
+        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
+
         Ok(())
     }
 
