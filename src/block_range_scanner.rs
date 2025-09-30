@@ -170,9 +170,6 @@ pub enum Command {
     Unsubscribe {
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
-    GetStatus {
-        response: oneshot::Sender<ServiceStatus>,
-    },
     Shutdown {
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
@@ -403,10 +400,6 @@ impl<N: Network> Service<N> {
             Command::Unsubscribe { response } => {
                 self.handle_unsubscribe();
                 let _ = response.send(Ok(()));
-            }
-            Command::GetStatus { response } => {
-                let status = self.get_status();
-                let _ = response.send(status);
             }
             Command::Shutdown { response } => {
                 self.shutdown = true;
@@ -737,16 +730,6 @@ impl<N: Network> Service<N> {
         }
     }
 
-    fn get_status(&self) -> ServiceStatus {
-        ServiceStatus {
-            is_subscribed: self.subscriber.is_some(),
-            last_synced_block: self.current.clone(),
-            websocket_connected: self.websocket_connected,
-            processed_count: self.processed_count,
-            error_count: self.error_count,
-        }
-    }
-
     fn ensure_no_subscriber(&self) -> Result<(), BlockRangeScannerError> {
         if self.subscriber.is_some() {
             return Err(BlockRangeScannerError::MultipleSubscribers);
@@ -884,24 +867,6 @@ impl BlockRangeScannerClient {
         response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)?
     }
 
-    /// Returns the current status of the subscription service.
-    ///
-    /// # Errors
-    ///
-    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn get_status(&self) -> Result<ServiceStatus, BlockRangeScannerError> {
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::GetStatus { response: response_tx };
-
-        self.command_sender
-            .send(command)
-            .await
-            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)
-    }
-
     /// Shuts down the subscription service and unsubscribes the current subscriber.
     ///
     /// # Errors
@@ -976,33 +941,6 @@ mod tests {
 
         assert_eq!(scanner.blocks_read_per_epoch, blocks_read_per_epoch);
         assert_eq!(scanner.block_confirmations, block_confirmations);
-    }
-
-    #[test]
-    fn service_status_reflects_internal_state() {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(test_config(), provider);
-
-        let processed_count = 7;
-        let error_count = 2;
-        service.processed_count = processed_count;
-        service.error_count = error_count;
-        let hash = keccak256(b"random");
-        let block_number = 99;
-        service.current = BlockHashAndNumber { hash, number: block_number };
-        service.websocket_connected = true;
-        service.subscriber = Some(mpsc::channel(1).0);
-
-        let status = service.get_status();
-
-        assert!(status.is_subscribed);
-        assert!(status.websocket_connected);
-        assert_eq!(status.processed_count, processed_count);
-        assert_eq!(status.error_count, error_count);
-        let last = status.last_synced_block;
-        assert_eq!(last.number, block_number);
-        assert_eq!(last.hash, hash);
     }
 
     #[tokio::test]
