@@ -718,7 +718,7 @@ impl<N: Network> Service<N> {
     async fn send_to_subscriber(&mut self, message: BlockRangeMessage) {
         if let Some(ref sender) = self.subscriber {
             if let Err(err) = sender.send(message).await {
-                error!(error = %err, "Failed sending message to subscriber");
+                warn!(error = %err, "Downstream channel closed, failed sending the message to subscriber");
                 self.subscriber = None;
                 self.websocket_connected = false;
             } else {
