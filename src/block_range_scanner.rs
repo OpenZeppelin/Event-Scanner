@@ -1168,7 +1168,7 @@ mod tests {
         }
 
         // All ranges should be forwarded as-is since they're after cutoff
-        assert_eq!(forwarded, vec![51..=55, 55..=60, 60..=70]);
+        assert_eq!(forwarded, vec![51..=55, 56..=60, 61..=70]);
         Ok(())
     }
 
