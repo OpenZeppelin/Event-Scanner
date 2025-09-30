@@ -76,3 +76,91 @@ impl EventFilter {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::EventFilter;
+    use alloy::primitives::{Address, address};
+
+    fn addr_str(addr: Address) -> String {
+        format!("{:?}", addr)
+    }
+
+    #[test]
+    fn display_default_no_address_no_events() {
+        let filter = EventFilter::new();
+        let got = format!("{}", filter);
+        let expected = "EventFilter(contract: all contracts, events: all events)";
+        assert_eq!(got, expected);
+
+        // Debug should equal Display
+        assert_eq!(format!("{:?}", filter), got);
+    }
+
+    #[test]
+    fn display_with_address_no_events() {
+        let address = address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
+        let filter = EventFilter::new().with_contract_address(address);
+        let got = format!("{}", filter);
+        let expected = format!("EventFilter(contract: {}, events: all events)", addr_str(address));
+        assert_eq!(got, expected);
+
+        // Debug should equal Display
+        assert_eq!(format!("{:?}", filter), got);
+    }
+
+    #[test]
+    fn display_single_event_no_address() {
+        let event = "Transfer(address,address,uint256)";
+        let filter = EventFilter::new().with_event(event);
+        let got = format!("{}", filter);
+        let expected = format!("EventFilter(contract: all contracts, events: {})", event);
+        assert_eq!(got, expected);
+
+        // Debug should equal Display
+        assert_eq!(format!("{:?}", filter), got);
+    }
+
+    #[test]
+    fn display_multiple_events_with_address() {
+        let address = address!("0x000000000000000000000000000000000000dEaD");
+        let events = vec![
+            "Transfer(address,address,uint256)".to_string(),
+            "Approval(address,address,uint256)".to_string(),
+            "Sync(uint112,uint112)".to_string(),
+        ];
+        let filter = EventFilter::new().with_contract_address(address).with_events(events.clone());
+
+        let got = format!("{}", filter);
+        let expected =
+            format!("EventFilter(contract: {}, events: {})", addr_str(address), events.join(", "));
+        assert_eq!(got, expected);
+
+        // Debug should equal Display
+        assert_eq!(format!("{:?}", filter), got);
+    }
+
+    #[test]
+    fn display_with_empty_events_vector_noop() {
+        // Providing an empty events vector should behave as if no events were set.
+        let filter = EventFilter::new().with_events(Vec::<String>::new());
+        let got = format!("{}", filter);
+        let expected = "EventFilter(contract: all contracts, events: all events)";
+        assert_eq!(got, expected);
+
+        // Debug should equal Display
+        assert_eq!(format!("{:?}", filter), got);
+    }
+
+    #[test]
+    fn display_with_empty_event_string_prints_empty() {
+        // An explicitly empty event string results in an empty events field when joined.
+        let filter = EventFilter::new().with_event("");
+        let got = format!("{}", filter);
+        let expected = "EventFilter(contract: all contracts, events: )";
+        assert_eq!(got, expected);
+
+        // Debug should equal Display
+        assert_eq!(format!("{:?}", filter), got);
+    }
+}
