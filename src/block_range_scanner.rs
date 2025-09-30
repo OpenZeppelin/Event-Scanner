@@ -175,15 +175,6 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, Clone)]
-pub struct ServiceStatus {
-    pub is_subscribed: bool,
-    pub last_synced_block: BlockHashAndNumber,
-    pub websocket_connected: bool,
-    pub processed_count: u64,
-    pub error_count: u64,
-}
-
 #[derive(Default, Debug, Clone)]
 pub struct BlockHashAndNumber {
     pub hash: BlockHash,
