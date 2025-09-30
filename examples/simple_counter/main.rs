@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
 
     while let Some(message) = stream.next().await {
         match message {
-            EventScannerMessage::Message(logs) => {
+            EventScannerMessage::Data(logs) => {
                 for log in logs {
                     info!("Callback successfully executed with event {:?}", log.inner.data);
                 }

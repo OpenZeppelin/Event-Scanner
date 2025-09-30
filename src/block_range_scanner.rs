@@ -566,8 +566,7 @@ impl<N: Network> Service<N> {
                 .await?
                 .expect("end of the batch should already be ensured to exist");
 
-            self.send_to_subscriber(BlockRangeMessage::Message(self.current.number..=batch_to))
-                .await;
+            self.send_to_subscriber(BlockRangeMessage::Data(self.current.number..=batch_to)).await;
 
             self.current = BlockHashAndNumber::from_header::<N>(batch_end_block.header());
 
@@ -614,7 +613,7 @@ impl<N: Network> Service<N> {
                     }
 
                     if sender
-                        .send(BlockRangeMessage::Message(expected_next_block..=incoming_block_num))
+                        .send(BlockRangeMessage::Data(expected_next_block..=incoming_block_num))
                         .await
                         .is_err()
                     {
@@ -644,10 +643,10 @@ impl<N: Network> Service<N> {
         // Process all buffered messages
         while let Some(item) = buffer_rx.recv().await {
             match item {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     let (start, end) = (*range.start(), *range.end());
                     if start >= cutoff {
-                        if sender.send(BlockRangeMessage::Message(range)).await.is_err() {
+                        if sender.send(BlockRangeMessage::Data(range)).await.is_err() {
                             warn!("Subscriber channel closed, cleaning up");
                             return;
                         }
@@ -656,7 +655,7 @@ impl<N: Network> Service<N> {
                         discarded += cutoff - start;
 
                         let start = cutoff;
-                        if sender.send(BlockRangeMessage::Message(start..=end)).await.is_err() {
+                        if sender.send(BlockRangeMessage::Data(start..=end)).await.is_err() {
                             warn!("Subscriber channel closed, cleaning up");
                             return;
                         }
@@ -1019,12 +1018,12 @@ mod tests {
         service.subscriber = Some(tx);
 
         let expected_range = 10..=11;
-        service.send_to_subscriber(BlockRangeMessage::Message(expected_range.clone())).await;
+        service.send_to_subscriber(BlockRangeMessage::Data(expected_range.clone())).await;
 
         assert_eq!(service.processed_count, 1);
         assert!(service.subscriber.is_some());
 
-        let BlockRangeMessage::Message(received) = rx.recv().await.expect("range received") else {
+        let BlockRangeMessage::Data(received) = rx.recv().await.expect("range received") else {
             panic!("expected BlockRange message")
         };
         assert_eq!(received, expected_range);
@@ -1044,7 +1043,7 @@ mod tests {
         // channel is closed
         drop(rx);
 
-        service.send_to_subscriber(BlockRangeMessage::Message(15..=15)).await;
+        service.send_to_subscriber(BlockRangeMessage::Data(15..=15)).await;
 
         assert!(service.subscriber.is_none());
         assert!(!service.websocket_connected);
@@ -1089,7 +1088,7 @@ mod tests {
 
         while let Some(result) = receiver.next().await {
             match result {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     info!("Received block range: [{range:?}]");
                     if block_range_start == 0 {
                         block_range_start = *range.start();
@@ -1148,9 +1147,9 @@ mod tests {
     async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
         let cutoff = 50;
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Message(51..=55)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(56..=60)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(61..=70)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(51..=55)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(56..=60)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1159,7 +1158,7 @@ mod tests {
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
             match result {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
                 BlockRangeMessage::Info(_) => {}
@@ -1177,9 +1176,9 @@ mod tests {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Message(40..=50)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(50..=60)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(60..=70)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(40..=50)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(50..=60)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(60..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1188,7 +1187,7 @@ mod tests {
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
             match result {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
                 BlockRangeMessage::Info(_) => {}
@@ -1206,9 +1205,9 @@ mod tests {
         let cutoff = 75;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Message(70..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(60..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(74..=76)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(70..=80)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(60..=80)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(74..=76)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1217,7 +1216,7 @@ mod tests {
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
             match result {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
                 BlockRangeMessage::Info(_) => {}
@@ -1235,12 +1234,12 @@ mod tests {
         let cutoff = 50;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Message(30..=45)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(BlockRangeMessage::Message(45..=55)).await.unwrap(); // Overlaps: trim to 50..=55
-        buffer_tx.send(BlockRangeMessage::Message(55..=65)).await.unwrap(); // After cutoff: forward as-is
-        buffer_tx.send(BlockRangeMessage::Message(40..=49)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(BlockRangeMessage::Message(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
-        buffer_tx.send(BlockRangeMessage::Message(51..=100)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(BlockRangeMessage::Data(30..=45)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(BlockRangeMessage::Data(45..=55)).await.unwrap(); // Overlaps: trim to 50..=55
+        buffer_tx.send(BlockRangeMessage::Data(55..=65)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(BlockRangeMessage::Data(40..=49)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(BlockRangeMessage::Data(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
+        buffer_tx.send(BlockRangeMessage::Data(51..=100)).await.unwrap(); // After cutoff: forward as-is
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1249,7 +1248,7 @@ mod tests {
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
             match result {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
                 BlockRangeMessage::Info(_) => {}
@@ -1266,10 +1265,10 @@ mod tests {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Message(99..=99)).await.unwrap(); // Just before: discard
-        buffer_tx.send(BlockRangeMessage::Message(100..=100)).await.unwrap(); // Exactly at: forward
-        buffer_tx.send(BlockRangeMessage::Message(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
-        buffer_tx.send(BlockRangeMessage::Message(100..=101)).await.unwrap(); // Starts at cutoff: forward
+        buffer_tx.send(BlockRangeMessage::Data(99..=99)).await.unwrap(); // Just before: discard
+        buffer_tx.send(BlockRangeMessage::Data(100..=100)).await.unwrap(); // Exactly at: forward
+        buffer_tx.send(BlockRangeMessage::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
+        buffer_tx.send(BlockRangeMessage::Data(100..=101)).await.unwrap(); // Starts at cutoff: forward
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1278,7 +1277,7 @@ mod tests {
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
             match result {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
                 BlockRangeMessage::Info(_) => {}
@@ -1296,9 +1295,9 @@ mod tests {
         let cutoff = 0;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Message(0..=5)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(5..=10)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(10..=25)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(0..=5)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(5..=10)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(10..=25)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1307,7 +1306,7 @@ mod tests {
         let mut forwarded = Vec::new();
         while let Some(result) = out_rx.recv().await {
             match result {
-                BlockRangeMessage::Message(range) => {
+                BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
                 BlockRangeMessage::Info(_) => {}

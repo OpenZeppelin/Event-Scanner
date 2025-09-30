@@ -2,7 +2,7 @@ use std::error::Error;
 
 #[derive(Copy, Debug, Clone)]
 pub enum ScannerMessage<T: Clone, E: Error + Clone> {
-    Message(T),
+    Data(T),
     Error(E),
     Info(ScannerInfo),
 }

@@ -57,7 +57,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         let mut expected_new_count = 1;
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {

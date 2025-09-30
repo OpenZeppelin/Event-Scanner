@@ -48,7 +48,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
                 EventScannerMessage::Error(e) => {
@@ -96,7 +96,7 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
                 EventScannerMessage::Error(e) => {
@@ -163,7 +163,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = all_stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     all_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
                 EventScannerMessage::Error(e) => {
@@ -174,7 +174,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
         }
         while let Some(message) = specific_stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     specific_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
                 }
                 EventScannerMessage::Error(e) => {

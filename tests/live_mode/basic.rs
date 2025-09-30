@@ -44,7 +44,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         let mut expected_new_count = 1;
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {
@@ -114,7 +114,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
             let mut expected_new_count = 1;
             while let Some(message) = stream.next().await {
                 match message {
-                    EventScannerMessage::Message(logs) => {
+                    EventScannerMessage::Data(logs) => {
                         count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                         for log in logs {
@@ -188,7 +188,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         // process CountIncreased
         while let Some(message) = incr_stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {
@@ -212,7 +212,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         // process CountDecreased
         while let Some(message) = decr_stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {

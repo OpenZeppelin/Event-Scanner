@@ -77,7 +77,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {
@@ -161,7 +161,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {
@@ -252,7 +252,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {
@@ -343,7 +343,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(res) = stream.next().await {
             match res {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.block_number {

@@ -157,7 +157,7 @@ impl<N: Network> ConnectedEventScanner<N> {
             tokio::spawn(async move {
                 loop {
                     match sub.recv().await {
-                        Ok(BlockRangeMessage::Message(range)) => {
+                        Ok(BlockRangeMessage::Data(range)) => {
                             let (from_block, to_block) = (*range.start(), *range.end());
 
                             let mut log_filter =
@@ -193,7 +193,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     );
 
                                     if let Err(e) =
-                                        sender.send(EventScannerMessage::Message(logs)).await
+                                        sender.send(EventScannerMessage::Data(logs)).await
                                     {
                                         error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
                                     }

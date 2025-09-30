@@ -56,7 +56,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         let mut expected_new_count = 1;
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Message(logs) => {
+                EventScannerMessage::Data(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {
