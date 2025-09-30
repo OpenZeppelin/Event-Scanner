@@ -2,7 +2,7 @@ use alloy::{
     providers::Provider,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use std::{sync::Arc, time::Duration};
+use std::{cmp::min, sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
 use tokio::{sync::Mutex, time::timeout};
@@ -379,17 +379,16 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     let mut all_tx_hashes = vec![];
 
-    let initial_events = 4;
+    let initial_events = 4_u64;
     for _ in 0..initial_events {
         let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
         all_tx_hashes.push(receipt.transaction_hash);
-        println!("ini hash {}", receipt.transaction_hash);
     }
 
     let mut tx_block_pairs = vec![];
-    let num_new_events = 2;
+    let num_new_events = 2_u64;
     let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
-    let reorg_depth = 2;
+    let reorg_depth = 2_u64;
     for _ in 0..num_new_events {
         let tx = contract.increase().into_transaction_request();
         tx_block_pairs.push((TransactionData::JSON(tx), 0));
@@ -408,7 +407,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         .get_block_by_number(BlockNumberOrTag::Number(latest_block.header.number - reorg_depth + 1))
         .await?
         .unwrap();
-    assert_eq!(new_block.transactions.len(), num_new_events);
+    assert_eq!(new_block.transactions.len() as u64, num_new_events);
 
     for tx_hash in new_block.transactions.hashes() {
         all_tx_hashes.push(tx_hash);
@@ -443,10 +442,21 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
-    let final_blocks: Vec<_> = event_tx_hash.lock().await.clone();
-    println!("final_block {final_blocks:?}");
-    assert!(final_blocks.len() == initial_events);
-    // assert_eq!(final_blocks, expected_event_block_numbers);
+    let final_hashes: Vec<_> = event_tx_hash.lock().await.clone();
+    let number_discarded = min(initial_events, reorg_depth);
+    let expected_total = (initial_events - number_discarded) + num_new_events;
+    assert_eq!(final_hashes.len() as u64, expected_total);
+
+    let confirmed_initial_hashes =
+        &all_tx_hashes[0..(initial_events - number_discarded).try_into().unwrap()];
+
+    let reorg_hashes = &all_tx_hashes[usize::try_from(initial_events).unwrap()..
+        (initial_events + num_new_events).try_into().unwrap()];
+
+    let expected_hashes: Vec<_> =
+        confirmed_initial_hashes.iter().chain(reorg_hashes.iter()).copied().collect();
+
+    assert_eq!(final_hashes, expected_hashes);
 
     Ok(())
 }
