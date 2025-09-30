@@ -608,7 +608,7 @@ impl<N: Network> Service<N> {
 
                     if incoming_block_num < expected_next_block {
                         warn!("Reorg detected: sending forked range");
-                        if sender.send(Err(Error::ReorgDetected)).await.is_err() {
+                        if sender.send(Err(BlockRangeScannerError::ReorgDetected)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
                         }
@@ -1117,7 +1117,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_mode_respected_block_confirmations() -> anyhow::Result<()> {
+    async fn live_mode_respects_block_confirmations() -> anyhow::Result<()> {
         let anvil = Anvil::new().block_time_f64(0.1).try_spawn()?;
 
         let block_confirmations = 5;
@@ -1147,9 +1147,7 @@ mod tests {
                     let provider =
                         ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
                     let latest_head = provider.get_block_number().await?;
-                    // println!("latest head {latest_head}");
-                    // println!("range start {}, range end {}", *range.start(), *range.end());
-
+                    assert_eq!(*range.end(), latest_head.saturating_sub(block_confirmations));
                     assert_eq!(block_range_start, *range.start());
                     assert!(*range.end() >= *range.start());
                     block_range_start = *range.end() + 1;

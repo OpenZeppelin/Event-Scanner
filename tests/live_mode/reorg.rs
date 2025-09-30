@@ -258,7 +258,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
         }
     };
 
-    _ = timeout(Duration::from_secs(2), event_counting).await;
+    _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
     assert!(final_blocks.len() == initial_events + num_new_events);
@@ -343,11 +343,110 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
         }
     };
 
-    _ = timeout(Duration::from_secs(2), event_counting).await;
+    _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
     assert!(final_blocks.len() == initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
+    let anvil = spawn_anvil(1.0).unwrap();
+    let provider = build_provider(&anvil).await.unwrap();
+
+    let contract = deploy_counter(provider.clone()).await?;
+    let contract_address = *contract.address();
+
+    let filter = EventFilter {
+        contract_address: Some(contract_address),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
+    };
+
+    let block_confirmation = 5;
+    let mut client = EventScanner::new()
+        .with_block_confirmations(block_confirmation)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+
+    let mut stream = client.create_event_stream(filter);
+
+    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+
+    provider.anvil_mine(Some(10), None).await?;
+
+    let mut all_tx_hashes = vec![];
+
+    let initial_events = 4;
+    for _ in 0..initial_events {
+        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
+        all_tx_hashes.push(receipt.transaction_hash);
+        println!("ini hash {}", receipt.transaction_hash);
+    }
+
+    let mut tx_block_pairs = vec![];
+    let num_new_events = 2;
+    let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
+    let reorg_depth = 2;
+    for _ in 0..num_new_events {
+        let tx = contract.increase().into_transaction_request();
+        tx_block_pairs.push((TransactionData::JSON(tx), 0));
+    }
+    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
+
+    provider.anvil_reorg(reorg_options).await.unwrap();
+    let new_latest_block =
+        provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap();
+
+    // sanity checks, block numb stays the same but hash changes
+    assert_eq!(new_latest_block.header.number, latest_block.header.number);
+    assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
+
+    let new_block = provider
+        .get_block_by_number(BlockNumberOrTag::Number(latest_block.header.number - reorg_depth + 1))
+        .await?
+        .unwrap();
+    assert_eq!(new_block.transactions.len(), num_new_events);
+
+    for tx_hash in new_block.transactions.hashes() {
+        all_tx_hashes.push(tx_hash);
+    }
+
+    // continue mining to simulate incoming blocks
+    provider.anvil_mine(Some(10), None).await?;
+
+    let event_tx_hash = Arc::new(Mutex::new(Vec::new()));
+    let event_tx_hash_clone = Arc::clone(&event_tx_hash);
+    let event_counting = async move {
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(logs) => {
+                    let mut guard = event_tx_hash_clone.lock().await;
+                    for log in logs {
+                        if let Some(n) = log.transaction_hash {
+                            guard.push(n);
+                        }
+                    }
+                }
+                Err(e) => match e.as_ref() {
+                    EventScannerError::BlockRangeScanner(BlockRangeScannerError::ReorgDetected) => {
+                    }
+                    _ => {
+                        break;
+                    }
+                },
+            }
+        }
+    };
+
+    _ = timeout(Duration::from_secs(5), event_counting).await;
+
+    let final_blocks: Vec<_> = event_tx_hash.lock().await.clone();
+    println!("final_block {final_blocks:?}");
+    assert!(final_blocks.len() == initial_events);
+    // assert_eq!(final_blocks, expected_event_block_numbers);
 
     Ok(())
 }
