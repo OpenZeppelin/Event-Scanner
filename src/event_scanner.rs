@@ -208,11 +208,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                                         "failed to get logs for block range"
                                     );
 
-                                    if let Err(send_err) = sender
-                                        .send(EventScannerMessage::Error(EventScannerError::from(
-                                            e,
-                                        )))
-                                        .await
+                                    if let Err(send_err) =
+                                        sender.send(EventScannerMessage::Error(e.into())).await
                                     {
                                         error!(event = %event_display, error = %send_err, "failed to enqueue error for processing");
                                     }
