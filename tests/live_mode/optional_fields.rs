@@ -54,7 +54,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error {e}");
                 }
-                EventScannerMessage::Info(_) => {}
+                EventScannerMessage::Status(_) => {}
             }
         }
     };
@@ -102,7 +102,7 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error {e}");
                 }
-                EventScannerMessage::Info(_) => {}
+                EventScannerMessage::Status(_) => {}
             }
         }
     };
@@ -169,7 +169,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error {e}");
                 }
-                EventScannerMessage::Info(_) => {}
+                EventScannerMessage::Status(_) => {}
             }
         }
         while let Some(message) = specific_stream.next().await {
@@ -180,7 +180,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error {e}");
                 }
-                EventScannerMessage::Info(_) => {}
+                EventScannerMessage::Status(_) => {}
             }
         }
     };

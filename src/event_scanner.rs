@@ -221,18 +221,16 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
                             warn!(error = %e, "block range scanner error");
-                            if let Err(send_err) = sender
-                                .send(EventScannerMessage::Error(
-                                    EventScannerError::BlockRangeScanner(e),
-                                ))
-                                .await
+                            if let Err(send_err) =
+                                sender.send(ScannerMessage::Error(e.into())).await
                             {
                                 error!(error = %send_err, "failed to send error to broadcast channel");
                             }
                         }
-                        Ok(BlockRangeMessage::Info(info)) => {
-                            info!("Received info from block range scanner: {:?}", info);
-                            if let Err(send_err) = sender.send(ScannerMessage::Info(info)).await {
+                        Ok(BlockRangeMessage::Status(status)) => {
+                            info!("Received info from block range scanner: {:?}", status);
+                            if let Err(send_err) = sender.send(ScannerMessage::Status(status)).await
+                            {
                                 error!(error = %send_err, "failed to send error to");
                             }
                         }

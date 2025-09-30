@@ -4,11 +4,11 @@ use std::error::Error;
 pub enum ScannerMessage<T: Clone, E: Error + Clone> {
     Data(T),
     Error(E),
-    Info(ScannerInfo),
+    Status(ScannerStatus),
 }
 
 #[derive(Copy, Debug, Clone)]
-pub enum ScannerInfo {
+pub enum ScannerStatus {
     ChainTipReached,
     HistoricalSyncCompleted,
     ReorgDetected,

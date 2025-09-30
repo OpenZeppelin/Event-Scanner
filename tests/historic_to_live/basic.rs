@@ -69,7 +69,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error: {e}");
                 }
-                EventScannerMessage::Info(_) => {
+                EventScannerMessage::Status(_) => {
                     // Handle info if needed
                 }
             }

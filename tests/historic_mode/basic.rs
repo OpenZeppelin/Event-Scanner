@@ -70,7 +70,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error: {e}");
                 }
-                EventScannerMessage::Info(_) => {
+                EventScannerMessage::Status(_) => {
                     // Handle info if needed
                 }
             }

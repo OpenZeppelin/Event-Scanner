@@ -14,7 +14,7 @@ use alloy::{
 use event_scanner::{
     event_filter::EventFilter,
     event_scanner::{EventScanner, EventScannerMessage},
-    types::ScannerInfo,
+    types::ScannerStatus,
 };
 
 #[tokio::test]
@@ -88,8 +88,8 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Info(info) => {
-                    if matches!(info, ScannerInfo::ReorgDetected) {
+                EventScannerMessage::Status(info) => {
+                    if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
                 }
@@ -172,8 +172,8 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Info(info) => {
-                    if matches!(info, ScannerInfo::ReorgDetected) {
+                EventScannerMessage::Status(info) => {
+                    if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
                 }
@@ -263,8 +263,8 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Info(info) => {
-                    if matches!(info, ScannerInfo::ReorgDetected) {
+                EventScannerMessage::Status(info) => {
+                    if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
                 }
@@ -354,8 +354,8 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Info(info) => {
-                    if matches!(info, ScannerInfo::ReorgDetected) {
+                EventScannerMessage::Status(info) => {
+                    if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
                 }

@@ -57,7 +57,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error: {e}");
                 }
-                EventScannerMessage::Info(_) => {
+                EventScannerMessage::Status(_) => {
                     // Handle info if needed
                 }
             }
@@ -127,7 +127,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
                     EventScannerMessage::Error(e) => {
                         panic!("panicked with error: {e}");
                     }
-                    EventScannerMessage::Info(_) => {
+                    EventScannerMessage::Status(_) => {
                         // Handle info if needed
                     }
                 }
@@ -201,7 +201,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error {e}");
                 }
-                EventScannerMessage::Info(_) => {
+                EventScannerMessage::Status(_) => {
                     // Handle info if needed
                 }
             }
@@ -225,7 +225,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panicked with error {e}");
                 }
-                EventScannerMessage::Info(_) => {
+                EventScannerMessage::Status(_) => {
                     // Handle info if needed
                 }
             }

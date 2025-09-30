@@ -70,7 +70,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::types::{ScannerInfo, ScannerMessage};
+use crate::types::{ScannerMessage, ScannerStatus};
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
@@ -600,7 +600,7 @@ impl<N: Network> Service<N> {
                     if incoming_block_num < expected_next_block {
                         warn!("Reorg detected: sending forked range");
                         if sender
-                            .send(BlockRangeMessage::Info(ScannerInfo::ReorgDetected))
+                            .send(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
                             .await
                             .is_err()
                         {
@@ -641,8 +641,8 @@ impl<N: Network> Service<N> {
         let mut discarded = 0;
 
         // Process all buffered messages
-        while let Some(item) = buffer_rx.recv().await {
-            match item {
+        while let Some(data) = buffer_rx.recv().await {
+            match data {
                 BlockRangeMessage::Data(range) => {
                     let (start, end) = (*range.start(), *range.end());
                     if start >= cutoff {
@@ -664,14 +664,9 @@ impl<N: Network> Service<N> {
                         discarded += end - start;
                     }
                 }
-                BlockRangeMessage::Error(e) => {
-                    if sender.send(BlockRangeMessage::Error(e)).await.is_err() {
-                        warn!("Subscriber channel closed, cleaning up");
-                        return;
-                    }
-                }
-                BlockRangeMessage::Info(info) => {
-                    if sender.send(BlockRangeMessage::Info(info)).await.is_err() {
+                _ => {
+                    // Could be error or status
+                    if sender.send(data).await.is_err() {
                         warn!("Subscriber channel closed, cleaning up");
                         return;
                     }
@@ -1098,9 +1093,8 @@ mod tests {
                     assert!(*range.end() >= *range.start());
                     block_range_start = *range.end() + 1;
                 }
-                BlockRangeMessage::Info(_) => {}
-                BlockRangeMessage::Error(e) => {
-                    panic!("Received error from subscription: {e}");
+                _ => {
+                    panic!("Didnt Receive Range");
                 }
             }
         }
@@ -1161,7 +1155,7 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Status(_) => {}
                 BlockRangeMessage::Error(_) => break,
             }
         }
@@ -1190,7 +1184,7 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Status(_) => {}
                 BlockRangeMessage::Error(_) => break,
             }
         }
@@ -1219,7 +1213,7 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Status(_) => {}
                 BlockRangeMessage::Error(_) => break,
             }
         }
@@ -1251,7 +1245,7 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Status(_) => {}
                 BlockRangeMessage::Error(_) => break,
             }
         }
@@ -1280,7 +1274,7 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Status(_) => {}
                 BlockRangeMessage::Error(_) => break,
             }
         }
@@ -1309,7 +1303,7 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Info(_) => {}
+                BlockRangeMessage::Status(_) => {}
                 BlockRangeMessage::Error(_) => break,
             }
         }

@@ -57,7 +57,7 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("Received error: {e}");
                 }
-                EventScannerMessage::Info(_) => {}
+                EventScannerMessage::Status(_) => {}
             }
         }
     };

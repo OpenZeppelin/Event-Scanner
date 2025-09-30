@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
             EventScannerMessage::Error(e) => {
                 error!("Received error: {}", e);
             }
-            EventScannerMessage::Info(info) => {
+            EventScannerMessage::Status(info) => {
                 info!("Received info: {:?}", info);
             }
         }
