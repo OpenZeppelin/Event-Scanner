@@ -1149,8 +1149,8 @@ mod tests {
         let cutoff = 50;
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::Message(51..=55)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(55..=60)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Message(60..=70)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Message(56..=60)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Message(61..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
