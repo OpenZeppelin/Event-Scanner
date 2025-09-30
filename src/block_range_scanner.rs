@@ -32,7 +32,7 @@
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
-//!             BlockRangeMessage::Message(range) => {
+//!             BlockRangeMessage::Data(range) => {
 //!                 // process range
 //!             }
 //!             BlockRangeMessage::Error(e) => {
@@ -53,8 +53,8 @@
 //!                     }
 //!                 }
 //!             }
-//!             BlockRangeMessage::Info(info) => {
-//!                 info!("Received info message: {:?}", info);
+//!             BlockRangeMessage::Status(status) => {
+//!                 info!("Received status message: {:?}", status);
 //!             }
 //!         }
 //!     }
