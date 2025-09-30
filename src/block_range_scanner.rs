@@ -622,6 +622,7 @@ impl<N: Network> Service<N> {
                             return;
                         }
 
+                        // Overflow can not realistically happen
                         expected_next_block = confirmed + 1;
                     }
                 }
