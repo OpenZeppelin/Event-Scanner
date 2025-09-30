@@ -107,6 +107,23 @@ impl EventScanner {
             ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
         Ok(Client { event_scanner })
     }
+
+    /// Connects to an existing provider
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    pub fn connect_provider<N: Network>(
+        self, 
+        provider: RootProvider<N>
+    ) -> Result<Client<N>, EventScannerError> {
+        let block_range_scanner = self.block_range_scanner.connect_provider(provider)?;
+        let event_scanner = ConnectedEventScanner { 
+            block_range_scanner, 
+            event_listeners: Vec::default() 
+        };
+        Ok(Client { event_scanner })
+    }
 }
 
 pub struct ConnectedEventScanner<N: Network> {

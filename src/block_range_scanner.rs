@@ -281,6 +281,25 @@ impl BlockRangeScanner {
             },
         })
     }
+
+    /// Connects to an existing provider
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    pub fn connect_provider<N: Network>(
+        self, 
+        provider: RootProvider<N>
+    ) -> Result<ConnectedBlockRangeScanner<N>, BlockRangeScannerError> {
+        Ok(ConnectedBlockRangeScanner {
+            provider,
+            config: Config {
+                blocks_read_per_epoch: self.blocks_read_per_epoch,
+                reorg_rewind_depth: self.reorg_rewind_depth,
+                block_confirmations: self.block_confirmations,
+            },
+        })
+    }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
