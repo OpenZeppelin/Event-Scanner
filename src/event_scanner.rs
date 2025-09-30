@@ -174,22 +174,14 @@ impl<N: Network> ConnectedEventScanner<N> {
                         Ok(Ok(range)) => {
                             let (from_block, to_block) = (*range.start(), *range.end());
 
-                            let mut log_filter =
-                                Filter::new().from_block(from_block).to_block(to_block);
+                            let mut log_filter = Filter::new()
+                                .from_block(from_block)
+                                .to_block(to_block)
+                                .events(filter.events.clone());
 
                             if let Some(contract_address) = filter.contract_address {
                                 log_filter = log_filter.address(contract_address);
                             }
-
-                            if let Some(ref event_signature) = filter.event {
-                                log_filter = log_filter.event(event_signature.as_str());
-                            }
-
-                            let contract_display = filter.contract_address.map_or_else(
-                                || "all contracts".to_string(),
-                                |addr| format!("{addr:?}"),
-                            );
-                            let event_display = filter.event.as_deref().map_or("all events", |s| s);
 
                             match provider.get_logs(&log_filter).await {
                                 Ok(logs) => {
@@ -198,8 +190,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     }
 
                                     info!(
-                                        contract = %contract_display,
-                                        event = %event_display,
+                                        filter = %filter,
                                         log_count = logs.len(),
                                         from_block,
                                         to_block,
@@ -207,13 +198,12 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     );
 
                                     if let Err(e) = sender.send(Ok(logs)).await {
-                                        error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
+                                        error!(filter = %filter, error = %e, "failed to enqueue log for processing");
                                     }
                                 }
                                 Err(e) => {
                                     error!(
-                                        contract = %contract_display,
-                                        event = %event_display,
+                                        filter = %filter,
                                         error = %e,
                                         from_block,
                                         to_block,
@@ -223,7 +213,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     if let Err(send_err) =
                                         sender.send(Err(Arc::new(EventScannerError::from(e)))).await
                                     {
-                                        error!(event = %event_display, error = %send_err, "failed to enqueue error for processing");
+                                        warn!(filter = %filter, error = %send_err, "Downstream channel closed, error could not be enqueued. Stopping event stream.");
+                                        break;
                                     }
                                 }
                             }

@@ -20,10 +20,9 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     let receipt = contract.increase().send().await?.get_receipt().await?;
     let start_block = receipt.block_number.expect("receipt should contain block number");

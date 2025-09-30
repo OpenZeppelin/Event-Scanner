@@ -21,10 +21,9 @@ async fn reorg_error_propagation_to_event_stream() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
