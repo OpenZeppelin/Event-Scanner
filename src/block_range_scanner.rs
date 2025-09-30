@@ -1155,8 +1155,9 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Status(_) => {}
-                BlockRangeMessage::Error(_) => break,
+                _ => {
+                    panic!("Didnt Receive Range");
+                }
             }
         }
 
@@ -1171,8 +1172,8 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::Data(40..=50)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(50..=60)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(60..=70)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(51..=60)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1184,8 +1185,9 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Status(_) => {}
-                BlockRangeMessage::Error(_) => break,
+                _ => {
+                    panic!("Didnt Receive Range");
+                }
             }
         }
 
@@ -1213,8 +1215,9 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Status(_) => {}
-                BlockRangeMessage::Error(_) => break,
+                _ => {
+                    panic!("Didnt Receive Range");
+                }
             }
         }
 
@@ -1229,8 +1232,8 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::Data(30..=45)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(BlockRangeMessage::Data(45..=55)).await.unwrap(); // Overlaps: trim to 50..=55
-        buffer_tx.send(BlockRangeMessage::Data(55..=65)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(BlockRangeMessage::Data(46..=55)).await.unwrap(); // Overlaps: trim to 50..=55
+        buffer_tx.send(BlockRangeMessage::Data(56..=65)).await.unwrap(); // After cutoff: forward as-is
         buffer_tx.send(BlockRangeMessage::Data(40..=49)).await.unwrap(); // Before cutoff: discard
         buffer_tx.send(BlockRangeMessage::Data(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
         buffer_tx.send(BlockRangeMessage::Data(51..=100)).await.unwrap(); // After cutoff: forward as-is
@@ -1245,12 +1248,13 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Status(_) => {}
-                BlockRangeMessage::Error(_) => break,
+                _ => {
+                    panic!("Didnt Receive Range");
+                }
             }
         }
 
-        assert_eq!(forwarded, vec![50..=55, 55..=65, 50..=51, 51..=100]);
+        assert_eq!(forwarded, vec![50..=55, 56..=65, 50..=51, 51..=100]);
         Ok(())
     }
 
@@ -1274,8 +1278,9 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Status(_) => {}
-                BlockRangeMessage::Error(_) => break,
+                _ => {
+                    panic!("Didnt Receive Range");
+                }
             }
         }
 
@@ -1303,8 +1308,9 @@ mod tests {
                 BlockRangeMessage::Data(range) => {
                     forwarded.push(range);
                 }
-                BlockRangeMessage::Status(_) => {}
-                BlockRangeMessage::Error(_) => break,
+                _ => {
+                    panic!("Didnt Receive Range");
+                }
             }
         }
 
