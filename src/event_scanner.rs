@@ -139,8 +139,8 @@ impl<N: Network> ConnectedEventScanner<N> {
         self.spawn_log_consumers(&range_tx);
 
         while let Some(message) = stream.next().await {
-            if let Err(send_err) = range_tx.send(message) {
-                error!(error = %send_err, "failed to send error");
+            if let Err(err) = range_tx.send(message) {
+                error!(error = %err, "failed sending message to broadcast channel");
             }
         }
 
@@ -220,16 +220,13 @@ impl<N: Network> ConnectedEventScanner<N> {
                             }
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
-                            if let Err(send_err) =
-                                sender.send(ScannerMessage::Error(e.into())).await
-                            {
-                                error!(error = %send_err, "failed to send error to broadcast channel");
+                            if let Err(err) = sender.send(ScannerMessage::Error(e.into())).await {
+                                error!(error = %err, "failed to propagate error to receiver stream");
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
-                            if let Err(send_err) = sender.send(ScannerMessage::Status(status)).await
-                            {
-                                error!(error = %send_err, "failed to send error to");
+                            if let Err(err) = sender.send(ScannerMessage::Status(status)).await {
+                                error!(error = %err, "failed to send info to receiver stream");
                             }
                         }
                         // TODO: What happens if the broadcast channel is closed?
