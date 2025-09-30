@@ -1295,8 +1295,8 @@ mod tests {
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::Data(0..=5)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(5..=10)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(10..=25)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(6..=10)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(11..=25)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
@@ -1315,7 +1315,7 @@ mod tests {
         }
 
         // All ranges should be forwarded since they're all >= 0
-        assert_eq!(forwarded, vec![0..=5, 5..=10, 10..=25]);
+        assert_eq!(forwarded, vec![0..=5, 6..=10, 11..=25]);
         Ok(())
     }
 

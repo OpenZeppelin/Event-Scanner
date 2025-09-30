@@ -220,7 +220,6 @@ impl<N: Network> ConnectedEventScanner<N> {
                             }
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
-                            warn!(error = %e, "block range scanner error");
                             if let Err(send_err) =
                                 sender.send(ScannerMessage::Error(e.into())).await
                             {
@@ -228,7 +227,6 @@ impl<N: Network> ConnectedEventScanner<N> {
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
-                            info!("Received info from block range scanner: {:?}", status);
                             if let Err(send_err) = sender.send(ScannerMessage::Status(status)).await
                             {
                                 error!(error = %send_err, "failed to send error to");
