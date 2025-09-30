@@ -583,8 +583,11 @@ impl<N: Network> Service<N> {
             Ok(ws_stream) => {
                 info!("WebSocket connected for live blocks");
 
-                let cur = expected_next_block;
-                let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cur);
+                // ensure we start streaming only after the expected_next_block cutoff
+                let cutoff = expected_next_block;
+                let mut stream =
+                    ws_stream.into_stream().skip_while(|header| header.number() < cutoff);
+
                 while let Some(incoming_block) = stream.next().await {
                     let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
