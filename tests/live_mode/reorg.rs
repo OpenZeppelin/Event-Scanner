@@ -441,7 +441,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     assert_eq!(final_hashes, expected_hashes);
 
-    assert!(!*reorg_detected.lock().await);
+    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
