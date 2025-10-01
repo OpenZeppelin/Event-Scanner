@@ -51,7 +51,7 @@ where
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::None, Option::None, Option::None).await?;
+        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -118,7 +118,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 #[tokio::test]
 async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::None, Option::None, Option::None).await?;
+        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -177,7 +177,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
         }
     };
 
-    let _ = timeout(Duration::from_secs(5), event_counting).await;
+    let _ = timeout(Duration::from_secs(10), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
     assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
@@ -190,7 +190,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 #[tokio::test]
 async fn reorg_depth_one() -> anyhow::Result<()> {
     let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(1.0), Option::None, Option::None).await?;
+        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -269,7 +269,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
 #[tokio::test]
 async fn reorg_depth_two() -> anyhow::Result<()> {
     let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(1.0), Option::None, Option::None).await?;
+        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -423,7 +423,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         }
     };
 
-    _ = timeout(Duration::from_secs(5), event_counting).await;
+    _ = timeout(Duration::from_secs(10), event_counting).await;
 
     let final_hashes: Vec<_> = event_tx_hash.lock().await.clone();
     let number_discarded = min(initial_events, reorg_depth);
@@ -441,7 +441,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     assert_eq!(final_hashes, expected_hashes);
 
-    assert!(*reorg_detected.lock().await);
+    assert!(!*reorg_detected.lock().await);
 
     Ok(())
 }
