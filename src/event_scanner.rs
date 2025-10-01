@@ -179,16 +179,20 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
                             if let Err(err) = sender.send(ScannerMessage::Error(e.into())).await {
-                                error!(error = %err, "failed to propagate error to receiver stream");
+                                error!(error = %err, "Downstream channel closed, skipping error propagation and stopping streaming.");
+                                break;
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
                             if let Err(err) = sender.send(ScannerMessage::Status(status)).await {
-                                error!(error = %err, "failed to send info to receiver stream");
+                                error!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping streaming.");
+                                break;
                             }
                         }
-                        // TODO: What happens if the broadcast channel is closed?
-                        Err(RecvError::Closed) => break,
+                        Err(RecvError::Closed) => {
+                            error!("No block ranges to receive, stopping streaming.");
+                            break;
+                        }
                         Err(RecvError::Lagged(_)) => {}
                     }
                 }
