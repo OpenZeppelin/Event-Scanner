@@ -596,9 +596,7 @@ impl<N: Network> Service<N> {
                     let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
 
-                    println!("expected {expected_next_block}");
                     if incoming_block_num < expected_next_block {
-                        println!("REORG {incoming_block_num}");
                         warn!("Reorg detected: sending forked range");
                         if sender
                             .send(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
@@ -614,9 +612,6 @@ impl<N: Network> Service<N> {
                     }
 
                     let confirmed = incoming_block_num.saturating_sub(block_confirmations);
-                    println!("inc {incoming_block_num}");
-                    println!("confirm {confirmed}");
-
                     if confirmed >= expected_next_block {
                         if sender
                             .send(BlockRangeMessage::Data(expected_next_block..=confirmed))

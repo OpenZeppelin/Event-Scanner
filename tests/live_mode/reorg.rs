@@ -19,31 +19,28 @@ async fn reorg_with_new_txs<P>(
     num_new_events: u64,
     reorg_depth: u64,
     mut return_array: Vec<u64>,
+    same_block: bool,
 ) -> anyhow::Result<Vec<u64>>
 where
     P: alloy::providers::Provider<Ethereum> + Clone,
 {
     let mut tx_block_pairs = vec![];
     let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
-    for _ in 0..num_new_events {
+    for i in 0..num_new_events {
         let tx = contract.increase().into_transaction_request();
-        tx_block_pairs.push((TransactionData::JSON(tx), 0));
-        return_array.push(latest_block.header.number - reorg_depth + 1);
+        tx_block_pairs.push((TransactionData::JSON(tx), if same_block { 0 } else { i }));
+        return_array
+            .push(latest_block.header.number - reorg_depth + 1 + if same_block { 0 } else { i });
     }
     let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
 
     provider.anvil_reorg(reorg_options).await.unwrap();
     let new_latest_block =
         provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap();
-    // sanity checks, block numb stays the same but hash changes
+
+    // sanity checks, block numbers stays the same but hash changes
     assert_eq!(new_latest_block.header.number, latest_block.header.number);
     assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
-
-    let new_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest_block.header.number - reorg_depth + 1))
-        .await?
-        .unwrap();
-    assert_eq!(new_block.transactions.len() as u64, num_new_events);
 
     Ok(return_array)
 }
@@ -66,6 +63,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 
     let num_new_events = 3;
     let reorg_depth = 5;
+    let same_block = true;
 
     expected_event_block_numbers = reorg_with_new_txs(
         provider,
@@ -73,6 +71,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
         num_new_events,
         reorg_depth,
         expected_event_block_numbers,
+        same_block,
     )
     .await?;
 
@@ -130,23 +129,20 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
         expected_event_block_numbers.push(receipt.block_number.unwrap());
     }
 
-    let mut tx_block_pairs = vec![];
-    let num_new_events = 3;
-    let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
     let reorg_depth = 5;
-    for i in 0..num_new_events {
-        let tx = contract.increase().into_transaction_request();
-        tx_block_pairs.push((TransactionData::JSON(tx), i));
-        expected_event_block_numbers.push(latest_block.header.number - reorg_depth + 1 + i);
-    }
-    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
+    let num_new_events = 3;
+    // add events in ascending blocks from reorg point
+    let same_block = false;
 
-    provider.anvil_reorg(reorg_options).await.unwrap();
-    let new_latest_block =
-        provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap();
-    // sanity checks, block numb stays the same but hash changes
-    assert_eq!(new_latest_block.header.number, latest_block.header.number);
-    assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
+    expected_event_block_numbers = reorg_with_new_txs(
+        provider,
+        contract,
+        num_new_events,
+        reorg_depth,
+        expected_event_block_numbers,
+        same_block,
+    )
+    .await?;
 
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
@@ -202,30 +198,19 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
         expected_event_block_numbers.push(receipt.block_number.unwrap());
     }
 
-    let mut tx_block_pairs = vec![];
-    let num_new_events = 1;
-    let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
     let reorg_depth = 1;
-    for _ in 0..num_new_events {
-        let tx = contract.increase().into_transaction_request();
-        tx_block_pairs.push((TransactionData::JSON(tx), 0));
-        expected_event_block_numbers.push(latest_block.header.number - reorg_depth + 1);
-    }
-    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
+    let num_new_events = 1;
+    let same_block = true;
 
-    provider.anvil_reorg(reorg_options).await.unwrap();
-    let new_latest_block =
-        provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap();
-
-    // sanity checks, block numb stays the same but hash changes
-    assert_eq!(new_latest_block.header.number, latest_block.header.number);
-    assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
-
-    let new_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest_block.header.number - reorg_depth + 1))
-        .await?
-        .unwrap();
-    assert_eq!(new_block.transactions.len(), num_new_events);
+    expected_event_block_numbers = reorg_with_new_txs(
+        provider,
+        contract,
+        num_new_events,
+        reorg_depth,
+        expected_event_block_numbers,
+        same_block,
+    )
+    .await?;
 
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
@@ -259,7 +244,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert_eq!(final_blocks.len(), initial_events + num_new_events);
+    assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
     assert!(*reorg_detected.lock().await);
 
@@ -281,30 +266,19 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
         expected_event_block_numbers.push(receipt.block_number.unwrap());
     }
 
-    let mut tx_block_pairs = vec![];
     let num_new_events = 1;
-    let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
     let reorg_depth = 2;
-    for _ in 0..num_new_events {
-        let tx = contract.increase().into_transaction_request();
-        tx_block_pairs.push((TransactionData::JSON(tx), 0));
-        expected_event_block_numbers.push(latest_block.header.number - reorg_depth + 1);
-    }
-    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
 
-    provider.anvil_reorg(reorg_options).await.unwrap();
-    let new_latest_block =
-        provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap();
-
-    // sanity checks, block numb stays the same but hash changes
-    assert_eq!(new_latest_block.header.number, latest_block.header.number);
-    assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
-
-    let new_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest_block.header.number - reorg_depth + 1))
-        .await?
-        .unwrap();
-    assert_eq!(new_block.transactions.len(), num_new_events);
+    let same_block = true;
+    expected_event_block_numbers = reorg_with_new_txs(
+        provider,
+        contract,
+        num_new_events,
+        reorg_depth,
+        expected_event_block_numbers,
+        same_block,
+    )
+    .await?;
 
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
@@ -338,7 +312,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert_eq!(final_blocks.len(), initial_events + num_new_events);
+    assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_block_numbers);
     assert!(*reorg_detected.lock().await);
 
@@ -441,7 +415,9 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     assert_eq!(final_hashes, expected_hashes);
 
-    assert!(*reorg_detected.lock().await);
+    // reorg shouldnt be detected as we are only sending confirmed block
+    // reorg_depth < confirmed block
+    assert!(!*reorg_detected.lock().await);
 
     Ok(())
 }
