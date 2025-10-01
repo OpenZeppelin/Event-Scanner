@@ -88,14 +88,14 @@ use alloy::{
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
+pub const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
-const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
+pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 // const BACK_OFF_MAX_RETRIES: u64 = 5;
 
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 
-const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
+pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 
 // // State sync aware retry settings
 // const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);

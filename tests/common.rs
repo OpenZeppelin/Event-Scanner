@@ -1,5 +1,18 @@
-use alloy::{network::Ethereum, providers::ProviderBuilder, sol};
+use std::sync::Arc;
+
+use alloy::{
+    network::Ethereum,
+    providers::{Provider, ProviderBuilder, RootProvider},
+    sol,
+    sol_types::SolEvent,
+};
 use alloy_node_bindings::{Anvil, AnvilInstance};
+use event_scanner::{
+    EventFilter,
+    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
+    event_scanner::{Client, EventScanner, EventScannerMessage},
+};
+use tokio_stream::wrappers::ReceiverStream;
 
 // Shared test contract used across integration tests
 sol! {
@@ -28,6 +41,17 @@ sol! {
     }
 }
 
+pub struct TestSetup<P>
+where
+    P: Provider<Ethereum> + Clone,
+{
+    pub provider: RootProvider,
+    pub contract: TestCounter::TestCounterInstance<Arc<P>>,
+    pub client: Client<Ethereum>,
+    pub stream: ReceiverStream<EventScannerMessage>,
+    pub anvil: AnvilInstance,
+}
+
 #[allow(clippy::missing_errors_doc)]
 pub fn spawn_anvil(block_time_secs: f64) -> anyhow::Result<AnvilInstance> {
     Ok(Anvil::new().block_time_f64(block_time_secs).try_spawn()?)
@@ -35,12 +59,10 @@ pub fn spawn_anvil(block_time_secs: f64) -> anyhow::Result<AnvilInstance> {
 
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::missing_panics_doc)]
-pub async fn build_provider(
-    anvil: &AnvilInstance,
-) -> anyhow::Result<impl alloy::providers::Provider<Ethereum> + Clone> {
+pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RootProvider> {
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
     let provider = ProviderBuilder::new().wallet(wallet).connect(anvil.endpoint().as_str()).await?;
-    Ok(provider)
+    Ok(provider.root().to_owned())
 }
 
 #[allow(clippy::missing_errors_doc)]
@@ -50,4 +72,31 @@ where
 {
     let contract = TestCounter::deploy(provider).await?;
     Ok(contract)
+}
+
+pub async fn setup_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    confirmations: Option<u64>,
+) -> anyhow::Result<TestSetup<impl Provider<Ethereum> + Clone>> {
+    let anvil = spawn_anvil(block_interval.unwrap_or(0.1))?;
+    let provider = build_provider(&anvil).await?;
+    let contract = deploy_counter(Arc::new(provider.clone())).await?;
+
+    let default_filter = EventFilter {
+        contract_address: Some(*contract.address()),
+        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
+    };
+
+    let filter = filter.unwrap_or(default_filter);
+
+    let mut client = EventScanner::new()
+        .with_block_confirmations(confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS))
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = client.create_event_stream(filter);
+
+    // return anvil otherwise it doesnt live long enough...
+    Ok(TestSetup { provider, contract, client, stream, anvil })
 }

@@ -1,57 +1,34 @@
 use alloy::{
-    providers::Provider,
+    network::Ethereum,
+    providers::{Provider, RootProvider},
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
+use anyhow::Ok;
 use std::{cmp::min, sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
 use tokio::{sync::Mutex, time::timeout};
 
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use alloy::{
-    eips::BlockNumberOrTag, network::Ethereum, providers::ext::AnvilApi, sol_types::SolEvent,
-};
-use event_scanner::{
-    event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
-    types::ScannerStatus,
-};
+use crate::common::{TestCounter, TestSetup, setup_scanner};
+use alloy::{eips::BlockNumberOrTag, providers::ext::AnvilApi};
+use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
 
-#[tokio::test]
-async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(0.1).unwrap();
-    let provider = build_provider(&anvil).await.unwrap();
-
-    let contract = deploy_counter(provider.clone()).await?;
-    let contract_address = *contract.address();
-
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
-
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-
-    let mut stream = client.create_event_stream(filter);
-
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
-
-    let mut expected_event_block_numbers = vec![];
-
-    let initial_events = 5_u64;
-    for _ in 0..initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        expected_event_block_numbers.push(receipt.block_number.unwrap());
-    }
-
+async fn reorg_with_new_txs<P>(
+    provider: RootProvider,
+    contract: TestCounter::TestCounterInstance<Arc<P>>,
+    num_new_events: u64,
+    reorg_depth: u64,
+    mut return_array: Vec<u64>,
+) -> anyhow::Result<Vec<u64>>
+where
+    P: alloy::providers::Provider<Ethereum> + Clone,
+{
     let mut tx_block_pairs = vec![];
-    let num_new_events = 3_u64;
     let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
-    let reorg_depth = 5;
     for _ in 0..num_new_events {
         let tx = contract.increase().into_transaction_request();
         tx_block_pairs.push((TransactionData::JSON(tx), 0));
-        expected_event_block_numbers.push(latest_block.header.number - reorg_depth + 1);
+        return_array.push(latest_block.header.number - reorg_depth + 1);
     }
     let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
 
@@ -68,6 +45,37 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
         .unwrap();
     assert_eq!(new_block.transactions.len() as u64, num_new_events);
 
+    Ok(return_array)
+}
+
+#[tokio::test]
+async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
+    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
+        setup_scanner(Option::None, Option::None, Option::None).await?;
+
+    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+
+    let mut expected_event_block_numbers = vec![];
+
+    let initial_events = 5;
+
+    for _ in 0..initial_events {
+        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
+        expected_event_block_numbers.push(receipt.block_number.unwrap());
+    }
+
+    let num_new_events = 3;
+    let reorg_depth = 5;
+
+    expected_event_block_numbers = reorg_with_new_txs(
+        provider,
+        contract,
+        num_new_events,
+        reorg_depth,
+        expected_event_block_numbers,
+    )
+    .await?;
+
     let event_block_count = Arc::new(Mutex::new(Vec::new()));
     let event_block_count_clone = Arc::clone(&event_block_count);
 
@@ -75,8 +83,8 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let reorg_detected_clone = reorg_detected.clone();
 
     let event_counting = async move {
-        while let Some(res) = stream.next().await {
-            match res {
+        while let Some(message) = stream.next().await {
+            match message {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
@@ -109,20 +117,8 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(0.1).unwrap();
-    let provider = build_provider(&anvil).await.unwrap();
-
-    let contract = deploy_counter(provider.clone()).await?;
-    let contract_address = *contract.address();
-
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
-
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-
-    let mut stream = client.create_event_stream(filter);
+    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
+        setup_scanner(Option::None, Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -159,8 +155,8 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let reorg_detected_clone = reorg_detected.clone();
 
     let event_counting = async move {
-        while let Some(res) = stream.next().await {
-            match res {
+        while let Some(message) = stream.next().await {
+            match message {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
@@ -172,8 +168,8 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
                 EventScannerMessage::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Status(info) => {
-                    if matches!(info, ScannerStatus::ReorgDetected) {
+                EventScannerMessage::Status(status) => {
+                    if matches!(status, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
                 }
@@ -193,20 +189,8 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_depth_one() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1.0).unwrap();
-    let provider = build_provider(&anvil).await.unwrap();
-
-    let contract = deploy_counter(provider.clone()).await?;
-    let contract_address = *contract.address();
-
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
-
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-
-    let mut stream = client.create_event_stream(filter);
+    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
+        setup_scanner(Option::Some(1.0), Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -250,8 +234,8 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let reorg_detected_clone = reorg_detected.clone();
 
     let event_counting = async move {
-        while let Some(res) = stream.next().await {
-            match res {
+        while let Some(message) = stream.next().await {
+            match message {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
@@ -284,20 +268,8 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_depth_two() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1.0).unwrap();
-    let provider = build_provider(&anvil).await.unwrap();
-
-    let contract = deploy_counter(provider.clone()).await?;
-    let contract_address = *contract.address();
-
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
-
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-
-    let mut stream = client.create_event_stream(filter);
+    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
+        setup_scanner(Option::Some(1.0), Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -341,8 +313,8 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let reorg_detected_clone = reorg_detected.clone();
 
     let event_counting = async move {
-        while let Some(res) = stream.next().await {
-            match res {
+        while let Some(message) = stream.next().await {
+            match message {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
@@ -375,24 +347,9 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(1.0).unwrap();
-    let provider = build_provider(&anvil).await.unwrap();
-
-    let contract = deploy_counter(provider.clone()).await?;
-    let contract_address = *contract.address();
-
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
-
-    let block_confirmation = 5;
-    let mut client = EventScanner::new()
-        .with_block_confirmations(block_confirmation)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
-
-    let mut stream = client.create_event_stream(filter);
+    let block_confirmations = 5;
+    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
+        setup_scanner(Option::Some(1.0), Option::None, Option::Some(block_confirmations)).await?;
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
@@ -444,8 +401,8 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let reorg_detected_clone = reorg_detected.clone();
 
     let event_counting = async move {
-        while let Some(res) = stream.next().await {
-            match res {
+        while let Some(message) = stream.next().await {
+            match message {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_tx_hash_clone.lock().await;
                     for log in logs {
