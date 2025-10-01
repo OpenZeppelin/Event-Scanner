@@ -168,20 +168,23 @@ impl<N: Network> ConnectedEventScanner<N> {
             let sender = listener.sender.clone();
             let mut sub = range_tx.subscribe();
 
+            let mut log_filter = Filter::new();
+            if let Some(contract_address) = filter.contract_address {
+                log_filter = log_filter.address(contract_address);
+            }
+            let events = filter.all_events();
+            if !events.is_empty() {
+                log_filter = log_filter.event_signature(events);
+            }
+
             tokio::spawn(async move {
                 loop {
                     match sub.recv().await {
                         Ok(Ok(range)) => {
                             let (from_block, to_block) = (*range.start(), *range.end());
 
-                            let mut log_filter = Filter::new()
-                                .from_block(from_block)
-                                .to_block(to_block)
-                                .events(filter.events.clone());
-
-                            if let Some(contract_address) = filter.contract_address {
-                                log_filter = log_filter.address(contract_address);
-                            }
+                            let log_filter =
+                                log_filter.clone().from_block(from_block).to_block(to_block);
 
                             match provider.get_logs(&log_filter).await {
                                 Ok(logs) => {
