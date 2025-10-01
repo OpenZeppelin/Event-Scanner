@@ -7,10 +7,10 @@ use std::{
 };
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, rpc::types::Log, sol_types::SolEvent};
+use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{
     event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerError},
+    event_scanner::{EventScanner, EventScannerMessage},
 };
 use tokio::time::timeout;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
@@ -41,13 +41,24 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
         let mut expected_new_count = 1;
-        while let Some(Ok(logs)) = stream.next().await {
-            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        while let Some(message) = stream.next().await {
+            match message {
+                EventScannerMessage::Data(logs) => {
+                    event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
-            for log in logs {
-                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
-                assert_eq!(newCount, expected_new_count);
-                expected_new_count += 1;
+                    for log in logs {
+                        let TestCounter::CountIncreased { newCount } =
+                            log.log_decode().unwrap().inner.data;
+                        assert_eq!(newCount, expected_new_count);
+                        expected_new_count += 1;
+                    }
+                }
+                EventScannerMessage::Error(e) => {
+                    panic!("panicked with error: {e}");
+                }
+                EventScannerMessage::Status(_) => {
+                    // Handle info if needed
+                }
             }
         }
     };
@@ -90,31 +101,39 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         b.increase().send().await?.watch().await?;
     }
 
-    let make_assertion =
-        async |stream: ReceiverStream<Result<Vec<Log>, Arc<EventScannerError>>>,
-               expected_events| {
-            let mut stream = stream.take(expected_events);
+    let make_assertion = async |stream: ReceiverStream<EventScannerMessage>, expected_events| {
+        let mut stream = stream.take(expected_events);
 
-            let count = Arc::new(AtomicUsize::new(0));
-            let count_clone = Arc::clone(&count);
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_clone = Arc::clone(&count);
 
-            let event_counting = async move {
-                let mut expected_new_count = 1;
-                while let Some(Ok(logs)) = stream.next().await {
-                    count_clone.fetch_add(logs.len(), Ordering::SeqCst);
+        let event_counting = async move {
+            let mut expected_new_count = 1;
+            while let Some(message) = stream.next().await {
+                match message {
+                    EventScannerMessage::Data(logs) => {
+                        count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
-                    for log in logs {
-                        let TestCounter::CountIncreased { newCount } =
-                            log.log_decode().unwrap().inner.data;
-                        assert_eq!(newCount, expected_new_count);
-                        expected_new_count += 1;
+                        for log in logs {
+                            let TestCounter::CountIncreased { newCount } =
+                                log.log_decode().unwrap().inner.data;
+                            assert_eq!(newCount, expected_new_count);
+                            expected_new_count += 1;
+                        }
+                    }
+                    EventScannerMessage::Error(e) => {
+                        panic!("panicked with error: {e}");
+                    }
+                    EventScannerMessage::Status(_) => {
+                        // Handle info if needed
                     }
                 }
-            };
-
-            _ = timeout(Duration::from_secs(1), event_counting).await;
-            assert_eq!(count.load(Ordering::SeqCst), expected_events);
+            }
         };
+
+        _ = timeout(Duration::from_secs(1), event_counting).await;
+        assert_eq!(count.load(Ordering::SeqCst), expected_events);
+    };
 
     make_assertion(a_stream, expected_events_a).await;
     make_assertion(b_stream, expected_events_b).await;
@@ -162,7 +181,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         let mut expected_new_count = 0;
 
         // process CountIncreased
-        while let Some(Ok(logs)) = incr_stream.next().await {
+        while let Some(EventScannerMessage::Data(logs)) = incr_stream.next().await {
             incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
             for log in logs {
@@ -175,7 +194,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         expected_new_count -= 1;
 
         // process CountDecreased
-        while let Some(Ok(logs)) = decr_stream.next().await {
+        while let Some(EventScannerMessage::Data(logs)) = decr_stream.next().await {
             decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
             for log in logs {

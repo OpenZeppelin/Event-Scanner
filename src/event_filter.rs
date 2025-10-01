@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 
 use alloy::{
     primitives::{Address, keccak256},
-    rpc::types::{Topic, ValueOrArray},
+    rpc::types::{Filter, Topic, ValueOrArray},
 };
 
 /// Type representing filters to apply when fetching events from the chain.
@@ -126,6 +126,34 @@ impl EventFilter {
         let sigs = self.event_signatures.clone();
         let sigs = sigs.extend(events);
         sigs
+    }
+}
+
+impl From<EventFilter> for Filter {
+    fn from(value: EventFilter) -> Self {
+        let mut filter = Filter::new();
+        if let Some(contract_address) = value.contract_address {
+            filter = filter.address(contract_address);
+        }
+        let events = value.all_events();
+        if !events.is_empty() {
+            filter = filter.event_signature(events);
+        }
+        filter
+    }
+}
+
+impl From<&EventFilter> for Filter {
+    fn from(value: &EventFilter) -> Self {
+        let mut filter = Filter::new();
+        if let Some(contract_address) = value.contract_address {
+            filter = filter.address(contract_address);
+        }
+        let events = value.all_events();
+        if !events.is_empty() {
+            filter = filter.event_signature(events);
+        }
+        filter
     }
 }
 
