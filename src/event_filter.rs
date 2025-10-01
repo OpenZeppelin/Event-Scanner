@@ -79,7 +79,8 @@ impl EventFilter {
     }
 
     /// Sets the event signature to filter specific events.
-    /// If neither events nor event signature hashes are set, all events from the specified contract(s) will be tracked.
+    /// If neither events nor event signature hashes are set, all events from the specified
+    /// contract(s) will be tracked.
     #[must_use]
     pub fn with_event(mut self, event: impl Into<String>) -> Self {
         let event = event.into();
@@ -90,7 +91,8 @@ impl EventFilter {
     }
 
     /// Sets the event signatures to filter specific events.
-    /// If neither events nor event signature hashes are set, all events from the specified contract(s) will be tracked.
+    /// If neither events nor event signature hashes are set, all events from the specified
+    /// contract(s) will be tracked.
     #[must_use]
     pub fn with_events(mut self, events: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.events.extend(events.into_iter().map(Into::into));
@@ -98,7 +100,8 @@ impl EventFilter {
     }
 
     /// Sets the event signature hash to filter specific events.
-    /// If neither event signature hashes nor events are set, all events from the specified contract(s) will be tracked.
+    /// If neither event signature hashes nor events are set, all events from the specified
+    /// contract(s) will be tracked.
     #[must_use]
     pub fn with_event_signature(mut self, event_signature: impl Into<Topic>) -> Self {
         self.event_signatures = self.event_signatures.extend(event_signature.into());
@@ -106,7 +109,8 @@ impl EventFilter {
     }
 
     /// Sets the event signature hashes to filter specific events.
-    /// If neither event signature hashes nor events are set, all events from the specified contract(s) will be tracked.
+    /// If neither event signature hashes nor events are set, all events from the specified
+    /// contract(s) will be tracked.
     #[must_use]
     pub fn with_event_signatures(
         mut self,
@@ -124,8 +128,7 @@ impl EventFilter {
     pub fn all_events(&self) -> Topic {
         let events = self.events.iter().map(|e| keccak256(e.as_bytes())).collect::<Vec<_>>();
         let sigs = self.event_signatures.clone();
-        let sigs = sigs.extend(events);
-        sigs
+        sigs.extend(events)
     }
 }
 
@@ -185,7 +188,7 @@ mod tests {
         let address = address!("0x000000000000000000000000000000000000dEaD");
         let filter = EventFilter::new().with_contract_address(address);
         let got = format!("{filter}");
-        let expected = format!("EventFilter(contract: 0x000000000000000000000000000000000000dEaD)");
+        let expected = "EventFilter(contract: 0x000000000000000000000000000000000000dEaD)";
         assert_eq!(got, expected);
 
         // Debug should equal Display
@@ -197,7 +200,7 @@ mod tests {
         let event = SomeContract::EventOne::SIGNATURE;
         let filter = EventFilter::new().with_event(event);
         let got = format!("{filter}");
-        let expected = format!("EventFilter(events: [EventOne()])");
+        let expected = "EventFilter(events: [EventOne()])";
         assert_eq!(got, expected);
 
         // Debug should equal Display
@@ -209,9 +212,7 @@ mod tests {
         let event_signature = SomeContract::EventOne::SIGNATURE_HASH;
         let filter = EventFilter::new().with_event_signature(event_signature);
         let got = format!("{filter}");
-        let expected = format!(
-            "EventFilter(event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])"
-        );
+        let expected = "EventFilter(event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
         assert_eq!(got, expected);
 
         // Debug should equal Display
@@ -225,9 +226,7 @@ mod tests {
         let filter = EventFilter::new().with_contract_address(address).with_events(events.clone());
 
         let got = format!("{filter}");
-        let expected = format!(
-            "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, events: [EventOne(), EventTwo()])"
-        );
+        let expected = "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, events: [EventOne(), EventTwo()])";
         assert_eq!(got, expected);
 
         // Debug should equal Display
@@ -244,13 +243,8 @@ mod tests {
             .with_event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
-        // `Topic` doesn't guarantee the order of values it returns
-        let expected_1 = format!(
-            "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])"
-        );
-        let expected_2 = format!(
-            "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91, 0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff])"
-        );
+        let expected_1 = "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
+        let expected_2 = "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91, 0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff])";
         assert!(
             got == expected_1 || got == expected_2,
             "got: {got},\nexpected_1: {expected_1},\nexpected_2: {expected_2}"
@@ -270,12 +264,8 @@ mod tests {
             .with_event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
-        let expected_1 = format!(
-            "EventFilter(events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])",
-        );
-        let expected_2 = format!(
-            "EventFilter(events: [EventOne(), EventTwo()], event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91, 0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff])",
-        );
+        let expected_1 = "EventFilter(events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
+        let expected_2 = "EventFilter(events: [EventOne(), EventTwo()], event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91, 0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff])";
         assert!(
             got == expected_1 || got == expected_2,
             "got: {got},\nexpected_1: {expected_1},\nexpected_2: {expected_2}"
@@ -297,12 +287,8 @@ mod tests {
             .with_event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
-        let expected_1 = format!(
-            "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])",
-        );
-        let expected_2 = format!(
-            "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, events: [EventOne(), EventTwo()], event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91, 0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff])",
-        );
+        let expected_1 = "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
+        let expected_2 = "EventFilter(contract: 0x000000000000000000000000000000000000dEaD, events: [EventOne(), EventTwo()], event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91, 0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff])";
         assert!(
             got == expected_1 || got == expected_2,
             "got: {got},\nexpected_1: {expected_1},\nexpected_2: {expected_2}"
