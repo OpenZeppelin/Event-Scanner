@@ -74,6 +74,7 @@ where
     Ok(contract)
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub async fn setup_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
