@@ -1,5 +1,6 @@
 use alloy::{
     network::Ethereum,
+    primitives::FixedBytes,
     providers::{Provider, RootProvider},
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
@@ -16,33 +17,73 @@ use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
 async fn reorg_with_new_txs<P>(
     provider: RootProvider,
     contract: TestCounter::TestCounterInstance<Arc<P>>,
+    num_initial_events: u64,
     num_new_events: u64,
     reorg_depth: u64,
-    mut return_array: Vec<u64>,
     same_block: bool,
-) -> anyhow::Result<Vec<u64>>
+) -> anyhow::Result<Vec<FixedBytes<32>>>
 where
     P: alloy::providers::Provider<Ethereum> + Clone,
 {
-    let mut tx_block_pairs = vec![];
-    let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
+    let mut event_tx_hashes = vec![];
+
+    for _ in 0..num_initial_events {
+        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
+        event_tx_hashes.push(receipt.transaction_hash);
+    }
+
+    let mut tx_hashes = vec![];
     for i in 0..num_new_events {
         let tx = contract.increase().into_transaction_request();
-        tx_block_pairs.push((TransactionData::JSON(tx), if same_block { 0 } else { i }));
-        return_array
-            .push(latest_block.header.number - reorg_depth + 1 + if same_block { 0 } else { i });
+        tx_hashes.push((TransactionData::JSON(tx), if same_block { 0 } else { i }));
     }
-    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
+    let pre_reorg_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
+
+    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs: tx_hashes };
 
     provider.anvil_reorg(reorg_options).await.unwrap();
-    let new_latest_block =
-        provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap();
+
+    let post_reorg_block = provider
+        .get_block_by_number(BlockNumberOrTag::Number(pre_reorg_block.number()))
+        .full()
+        .await?
+        .unwrap();
 
     // sanity checks, block numbers stays the same but hash changes
-    assert_eq!(new_latest_block.header.number, latest_block.header.number);
-    assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
+    assert_eq!(post_reorg_block.header.number, pre_reorg_block.header.number);
+    assert_ne!(post_reorg_block.header.hash, pre_reorg_block.header.hash);
 
-    Ok(return_array)
+    if same_block {
+        // only check block we inserted events in
+        let new_block = provider
+            .get_block_by_number(BlockNumberOrTag::Number(
+                post_reorg_block.header.number - reorg_depth + 1,
+            ))
+            .await?
+            .unwrap();
+        assert_eq!(new_block.transactions.len() as u64, num_new_events);
+
+        for tx_hash in new_block.transactions.hashes() {
+            event_tx_hashes.push(tx_hash);
+        }
+    } else {
+        for i in 0..num_new_events {
+            // check subquent blocks for events
+            let new_block = provider
+                .get_block_by_number(BlockNumberOrTag::Number(
+                    post_reorg_block.header.number - reorg_depth + 1 + i,
+                ))
+                .await?
+                .unwrap();
+            assert_eq!(new_block.transactions.len() as u64, 1);
+
+            for tx_hash in new_block.transactions.hashes() {
+                event_tx_hashes.push(tx_hash);
+            }
+        }
+    }
+
+    Ok(event_tx_hashes)
 }
 
 #[tokio::test]
@@ -52,25 +93,17 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
-    let mut expected_event_block_numbers = vec![];
-
-    let initial_events = 5;
-
-    for _ in 0..initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        expected_event_block_numbers.push(receipt.block_number.unwrap());
-    }
-
+    let num_initial_events = 5;
     let num_new_events = 3;
     let reorg_depth = 5;
     let same_block = true;
 
-    expected_event_block_numbers = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_txs(
         provider,
         contract,
+        num_initial_events,
         num_new_events,
         reorg_depth,
-        expected_event_block_numbers,
         same_block,
     )
     .await?;
@@ -87,7 +120,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
-                        if let Some(n) = log.block_number {
+                        if let Some(n) = log.transaction_hash {
                             guard.push(n);
                         }
                     }
@@ -107,8 +140,8 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
-    assert_eq!(final_blocks, expected_event_block_numbers);
+    assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
+    assert_eq!(final_blocks, expected_event_tx_hashes);
     assert!(*reorg_detected.lock().await);
 
     Ok(())
@@ -121,25 +154,19 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
-    let mut expected_event_block_numbers = vec![];
-
-    let initial_events = 5;
-    for _ in 0..initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        expected_event_block_numbers.push(receipt.block_number.unwrap());
-    }
+    let num_initial_events = 5;
 
     let reorg_depth = 5;
     let num_new_events = 3;
     // add events in ascending blocks from reorg point
     let same_block = false;
 
-    expected_event_block_numbers = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_txs(
         provider,
         contract,
+        num_initial_events,
         num_new_events,
         reorg_depth,
-        expected_event_block_numbers,
         same_block,
     )
     .await?;
@@ -156,7 +183,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
-                        if let Some(n) = log.block_number {
+                        if let Some(n) = log.transaction_hash {
                             guard.push(n);
                         }
                     }
@@ -176,8 +203,8 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let _ = timeout(Duration::from_secs(10), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
-    assert_eq!(final_blocks, expected_event_block_numbers);
+    assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
+    assert_eq!(final_blocks, expected_event_tx_hashes);
     assert!(*reorg_detected.lock().await);
 
     Ok(())
@@ -190,24 +217,18 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
-    let mut expected_event_block_numbers = vec![];
-
-    let initial_events = 4;
-    for _ in 0..initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        expected_event_block_numbers.push(receipt.block_number.unwrap());
-    }
+    let num_initial_events = 4;
 
     let reorg_depth = 1;
     let num_new_events = 1;
     let same_block = true;
 
-    expected_event_block_numbers = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_txs(
         provider,
         contract,
+        num_initial_events,
         num_new_events,
         reorg_depth,
-        expected_event_block_numbers,
         same_block,
     )
     .await?;
@@ -224,7 +245,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
-                        if let Some(n) = log.block_number {
+                        if let Some(n) = log.transaction_hash {
                             guard.push(n);
                         }
                     }
@@ -244,8 +265,8 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
-    assert_eq!(final_blocks, expected_event_block_numbers);
+    assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
+    assert_eq!(final_blocks, expected_event_tx_hashes);
     assert!(*reorg_detected.lock().await);
 
     Ok(())
@@ -258,24 +279,18 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 
     tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
 
-    let mut expected_event_block_numbers = vec![];
-
-    let initial_events = 4;
-    for _ in 0..initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        expected_event_block_numbers.push(receipt.block_number.unwrap());
-    }
+    let num_initial_events = 4;
 
     let num_new_events = 1;
     let reorg_depth = 2;
 
     let same_block = true;
-    expected_event_block_numbers = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_txs(
         provider,
         contract,
+        num_initial_events,
         num_new_events,
         reorg_depth,
-        expected_event_block_numbers,
         same_block,
     )
     .await?;
@@ -292,7 +307,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
                 EventScannerMessage::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
-                        if let Some(n) = log.block_number {
+                        if let Some(n) = log.transaction_hash {
                             guard.push(n);
                         }
                     }
@@ -312,8 +327,8 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert_eq!(final_blocks.len() as u64, initial_events + num_new_events);
-    assert_eq!(final_blocks, expected_event_block_numbers);
+    assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
+    assert_eq!(final_blocks, expected_event_tx_hashes);
     assert!(*reorg_detected.lock().await);
 
     Ok(())
@@ -329,41 +344,21 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     provider.anvil_mine(Some(10), None).await?;
 
-    let mut all_tx_hashes = vec![];
+    let num_initial_events = 4_u64;
 
-    let initial_events = 4_u64;
-    for _ in 0..initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        all_tx_hashes.push(receipt.transaction_hash);
-    }
-
-    let mut tx_block_pairs = vec![];
     let num_new_events = 2_u64;
-    let latest_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
     let reorg_depth = 2_u64;
-    for _ in 0..num_new_events {
-        let tx = contract.increase().into_transaction_request();
-        tx_block_pairs.push((TransactionData::JSON(tx), 0));
-    }
-    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs };
+    let same_block = false;
 
-    provider.anvil_reorg(reorg_options).await.unwrap();
-    let new_latest_block =
-        provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap();
-
-    // sanity checks, block numb stays the same but hash changes
-    assert_eq!(new_latest_block.header.number, latest_block.header.number);
-    assert_ne!(new_latest_block.header.hash, latest_block.header.hash);
-
-    let new_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(latest_block.header.number - reorg_depth + 1))
-        .await?
-        .unwrap();
-    assert_eq!(new_block.transactions.len() as u64, num_new_events);
-
-    for tx_hash in new_block.transactions.hashes() {
-        all_tx_hashes.push(tx_hash);
-    }
+    let all_tx_hashes = reorg_with_new_txs(
+        provider.clone(),
+        contract,
+        num_initial_events,
+        num_new_events,
+        reorg_depth,
+        same_block,
+    )
+    .await?;
 
     // continue mining to simulate incoming blocks
     provider.anvil_mine(Some(10), None).await?;
@@ -400,15 +395,15 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(10), event_counting).await;
 
     let final_hashes: Vec<_> = event_tx_hash.lock().await.clone();
-    let number_discarded = min(initial_events, reorg_depth);
-    let expected_total = (initial_events - number_discarded) + num_new_events;
+    let number_discarded = min(num_initial_events, reorg_depth);
+    let expected_total = (num_initial_events - number_discarded) + num_new_events;
     assert_eq!(final_hashes.len() as u64, expected_total);
 
     let confirmed_initial_hashes =
-        &all_tx_hashes[0..(initial_events - number_discarded).try_into().unwrap()];
+        &all_tx_hashes[0..(num_initial_events - number_discarded).try_into().unwrap()];
 
-    let reorg_hashes = &all_tx_hashes[usize::try_from(initial_events).unwrap()..
-        (initial_events + num_new_events).try_into().unwrap()];
+    let reorg_hashes = &all_tx_hashes[usize::try_from(num_initial_events).unwrap()..
+        (num_initial_events + num_new_events).try_into().unwrap()];
 
     let expected_hashes: Vec<_> =
         confirmed_initial_hashes.iter().chain(reorg_hashes.iter()).copied().collect();

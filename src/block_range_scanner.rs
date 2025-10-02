@@ -607,8 +607,12 @@ impl<N: Network> Service<N> {
                             return;
                         }
 
-                        // resets cursor to incoming block num
-                        expected_next_block = incoming_block_num;
+                        // Calculate the confirmed block position for the incoming block
+                        let incoming_confirmed =
+                            incoming_block_num.saturating_sub(block_confirmations);
+
+                        // updated expected block to updated confirmed
+                        expected_next_block = incoming_confirmed;
                     }
 
                     let confirmed = incoming_block_num.saturating_sub(block_confirmations);
@@ -900,10 +904,10 @@ mod tests {
     use alloy::{
         network::Ethereum,
         primitives::{B256, keccak256},
-        providers::ProviderBuilder,
+        providers::{ProviderBuilder, ext::AnvilApi},
         rpc::{
             client::RpcClient,
-            types::{Block as RpcBlock, Header, Transaction},
+            types::{Block as RpcBlock, Header, Transaction, anvil::ReorgOptions},
         },
         transports::mock::Asserter,
     };
@@ -1018,8 +1022,6 @@ mod tests {
         let anvil = Anvil::new().block_time_f64(0.01).try_spawn()?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(3)
-            .with_reorg_rewind_depth(5)
             .with_block_confirmations(1)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
@@ -1052,8 +1054,6 @@ mod tests {
         let block_confirmations = 5;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(3)
-            .with_reorg_rewind_depth(5)
             .with_block_confirmations(block_confirmations)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
@@ -1078,6 +1078,129 @@ mod tests {
             assert!(*range.end() >= *range.start());
             block_range_start = *range.end() + 1;
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
+        let anvil = Anvil::new().block_time(1).try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        let block_confirmations = 5;
+
+        let client = BlockRangeScanner::new()
+            .with_block_confirmations(block_confirmations)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut receiver = client.stream_live().await?;
+
+        provider.anvil_mine(Option::Some(10), Option::None).await?;
+
+        provider
+            .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
+            .await?;
+
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
+
+        let mut block_range_start = 0;
+
+        let end_loop = 20;
+        let mut i = 0;
+        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+            if block_range_start == 0 {
+                block_range_start = *range.start();
+            }
+
+            assert_eq!(block_range_start, *range.start());
+            assert!(*range.end() >= *range.start());
+            block_range_start = *range.end() + 1;
+            i += 1;
+            if i == end_loop {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
+        let anvil = Anvil::new().block_time(1).try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        let block_confirmations = 3;
+
+        let client = BlockRangeScanner::new()
+            .with_block_confirmations(block_confirmations)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut receiver = client.stream_live().await?;
+
+        provider.anvil_mine(Option::Some(10), Option::None).await?;
+
+        provider
+            .anvil_reorg(ReorgOptions { depth: block_confirmations + 2, tx_block_pairs: vec![] })
+            .await?;
+
+        provider.anvil_mine(Option::Some(30), Option::None).await?;
+        receiver.close();
+
+        let mut block_range_start = 0;
+
+        let mut block_num = vec![];
+        let mut reorg_detected = false;
+        while let Some(msg) = receiver.next().await {
+            match msg {
+                BlockRangeMessage::Data(range) => {
+                    if block_range_start == 0 {
+                        block_range_start = *range.start();
+                    }
+                    block_num.push(range);
+                    if block_num.len() == 15 {
+                        break;
+                    }
+                }
+                BlockRangeMessage::Status(ScannerStatus::ReorgDetected) => {
+                    reorg_detected = true;
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+        assert!(reorg_detected, "Reorg should have been detected");
+
+        // Check that blocks 3-7 appear twice (they were reorged and resent)
+        let block_numbers: Vec<u64> = block_num.iter().map(|r| *r.start()).collect();
+
+        // Find where blocks 3-7 appear the first time
+        let first_occurrence =
+            block_numbers.iter().position(|&b| b == 3).expect("Block 3 should appear");
+
+        // Find where blocks 3-7 appear the second time (after reorg)
+        let second_occurrence = block_numbers[first_occurrence + 1..]
+            .iter()
+            .position(|&b| b == 3)
+            .map(|pos| pos + first_occurrence + 1)
+            .expect("Block 3 should appear twice due to reorg");
+
+        // Verify that blocks 3,4,5,6,7 appear in sequence twice
+        assert_eq!(
+            block_num[first_occurrence..first_occurrence + 5],
+            vec![3..=3, 4..=4, 5..=5, 6..=6, 7..=7],
+            "First occurrence of blocks 3-7"
+        );
+        assert_eq!(
+            block_num[second_occurrence..second_occurrence + 5],
+            vec![3..=3, 4..=4, 5..=5, 6..=6, 7..=7],
+            "Second occurrence of blocks 3-7 after reorg"
+        );
 
         Ok(())
     }
