@@ -411,15 +411,16 @@ impl<N: Network> Service<N> {
 
     async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
         let provider = self.provider.clone();
-        let start = self.provider.get_block_number().await?;
+        let latest = self.provider.get_block_number().await?;
 
         let Some(sender) = self.subscriber.clone() else {
             return Err(BlockRangeScannerError::ServiceShutdown);
         };
 
         let block_confirmations = self.config.block_confirmations;
+        let expected_next = latest.saturating_sub(block_confirmations);
         tokio::spawn(async move {
-            Self::stream_live_blocks(start, provider, sender, block_confirmations).await;
+            Self::stream_live_blocks(expected_next, provider, sender, block_confirmations).await;
         });
 
         Ok(())
@@ -474,8 +475,40 @@ impl<N: Network> Service<N> {
             )),
         )?;
 
-        let end_block = self.provider.get_block_by_number(BlockNumberOrTag::Latest).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError("Latest block not found".to_string()),
+        let latest_block =
+            self.provider.get_block_by_number(BlockNumberOrTag::Latest).await?.ok_or(
+                BlockRangeScannerError::HistoricalSyncError("Latest block not found".to_string()),
+            )?;
+
+        let block_confirmations = self.config.block_confirmations;
+        let confirmed_tip_num = latest_block.header().number().saturating_sub(block_confirmations);
+
+        // If start is beyond confirmed tip, skip historical and go straight to live
+        if start_block.header().number() > confirmed_tip_num {
+            info!(
+                start_block = start_block.header().number(),
+                confirmed_tip = confirmed_tip_num,
+                "Start block is beyond confirmed tip, starting live stream"
+            );
+
+            let Some(sender) = self.subscriber.clone() else {
+                return Err(BlockRangeScannerError::ServiceShutdown);
+            };
+
+            let provider = self.provider.clone();
+            let expected_next = start_block.header().number();
+            tokio::spawn(async move {
+                Self::stream_live_blocks(expected_next, provider, sender, block_confirmations)
+                    .await;
+            });
+
+            return Ok(());
+        }
+
+        let end_block = self.provider.get_block_by_number(confirmed_tip_num.into()).await?.ok_or(
+            BlockRangeScannerError::HistoricalSyncError(format!(
+                "Confirmed tip block {confirmed_tip_num} not found"
+            )),
         )?;
 
         info!(
@@ -494,8 +527,6 @@ impl<N: Network> Service<N> {
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
         let cutoff = end_block.header().number();
-
-        let block_confirmations = self.config.block_confirmations;
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
@@ -1049,7 +1080,10 @@ mod tests {
 
     #[tokio::test]
     async fn live_mode_respects_block_confirmations() -> anyhow::Result<()> {
-        let anvil = Anvil::new().block_time_f64(0.1).try_spawn()?;
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
 
         let block_confirmations = 5;
 
@@ -1062,18 +1096,18 @@ mod tests {
         let expected_blocks = 10;
 
         let mut receiver = client.stream_live().await?.take(expected_blocks);
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let latest_head = provider.get_block_number().await?;
+        provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
 
         let mut block_range_start = 0;
 
         while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            info!("Received block range: [{range:?}]");
             if block_range_start == 0 {
                 block_range_start = *range.start();
+                assert_eq!(*range.start(), latest_head.saturating_sub(block_confirmations));
             }
 
-            let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-            let latest_head = provider.get_block_number().await?;
-            assert_eq!(*range.end(), latest_head.saturating_sub(block_confirmations));
             assert_eq!(block_range_start, *range.start());
             assert!(*range.end() >= *range.start());
             block_range_start = *range.end() + 1;
