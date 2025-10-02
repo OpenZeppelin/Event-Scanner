@@ -1145,7 +1145,7 @@ mod tests {
         provider.anvil_mine(Option::Some(10), Option::None).await?;
 
         provider
-            .anvil_reorg(ReorgOptions { depth: block_confirmations + 2, tx_block_pairs: vec![] })
+            .anvil_reorg(ReorgOptions { depth: block_confirmations + 5, tx_block_pairs: vec![] })
             .await?;
 
         provider.anvil_mine(Option::Some(30), Option::None).await?;
