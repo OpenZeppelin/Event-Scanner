@@ -412,11 +412,9 @@ impl<N: Network> Service<N> {
             return Err(BlockRangeScannerError::ServiceShutdown);
         };
 
-        let reorg_rewind = self.config.reorg_rewind_depth;
         let block_confirmations = self.config.block_confirmations;
         tokio::spawn(async move {
-            Self::stream_live_blocks(start, provider, sender, reorg_rewind, block_confirmations)
-                .await;
+            Self::stream_live_blocks(start, provider, sender, block_confirmations).await;
         });
 
         Ok(())
@@ -492,7 +490,6 @@ impl<N: Network> Service<N> {
         // Any block > cutoff will come from the live stream
         let cutoff = end_block.header().number();
 
-        let reorg_rewind = self.config.reorg_rewind_depth;
         let block_confirmations = self.config.block_confirmations;
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
@@ -501,7 +498,6 @@ impl<N: Network> Service<N> {
                 cutoff + 1,
                 provider,
                 live_block_buffer_sender,
-                reorg_rewind,
                 block_confirmations,
             )
             .await;
@@ -580,7 +576,6 @@ impl<N: Network> Service<N> {
         mut expected_next_block: BlockNumber,
         provider: P,
         sender: mpsc::Sender<BlockRangeMessage>,
-        _reorg_rewind_depth: u64,
         block_confirmations: u64,
     ) {
         match Self::get_block_subscription(&provider).await {
@@ -1176,6 +1171,10 @@ mod tests {
         }
         assert!(reorg_detected, "Reorg should have been detected");
 
+        // Generally check that there is a reorg in the range i.e.
+        //                                                        REORG
+        // [0..=0, 1..=1, 2..=2, 3..=3, 4..=4, 5..=5, 6..=6, 7..=7, 3..=3, 4..=4, 5..=5, 6..=6,
+        // 7..=7, 8..=8, 9..=9] (Less flaky to assert this way)
         let mut found_reorg_pattern = false;
         for window in block_num.windows(2) {
             if window[1].start() < window[0].end() {
