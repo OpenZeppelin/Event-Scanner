@@ -386,15 +386,9 @@ impl<N: Network> Service<N> {
             Command::StreamFrom { sender, start_height, response } => {
                 self.ensure_no_subscriber()?;
                 self.subscriber = Some(sender);
-                if matches!(start_height, BlockNumberOrTag::Latest) {
-                    let result = self.handle_live().await;
-                    info!("Starting live stream");
-                    let _ = response.send(result);
-                } else {
-                    info!(start_height = ?start_height, "Starting streaming from");
-                    let result = self.handle_sync(start_height).await;
-                    let _ = response.send(result);
-                }
+                info!(start_height = ?start_height, "Starting streaming from");
+                let result = self.handle_sync(start_height).await;
+                let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
                 self.handle_unsubscribe();
@@ -1068,6 +1062,44 @@ mod tests {
             info!("Received block range: [{range:?}]");
             if block_range_start == 0 {
                 block_range_start = *range.start();
+            }
+
+            assert_eq!(block_range_start, *range.start());
+            assert!(*range.end() >= *range.start());
+            block_range_start = *range.end() + 1;
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
+
+        let block_confirmations = 5;
+
+        let client = BlockRangeScanner::new()
+            .with_block_confirmations(block_confirmations)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let expected_blocks = 10;
+        let mut receiver =
+            client.stream_from(BlockNumberOrTag::Latest).await?.take(expected_blocks);
+
+        let latest_head = provider.get_block_number().await?;
+        provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
+
+        let mut block_range_start = 0;
+
+        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+            if block_range_start == 0 {
+                block_range_start = *range.start();
+                assert_eq!(*range.start(), latest_head);
             }
 
             assert_eq!(block_range_start, *range.start());
