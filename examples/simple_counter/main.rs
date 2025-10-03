@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use alloy::{
-    eips::BlockNumberOrTag, network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent,
-};
+use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 use event_scanner::{
     EventFilter,
@@ -61,10 +59,7 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = client.create_event_stream(increase_filter);
 
     let task_1 = tokio::spawn(async move {
-        client
-            .start_scanner(BlockNumberOrTag::Latest, None)
-            .await
-            .expect("failed to start scanner");
+        client.stream_live(None).await.expect("failed to start scanner");
     });
 
     let task_2 = tokio::spawn(async move {

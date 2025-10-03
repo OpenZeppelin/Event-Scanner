@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
+use alloy::{network::Ethereum, sol_types::SolEvent};
 use event_scanner::{
     event_filter::EventFilter,
     event_scanner::{EventScanner, EventScannerMessage},
@@ -31,7 +31,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { client.stream_live(None).await });
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
@@ -91,7 +91,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let a_stream = client.create_event_stream(a_filter);
     let b_stream = client.create_event_stream(b_filter);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { client.stream_live(None).await });
 
     for _ in 0..expected_events_a {
         a.increase().send().await?.watch().await?;
@@ -163,7 +163,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let mut incr_stream = client.create_event_stream(increase_filter).take(expected_incr_events);
     let mut decr_stream = client.create_event_stream(decrease_filter).take(expected_decr_events);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { client.stream_live(None).await });
 
     for _ in 0..expected_incr_events {
         contract.increase().send().await?.watch().await?;
@@ -230,7 +230,7 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     let mut stream = client.create_event_stream(filter).take(num_of_events);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { client.stream_live(None).await });
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
@@ -263,7 +263,7 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
 
     let mut stream = client.create_event_stream(filter).take(num_of_events);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { client.stream_live(None).await });
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;

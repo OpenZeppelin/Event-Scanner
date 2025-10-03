@@ -23,7 +23,13 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     let start_height = provider.get_block_number().await?.saturating_sub(5);
 
     tokio::spawn(async move {
-        client.start_scanner(BlockNumberOrTag::Number(start_height), None).await
+        client
+            .stream_from(
+                BlockNumberOrTag::Number(start_height),
+                Option::None,
+                Option::Some(block_confirmations),
+            )
+            .await
     });
 
     //  perform a shallow reorg on the live tail
