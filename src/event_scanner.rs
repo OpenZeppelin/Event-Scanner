@@ -57,30 +57,6 @@ impl EventScanner {
         Self { block_range_scanner: BlockRangeScanner::new() }
     }
 
-    /// Configures how many blocks are read per epoch during a historical sync.
-    #[must_use]
-    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
-        self.block_range_scanner =
-            self.block_range_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
-        self
-    }
-
-    /// Sets the depth to rewind when a reorg is detected.
-    #[must_use]
-    pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
-        self.block_range_scanner =
-            self.block_range_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
-        self
-    }
-
-    /// Configures how many confirmations are required before processing a block (used for reorgs).
-    #[must_use]
-    pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
-        self.block_range_scanner =
-            self.block_range_scanner.with_block_confirmations(block_confirmations);
-        self
-    }
-
     /// Connects to the provider via WebSocket
     ///
     /// # Errors
@@ -130,27 +106,88 @@ pub struct ConnectedEventScanner<N: Network> {
 }
 
 impl<N: Network> ConnectedEventScanner<N> {
-    /// Starts the scanner
+    /// Streams live events starting from the latest block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_confirmation`: Number of confirmations to apply once in live mode.
+    /// # Errors
+    ///
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    pub async fn start_live(
+        &self,
+        block_confirmations: Option<u64>,
+    ) -> Result<(), EventScannerError> {
+        let client = self.block_range_scanner.run()?;
+        let mut stream = client.stream_live(block_confirmations).await?;
+
+        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
+        self.spawn_log_consumers(&range_tx);
+
+        while let Some(message) = stream.next().await {
+            if let Err(err) = range_tx.send(message) {
+                error!(error = %err, "failed sending message to broadcast channel");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Streams a batch of historical evnets from `start_height` to `end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    /// * `end_height` - The ending block number or tag.
+    /// * `reads_per_epoch` - The number of blocks to process per batch.
     ///
     /// # Errors
     ///
-    /// Returns an error if the scanner fails to start
-    pub async fn start(
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    pub async fn stream_historical(
         &self,
         start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
+        end_height: BlockNumberOrTag,
+        reads_per_epoch: Option<usize>,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
-        let mut stream = if let Some(end_height) = end_height {
-            client.stream_historical(start_height, end_height).await?
-        } else if matches!(start_height, BlockNumberOrTag::Latest) {
-            client.stream_live().await?
-        } else {
-            client.stream_from(start_height).await?
-        };
+        let mut stream =
+            client.stream_historical(start_height, end_height, reads_per_epoch).await?;
 
         let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
+        self.spawn_log_consumers(&range_tx);
 
+        while let Some(message) = stream.next().await {
+            if let Err(err) = range_tx.send(message) {
+                error!(error = %err, "failed sending message to broadcast channel");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Streams events starting from `start_height` and transitions to live mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    /// * `reads_per_epoch` - The number of blocks to process per batch during the historical phase.
+    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    ///
+    /// # Errors
+    ///
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    pub async fn stream_from(
+        &self,
+        start_height: BlockNumberOrTag,
+        reads_per_epoch: Option<usize>,
+        block_confirmations: Option<u64>,
+    ) -> Result<(), EventScannerError> {
+        let client = self.block_range_scanner.run()?;
+        let mut stream =
+            client.stream_from(start_height, reads_per_epoch, block_confirmations).await?;
+
+        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
         self.spawn_log_consumers(&range_tx);
 
         while let Some(message) = stream.next().await {
@@ -266,16 +303,58 @@ impl<N: Network> Client<N> {
         ReceiverStream::new(receiver)
     }
 
-    /// Starts the scanner
+    /// Streams live events starting from the latest block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_confirmation`: Number of confirmations to apply once in live mode.
+    /// # Errors
+    ///
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    pub async fn start_live(
+        self,
+        block_confirmations: Option<u64>,
+    ) -> Result<(), EventScannerError> {
+        self.event_scanner.start_live(block_confirmations).await
+    }
+
+    /// Streams a batch of historical evnets from `start_height` to `end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    /// * `end_height` - The ending block number or tag.
+    /// * `reads_per_epoch` - The number of blocks to process per batch.
     ///
     /// # Errors
     ///
-    /// Returns an error if the scanner fails to start
-    pub async fn start_scanner(
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    pub async fn start_historical(
         self,
         start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
+        end_height: BlockNumberOrTag,
+        reads_per_epoch: Option<usize>,
     ) -> Result<(), EventScannerError> {
-        self.event_scanner.start(start_height, end_height).await
+        self.event_scanner.stream_historical(start_height, end_height, reads_per_epoch).await
+    }
+
+    /// Streams events starting from `start_height` and transitions to live mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag.
+    /// * `reads_per_epoch` - The number of blocks to process per batch during the historical phase.
+    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    ///
+    /// # Errors
+    ///
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    pub async fn start_from(
+        self,
+        start_height: BlockNumberOrTag,
+        reads_per_epoch: Option<usize>,
+        block_confirmations: Option<u64>,
+    ) -> Result<(), EventScannerError> {
+        self.event_scanner.stream_from(start_height, reads_per_epoch, block_confirmations).await
     }
 }
