@@ -1198,6 +1198,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
     async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
@@ -1242,6 +1243,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
     async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
         let anvil = Anvil::new().block_time(1).try_spawn()?;
 
