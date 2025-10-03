@@ -1092,7 +1092,7 @@ mod tests {
             client.stream_from(BlockNumberOrTag::Latest).await?.take(expected_blocks);
 
         let latest_head = provider.get_block_number().await?;
-        provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
 
         let mut block_range_start = 0;
 
