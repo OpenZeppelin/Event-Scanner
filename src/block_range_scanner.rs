@@ -452,7 +452,80 @@ impl<N: Network> Service<N> {
             "Syncing historical data"
         );
 
-        self.sync_historical_data(start_block, end_block).await?;
+        // Determine if we need to monitor live headers while syncing
+        let mut live_header_task = None;
+        let mut live_header_rx_opt: Option<mpsc::Receiver<BlockNumber>> = None;
+
+        // Try to fetch the finalized tip; if unavailable, skip monitoring
+        // NOTE: Maybe this should fail? or send message / error
+        let Some(sender) = self.subscriber.clone() else {
+            return Err(BlockRangeScannerError::ServiceShutdown);
+        };
+        if let Ok(Some(finalized_block)) =
+            self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await
+        {
+            let end_num = end_block.header().number();
+            let finalized_num = finalized_block.header().number();
+            if end_num > finalized_num {
+                let (live_block_num_sender, live_block_num_receiver) =
+                    mpsc::channel::<BlockNumber>(MAX_BUFFERED_MESSAGES);
+                let provider = self.provider.clone();
+                live_header_rx_opt = Some(live_block_num_receiver);
+                live_header_task = Some(tokio::spawn(async move {
+                    match Self::get_block_subscription(&provider).await {
+                        Ok(sub) => {
+                            let mut stream = sub.into_stream();
+                            while let Some(h) = stream.next().await {
+                                if live_block_num_sender.send(h.number()).await.is_err() {
+                                    warn!("Downstream channel closed, stopping live blocks task");
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if sender.send(BlockRangeMessage::Error(e)).await.is_err() {
+                                warn!("Downstream channel closed, stopping live blocks task");
+                            }
+                        }
+                    }
+                }));
+            }
+        }
+
+        if let Err(e) =
+            self.fetch_historical_blocks(start_block, end_block.clone(), reads_per_epoch).await
+        {
+            // Ensure we stop the live header task if it was started
+            // and theres an error with the historical block fetching
+            if let Some(handle) = live_header_task.take() {
+                handle.abort();
+            }
+            return Err(e);
+        }
+
+        // Post-sync: stop header collection and evaluate correction range
+        if let Some(handle) = live_header_task.take() {
+            handle.abort();
+        }
+
+        if let Some(mut rx) = live_header_rx_opt {
+            let end_num = end_block.header().number();
+            let mut min_seen_below_end: Option<BlockNumber> = None;
+            while let Some(live_blocks) = rx.recv().await {
+                if live_blocks < end_num {
+                    // either store new live block or the latest smallest live block
+                    min_seen_below_end =
+                        Some(min_seen_below_end.map_or(live_blocks, |latest_smallest_seen| {
+                            latest_smallest_seen.min(live_blocks)
+                        }));
+                }
+            }
+
+            if let Some(reorg_start) = min_seen_below_end {
+                // send correction reorg --> end
+                self.send_to_subscriber(BlockRangeMessage::Data(reorg_start..=end_num)).await;
+            }
+        }
 
         _ = self.subscriber.take();
 
@@ -566,7 +639,7 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn sync_historical_data(
+    async fn fetch_historical_blocks(
         &mut self,
         start: N::BlockResponse,
         end: N::BlockResponse,
