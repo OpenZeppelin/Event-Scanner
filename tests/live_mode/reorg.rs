@@ -1,90 +1,12 @@
-use alloy::{
-    network::Ethereum,
-    primitives::FixedBytes,
-    providers::{Provider, RootProvider},
-    rpc::types::anvil::{ReorgOptions, TransactionData},
-};
 use anyhow::Ok;
 use std::{sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
 use tokio::{sync::Mutex, time::timeout};
 
-use crate::common::{TestCounter, TestSetup, setup_scanner};
+use crate::common::{TestSetup, reorg_with_new_txs, setup_scanner};
 use alloy::{eips::BlockNumberOrTag, providers::ext::AnvilApi};
 use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
-
-async fn reorg_with_new_txs<P>(
-    provider: RootProvider,
-    contract: TestCounter::TestCounterInstance<Arc<P>>,
-    num_initial_events: u64,
-    num_new_events: u64,
-    reorg_depth: u64,
-    same_block: bool,
-) -> anyhow::Result<Vec<FixedBytes<32>>>
-where
-    P: alloy::providers::Provider<Ethereum> + Clone,
-{
-    let mut event_tx_hashes = vec![];
-
-    for _ in 0..num_initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        event_tx_hashes.push(receipt.transaction_hash);
-    }
-
-    let mut tx_hashes = vec![];
-    for i in 0..num_new_events {
-        let tx = contract.increase().into_transaction_request();
-        tx_hashes.push((TransactionData::JSON(tx), if same_block { 0 } else { i }));
-    }
-    let pre_reorg_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
-
-    let reorg_options = ReorgOptions { depth: reorg_depth, tx_block_pairs: tx_hashes };
-
-    provider.anvil_reorg(reorg_options).await.unwrap();
-
-    let post_reorg_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(pre_reorg_block.number()))
-        .full()
-        .await?
-        .unwrap();
-
-    // sanity checks, block numbers stays the same but hash changes
-    assert_eq!(post_reorg_block.header.number, pre_reorg_block.header.number);
-    assert_ne!(post_reorg_block.header.hash, pre_reorg_block.header.hash);
-
-    if same_block {
-        // only check block we inserted events in
-        let new_block = provider
-            .get_block_by_number(BlockNumberOrTag::Number(
-                post_reorg_block.header.number - reorg_depth + 1,
-            ))
-            .await?
-            .unwrap();
-        assert_eq!(new_block.transactions.len() as u64, num_new_events);
-
-        for tx_hash in new_block.transactions.hashes() {
-            event_tx_hashes.push(tx_hash);
-        }
-    } else {
-        for i in 0..num_new_events {
-            // check subquent blocks for events
-            let new_block = provider
-                .get_block_by_number(BlockNumberOrTag::Number(
-                    post_reorg_block.header.number - reorg_depth + 1 + i,
-                ))
-                .await?
-                .unwrap();
-            assert_eq!(new_block.transactions.len() as u64, 1);
-
-            for tx_hash in new_block.transactions.hashes() {
-                event_tx_hashes.push(tx_hash);
-            }
-        }
-    }
-
-    Ok(event_tx_hashes)
-}
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
@@ -422,7 +344,6 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     );
 
     // Full equality for completeness
-    // let expected: Vec<_> = kept_initial.append(&mut kept_post_reorg);
     let mut expected = kept_initial.to_owned().clone();
     let mut post_reorg_clone = kept_post_reorg.to_owned().clone();
     expected.append(&mut post_reorg_clone);
