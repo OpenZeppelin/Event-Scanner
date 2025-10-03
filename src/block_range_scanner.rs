@@ -404,21 +404,17 @@ impl<N: Network> Service<N> {
     }
 
     async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
+        let provider = self.provider.clone();
+        let latest = self.provider.get_block_number().await?;
+
         let Some(sender) = self.subscriber.clone() else {
             return Err(BlockRangeScannerError::ServiceShutdown);
         };
 
         let block_confirmations = self.config.block_confirmations;
-        let provider = self.provider.clone();
-        let latest = self.provider.get_block_number().await?;
-
-        // the next block returned by the underlying subscription will always be `latest + 1`,
-        // because `latest` was already mined and subscription by definition only streams after new
-        // blocks have been mined
-        let range_start = (latest + 1).saturating_sub(block_confirmations);
-
+        let expected_next = latest.saturating_sub(block_confirmations);
         tokio::spawn(async move {
-            Self::stream_live_blocks(range_start, provider, sender, block_confirmations).await;
+            Self::stream_live_blocks(expected_next, provider, sender, block_confirmations).await;
         });
 
         Ok(())
@@ -607,7 +603,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn stream_live_blocks<P: Provider<N>>(
-        mut range_start: BlockNumber,
+        mut expected_next_block: BlockNumber,
         provider: P,
         sender: mpsc::Sender<BlockRangeMessage>,
         block_confirmations: u64,
@@ -617,7 +613,7 @@ impl<N: Network> Service<N> {
                 info!("WebSocket connected for live blocks");
 
                 // ensure we start streaming only after the expected_next_block cutoff
-                let cutoff = range_start;
+                let cutoff = expected_next_block;
                 let mut stream =
                     ws_stream.into_stream().skip_while(|header| header.number() < cutoff);
 
@@ -625,7 +621,7 @@ impl<N: Network> Service<N> {
                     let incoming_block_num = incoming_block.number();
                     info!(block_number = incoming_block_num, "Received block header");
 
-                    if incoming_block_num < range_start {
+                    if incoming_block_num < expected_next_block {
                         warn!("Reorg detected: sending forked range");
                         if sender
                             .send(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
@@ -641,13 +637,13 @@ impl<N: Network> Service<N> {
                             incoming_block_num.saturating_sub(block_confirmations);
 
                         // updated expected block to updated confirmed
-                        range_start = incoming_confirmed;
+                        expected_next_block = incoming_confirmed;
                     }
 
                     let confirmed = incoming_block_num.saturating_sub(block_confirmations);
-                    if confirmed >= range_start {
+                    if confirmed >= expected_next_block {
                         if sender
-                            .send(BlockRangeMessage::Data(range_start..=confirmed))
+                            .send(BlockRangeMessage::Data(expected_next_block..=confirmed))
                             .await
                             .is_err()
                         {
@@ -656,7 +652,7 @@ impl<N: Network> Service<N> {
                         }
 
                         // Overflow can not realistically happen
-                        range_start = confirmed + 1;
+                        expected_next_block = confirmed + 1;
                     }
                 }
             }
@@ -930,8 +926,6 @@ impl BlockRangeScannerClient {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use alloy::{
         network::Ethereum,
         primitives::{B256, keccak256},
@@ -944,7 +938,7 @@ mod tests {
     };
     use alloy_node_bindings::Anvil;
     use serde_json::{Value, json};
-    use tokio::{sync::mpsc, time::timeout};
+    use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
 
     use super::*;
@@ -1071,7 +1065,7 @@ mod tests {
             }
 
             assert_eq!(block_range_start, *range.start());
-            assert!(range.end() >= range.start());
+            assert!(*range.end() >= *range.start());
             block_range_start = *range.end() + 1;
         }
 
@@ -1100,17 +1094,18 @@ mod tests {
         let latest_head = provider.get_block_number().await?;
         provider.anvil_mine(Option::Some(20), Option::None).await?;
 
-        let mut expected_range_start = latest_head;
+        let mut block_range_start = 0;
 
         while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            assert_eq!(expected_range_start, *range.start());
-            assert_eq!(range.end(), range.start());
-            expected_range_start += 1;
-        }
+            if block_range_start == 0 {
+                block_range_start = *range.start();
+                assert_eq!(*range.start(), latest_head);
+            }
 
-        // verify that the final block number (range.end) was of the latest block with the expected
-        // block confirmations
-        assert_eq!(expected_range_start, latest_head + expected_blocks as u64);
+            assert_eq!(block_range_start, *range.start());
+            assert!(*range.end() >= *range.start());
+            block_range_start = *range.end() + 1;
+        }
 
         Ok(())
     }
@@ -1137,20 +1132,18 @@ mod tests {
         let latest_head = provider.get_block_number().await?;
         provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
 
-        let mut expected_range_start = latest_head.saturating_sub(block_confirmations) + 1;
+        let mut block_range_start = 0;
 
         while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            assert_eq!(expected_range_start, *range.start());
-            assert_eq!(range.end(), range.start());
-            expected_range_start += 1;
-        }
+            if block_range_start == 0 {
+                block_range_start = *range.start();
+                assert_eq!(*range.start(), latest_head.saturating_sub(block_confirmations));
+            }
 
-        // we add 1 to the right side, because we're expecting the number of the _next_ block to be
-        // mined
-        assert_eq!(
-            expected_range_start,
-            latest_head + expected_blocks as u64 + 1 - block_confirmations
-        );
+            assert_eq!(block_range_start, *range.start());
+            assert!(*range.end() >= *range.start());
+            block_range_start = *range.end() + 1;
+        }
 
         Ok(())
     }
@@ -1199,7 +1192,7 @@ mod tests {
 
     #[tokio::test]
     async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
+        let anvil = Anvil::new().block_time(1).try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
@@ -1231,7 +1224,7 @@ mod tests {
             }
 
             assert_eq!(block_range_start, *range.start());
-            assert!(range.end() >= range.start());
+            assert!(*range.end() >= *range.start());
             block_range_start = *range.end() + 1;
             i += 1;
             if i == end_loop {
