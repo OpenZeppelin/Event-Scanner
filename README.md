@@ -58,8 +58,8 @@ event-scanner = "0.1.0-alpha.3"
 Create an event stream for the given event filters registered with the `EventScanner`:
 
 ```rust
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{EventFilter, event_scanner::EventScanner, block_range_scanner::Error};
+use alloy::{network::Ethereum, sol_types::SolEvent};
+use event_scanner::{EventFilter, event_scanner::EventScanner};
 use tokio_stream::StreamExt;
 
 use crate::MyContract;
@@ -67,7 +67,7 @@ use crate::MyContract;
 async fn run_scanner(
     ws_url: alloy::transports::http::reqwest::Url,
     contract: alloy::primitives::Address,
-) -> Result<(), Error> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
 
     let filter = EventFilter::new()
@@ -76,9 +76,8 @@ async fn run_scanner(
 
     let mut stream = client.create_event_stream(filter);
 
-    tokio::spawn(async move {
-        client.start_scanner(BlockNumberOrTag::Earliest, Some(BlockNumberOrTag::Latest)).await
-    });
+    // Live mode with default confirmations
+    tokio::spawn(async move { client.stream_live(Option::None).await });
 
     while let Some(Ok(logs)) = stream.next().await {
         println!("Fetched logs: {logs:?}");
@@ -94,13 +93,16 @@ async fn run_scanner(
 
 ### Building a Scanner
 
-`EventScanner` supports:
+- No builders. Pass parameters to each mode as options.
+- Defaults: `DEFAULT_BLOCKS_READ_PER_EPOCH`, `DEFAULT_BLOCK_CONFIRMATIONS`.
+- Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or an existing provider.
 
-- `with_blocks_read_per_epoch` - how many blocks are read at a time in a single batch (taken into consideration when fetching historical blocks)
-- `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected (NOTE ⚠️: still WIP)
-- `with_block_confirmations` - how many confirmations to wait for before considering a block final (NOTE ⚠️: still WIP)
+Mode APIs (all optional params use sensible defaults):
+- Live: `client.stream_live(block_confirmations: Option<u64>)`
+- Historical: `client.stream_historical(start, end, reads_per_epoch: Option<usize>)`
+- From + Live: `client.stream_from(start, reads_per_epoch: Option<usize>, block_confirmations: Option<u64>)`
 
-Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-Modes).
+Pass `None` to use defaults; provide values to override per call.
 
 ### Defining Event Filters
 
@@ -136,13 +138,13 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 
 ### Scanning Modes
 
-- **Live mode** – `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only.
-- **Historical mode** – `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range.
-- **Historical → Live** – `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks.
+- **Live mode** – `client.stream_live(None)` subscribes to new blocks using default confirmations.
+- **Historical mode** – `client.stream_historical(start, end, None)` fetches a historical block range using the default batch size.
+- **Historical → Live** – `client.stream_from(start, None, None)` replays from `start` to the confirmed tip, then streams future blocks with default confirmations.
 
-For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
+Override defaults by passing `Some(...)` for the optional parameters.
 
-See the integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
+See integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
 
 ---
 
