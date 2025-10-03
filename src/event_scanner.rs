@@ -106,11 +106,8 @@ pub struct ConnectedEventScanner<N: Network> {
 }
 
 impl<N: Network> ConnectedEventScanner<N> {
-    /// Streams live events starting from the latest block.
+    /// Implementation of stream live
     ///
-    /// # Arguments
-    ///
-    /// * `block_confirmation`: Number of confirmations to apply once in live mode.
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
@@ -133,13 +130,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
-    /// Streams a batch of historical evnets from `start_height` to `end_height`.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_height` - The starting block number or tag.
-    /// * `end_height` - The ending block number or tag.
-    /// * `reads_per_epoch` - The number of blocks to process per batch.
+    /// Implementation of stream historical
     ///
     /// # Errors
     ///
@@ -166,13 +157,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
-    /// Streams events starting from `start_height` and transitions to live mode.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_height` - The starting block number or tag.
-    /// * `reads_per_epoch` - The number of blocks to process per batch during the historical phase.
-    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    /// Implementation of stream from
     ///
     /// # Errors
     ///
