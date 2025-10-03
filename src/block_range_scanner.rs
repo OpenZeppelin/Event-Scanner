@@ -1156,6 +1156,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_mode_respects_block_confirmations_on_new_chain() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        let block_confirmations = 5;
+
+        let client = BlockRangeScanner::new()
+            .with_block_confirmations(block_confirmations)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut receiver = client.stream_live().await?;
+
+        provider.anvil_mine(Option::Some(6), Option::None).await?;
+
+        let next = receiver.next().await;
+        if let Some(BlockRangeMessage::Data(range)) = next {
+            assert_eq!(0, *range.start());
+            assert_eq!(0, *range.end());
+        } else {
+            panic!("expected range, got: {next:?}");
+        }
+
+        let next = receiver.next().await;
+        if let Some(BlockRangeMessage::Data(range)) = next {
+            assert_eq!(1, *range.start());
+            assert_eq!(1, *range.end());
+        } else {
+            panic!("expected range, got: {next:?}");
+        }
+
+        // assert no new pending confirmed block ranges
+        assert!(
+            timeout(Duration::from_secs(1), async move { receiver.next().await }).await.is_err()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
