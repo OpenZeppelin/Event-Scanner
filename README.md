@@ -52,7 +52,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "0.1.0-alpha.3"
+event-scanner = "0.2.0-alpha"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
