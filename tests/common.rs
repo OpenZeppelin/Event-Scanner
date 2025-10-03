@@ -12,7 +12,7 @@ use alloy::{
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
     EventFilter,
-    event_scanner::{Client, EventScanner, EventScannerMessage},
+    event_scanner::{EventScanner, EventScannerClient, EventScannerMessage},
 };
 use tokio_stream::wrappers::ReceiverStream;
 // Shared test contract used across integration tests
@@ -48,7 +48,7 @@ where
 {
     pub provider: RootProvider,
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
-    pub client: Client<Ethereum>,
+    pub client: EventScannerClient<Ethereum>,
     pub stream: ReceiverStream<EventScannerMessage>,
     pub anvil: AnvilInstance,
 }

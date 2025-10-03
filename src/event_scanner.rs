@@ -62,11 +62,14 @@ impl EventScanner {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> Result<Client<N>, EventScannerError> {
+    pub async fn connect_ws<N: Network>(
+        self,
+        ws_url: Url,
+    ) -> Result<EventScannerClient<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         let event_scanner =
             ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(EventScannerClient { event_scanner })
     }
 
     /// Connects to the provider via IPC
@@ -77,11 +80,11 @@ impl EventScanner {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<Client<N>, EventScannerError> {
+    ) -> Result<EventScannerClient<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
         let event_scanner =
             ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(EventScannerClient { event_scanner })
     }
 
     /// Connects to an existing provider
@@ -92,11 +95,11 @@ impl EventScanner {
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> Result<Client<N>, EventScannerError> {
+    ) -> Result<EventScannerClient<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_provider(provider)?;
         let event_scanner =
             ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(EventScannerClient { event_scanner })
     }
 }
 
@@ -272,11 +275,11 @@ impl<N: Network> ConnectedEventScanner<N> {
     }
 }
 
-pub struct Client<N: Network> {
+pub struct EventScannerClient<N: Network> {
     event_scanner: ConnectedEventScanner<N>,
 }
 
-impl<N: Network> Client<N> {
+impl<N: Network> EventScannerClient<N> {
     pub fn create_event_stream(
         &mut self,
         event_filter: EventFilter,
