@@ -22,10 +22,9 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 
-    let filter = EventFilter {
-        contract_address: Some(*contract.address()),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(*contract.address())
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
     let expected_event_count = 100;
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;

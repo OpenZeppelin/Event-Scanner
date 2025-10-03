@@ -25,10 +25,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     // Create filter that tracks ALL events from a specific contract (no event signature specified)
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: None, // Track all events from this contract
-    };
+    let filter = EventFilter::new().with_contract_address(contract_address);
     let expected_event_count = 5;
 
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
@@ -66,10 +63,7 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
 
     // Create filter that tracks ALL events in block range (no contract address or event signature
     // specified)
-    let filter = EventFilter {
-        contract_address: None, // Track events from all contracts
-        event: None,            // Track all event types
-    };
+    let filter = EventFilter::new();
     let expected_event_count = 3;
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
@@ -106,14 +100,13 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
     let contract_address = *contract.address();
 
     // Filter for specific event from specific contract
-    let specific_filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let specific_filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
     let expected_specific_count = 2;
 
     // Filter for all events from all contracts
-    let all_events_filter = EventFilter { contract_address: None, event: None };
+    let all_events_filter = EventFilter::new();
     let expected_all_count = 3;
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;

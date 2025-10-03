@@ -166,6 +166,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         for listener in &self.event_listeners {
             let provider = self.block_range_scanner.provider().clone();
             let filter = listener.filter.clone();
+            let log_filter = Filter::from(&filter);
             let sender = listener.sender.clone();
             let mut sub = range_tx.subscribe();
 
@@ -173,20 +174,25 @@ impl<N: Network> ConnectedEventScanner<N> {
                 loop {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
-                            Self::process_range(range, &filter, &provider, &sender).await;
+                            Self::process_range(range, &filter, &log_filter, &provider, &sender)
+                                .await;
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
                             if let Err(err) = sender.send(ScannerMessage::Error(e.into())).await {
-                                error!(error = %err, "failed to propagate error to receiver stream");
+                                error!(error = %err, "Downstream channel closed, skipping error propagation and stopping streaming.");
+                                break;
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
                             if let Err(err) = sender.send(ScannerMessage::Status(status)).await {
-                                error!(error = %err, "failed to send info to receiver stream");
+                                error!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping streaming.");
+                                break;
                             }
                         }
-                        // TODO: What happens if the broadcast channel is closed?
-                        Err(RecvError::Closed) => break,
+                        Err(RecvError::Closed) => {
+                            error!("No block ranges to receive, stopping streaming.");
+                            break;
+                        }
                         Err(RecvError::Lagged(_)) => {}
                     }
                 }
@@ -196,14 +202,14 @@ impl<N: Network> ConnectedEventScanner<N> {
 
     async fn process_range(
         range: RangeInclusive<u64>,
-        filter: &EventFilter,
+        event_filter: &EventFilter,
+        log_filter: &Filter,
         provider: &RootProvider<N>,
         sender: &mpsc::Sender<EventScannerMessage>,
     ) {
         let (from_block, to_block) = (*range.start(), *range.end());
 
-        let (log_filter, contract_display, event_display) =
-            Self::build_log_filter(from_block, to_block, filter);
+        let log_filter = log_filter.clone().from_block(from_block).to_block(to_block);
 
         match provider.get_logs(&log_filter).await {
             Ok(logs) => {
@@ -212,8 +218,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                 }
 
                 info!(
-                    contract = %contract_display,
-                    event = %event_display,
+                    filter = %event_filter,
                     log_count = logs.len(),
                     from_block,
                     to_block,
@@ -221,13 +226,12 @@ impl<N: Network> ConnectedEventScanner<N> {
                 );
 
                 if let Err(e) = sender.send(EventScannerMessage::Data(logs)).await {
-                    error!(contract = %contract_display, event = %event_display, error = %e, "failed to enqueue log for processing");
+                    error!(filter = %event_filter, error = %e, "failed to enqueue log for processing");
                 }
             }
             Err(e) => {
                 error!(
-                    contract = %contract_display,
-                    event = %event_display,
+                    filter = %event_filter,
                     error = %e,
                     from_block,
                     to_block,
@@ -235,34 +239,10 @@ impl<N: Network> ConnectedEventScanner<N> {
                 );
 
                 if let Err(send_err) = sender.send(EventScannerMessage::Error(e.into())).await {
-                    error!(event = %event_display, error = %send_err, "failed to enqueue error for processing");
+                    error!(filter = %event_filter, error = %send_err, "failed to enqueue error for processing");
                 }
             }
         }
-    }
-
-    fn build_log_filter(
-        from_block: u64,
-        to_block: u64,
-        filter: &EventFilter,
-    ) -> (Filter, String, String) {
-        let mut log_filter = Filter::new().from_block(from_block).to_block(to_block);
-
-        if let Some(contract_address) = filter.contract_address {
-            log_filter = log_filter.address(contract_address);
-        }
-
-        if let Some(ref event_signature) = filter.event {
-            log_filter = log_filter.event(event_signature.as_str());
-        }
-
-        let contract_display = filter
-            .contract_address
-            .map_or_else(|| "all contracts".to_string(), |addr| format!("{addr:?}"));
-
-        let event_display = filter.event.as_deref().map_or("all events", |s| s).to_string();
-
-        (log_filter, contract_display, event_display)
     }
 
     fn add_event_listener(&mut self, event_listener: EventListener) {

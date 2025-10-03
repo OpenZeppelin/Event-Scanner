@@ -104,17 +104,25 @@ Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `conne
 
 ### Defining Event Filters
 
-Create an `EventFilter` for each contract/event pair you want to track. The filter specifies the contract address where events originated, and the event signature (from `SolEvent::SIGNATURE`).
-
-Both `contract_address` and `event` fields are optional, allowing for flexible event tracking.
+Create an `EventFilter` for each event stream you wish to process. The filter specifies the contract address where events originated, and event signatures (tip: you can use the value stored in `SolEvent::SIGNATURE`).
 
 ```rust
-// Track a specific event from a specific contract
+// Track a SPECIFIC event from a SPECIFIC contract
 let specific_filter = EventFilter::new()
     .with_contract_address(*counter_contract.address())
     .with_event(Counter::CountIncreased::SIGNATURE);
 
-// Track ALL events from a specific contract
+// Track a multiple events from a SPECIFIC contract
+let specific_filter = EventFilter::new()
+    .with_contract_address(*counter_contract.address())
+    .with_event(Counter::CountIncreased::SIGNATURE)
+    .with_event(Counter::CountDecreased::SIGNATURE);
+
+// Track a SPECIFIC event from a ALL contracts
+let specific_filter = EventFilter::new()
+    .with_event(Counter::CountIncreased::SIGNATURE);
+
+// Track ALL events from a SPECIFIC contract
 let all_contract_events_filter = EventFilter::new()
     .with_contract_address(*counter_contract.address());
 
@@ -124,14 +132,7 @@ let all_events_filter = EventFilter::new();
 
 Register multiple filters by invoking `create_event_stream` repeatedly.
 
-Event filters enable several powerful use cases:
-
-- **Track all events from a specific contract**: Set `contract_address` but leave `event` as `None`
-- **Track all events across all contracts**: Set both `contract_address` and `event` as `None`
-- **Track specific events from specific contracts**: Set both fields (traditional usage)
-- **Mixed filtering**: Use multiple filters with different optional field combinations
-
-This flexibility allows you to build sophisticated event monitoring systems that can track events at different granularities depending on your application's needs.
+The flexibility provided by `EventFilter` allows you to build sophisticated event monitoring systems that can track events at different granularities depending on your application's needs.
 
 ### Scanning Modes
 

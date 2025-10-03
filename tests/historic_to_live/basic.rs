@@ -35,10 +35,9 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
