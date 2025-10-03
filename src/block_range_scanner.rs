@@ -457,21 +457,22 @@ impl<N: Network> Service<N> {
         };
 
         let end_num = end_block.header().number();
-        let mut monitor = self.spawn_live_header_monitor_if_needed(end_num, subscriber).await;
+        let monitor = self.spawn_live_header_monitor_if_needed(end_num, subscriber).await?;
 
-        if let Err(e) =
-            self.fetch_historical_blocks(start_block, end_block.clone(), reads_per_epoch).await
-        {
-            if let Ok(Some(handler, _)) = monitor.take() {
-                handle.abort();
+        match self.fetch_historical_blocks(start_block, end_block.clone(), reads_per_epoch).await {
+            Ok(()) => {
+                // Post-sync: stop header collection and evaluate correction range
+                if let Some((handle, rx)) = monitor {
+                    handle.abort();
+                    self.drain_header_monitor_and_emit_correction(rx, end_num).await;
+                }
             }
-            return Err(e);
-        }
-
-        // Post-sync: stop header collection and evaluate correction range
-        if let Ok(Some(handle, rx)) = monitor.take() {
-            handle.abort();
-            self.drain_header_monitor_and_emit_correction(rx, end_num).await;
+            Err(e) => {
+                if let Some((handle, _)) = monitor {
+                    handle.abort();
+                }
+                return Err(e);
+            }
         }
 
         _ = self.subscriber.take();
@@ -815,7 +816,6 @@ impl<N: Network> Service<N> {
                 Ok(sub) => {
                     let mut stream = sub.into_stream();
                     while let Some(h) = stream.next().await {
-                        println!("{:?}", h);
                         if live_block_num_sender.send(h.number()).await.is_err() {
                             warn!("Downstream channel closed, stopping live header monitor");
                             break;
