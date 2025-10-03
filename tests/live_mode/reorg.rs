@@ -5,7 +5,7 @@ use alloy::{
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
 use anyhow::Ok;
-use std::{cmp::min, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
 use tokio::{sync::Mutex, time::timeout};
@@ -336,6 +336,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
+    // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
     let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
         setup_scanner(Option::Some(1.0), Option::None, Option::Some(block_confirmations)).await?;
@@ -345,10 +346,10 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     provider.anvil_mine(Some(10), None).await?;
 
     let num_initial_events = 4_u64;
-
     let num_new_events = 2_u64;
+    // reorg depth is less than confirmations -> mitigated
     let reorg_depth = 2_u64;
-    let same_block = false;
+    let same_block = true;
 
     let all_tx_hashes = reorg_with_new_txs(
         provider.clone(),
@@ -360,12 +361,12 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     )
     .await?;
 
-    // continue mining to simulate incoming blocks
     provider.anvil_mine(Some(10), None).await?;
 
-    let event_tx_hash = Arc::new(Mutex::new(Vec::new()));
-    let event_tx_hash_clone = Arc::clone(&event_tx_hash);
+    let observed_tx_hashes = Arc::new(Mutex::new(Vec::new()));
+    let observed_tx_hashes_clone = Arc::clone(&observed_tx_hashes);
 
+    // With sufficient confirmations, a shallow reorg should be fully masked
     let reorg_detected = Arc::new(Mutex::new(false));
     let reorg_detected_clone = reorg_detected.clone();
 
@@ -373,7 +374,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         while let Some(message) = stream.next().await {
             match message {
                 EventScannerMessage::Data(logs) => {
-                    let mut guard = event_tx_hash_clone.lock().await;
+                    let mut guard = observed_tx_hashes_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.transaction_hash {
                             guard.push(n);
@@ -394,25 +395,43 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     _ = timeout(Duration::from_secs(10), event_counting).await;
 
-    let final_hashes: Vec<_> = event_tx_hash.lock().await.clone();
-    let number_discarded = min(num_initial_events, reorg_depth);
-    let expected_total = (num_initial_events - number_discarded) + num_new_events;
-    assert_eq!(final_hashes.len() as u64, expected_total);
+    let final_hashes: Vec<_> = observed_tx_hashes.lock().await.clone();
 
-    let confirmed_initial_hashes =
-        &all_tx_hashes[0..(num_initial_events - number_discarded).try_into().unwrap()];
+    // Split tx hashes [initial_before_reorg | post_reorg]
+    let (initial_before_reorg, post_reorg) =
+        all_tx_hashes.split_at(num_initial_events.try_into().unwrap());
 
-    let reorg_hashes = &all_tx_hashes[usize::try_from(num_initial_events).unwrap()..
-        (num_initial_events + num_new_events).try_into().unwrap()];
+    // Keep only the confirmed portion of the pre-reorg events
+    let kept_initial = &initial_before_reorg
+        [..initial_before_reorg.len().saturating_sub(reorg_depth.try_into().unwrap())];
 
-    let expected_hashes: Vec<_> =
-        confirmed_initial_hashes.iter().chain(reorg_hashes.iter()).copied().collect();
+    // Keep all post-reorg events we injected
+    let kept_post_reorg = &post_reorg[..num_new_events.try_into().unwrap()];
 
-    assert_eq!(final_hashes, expected_hashes);
+    // sanity checks
+    assert_eq!(
+        final_hashes.len(),
+        kept_initial.len() + kept_post_reorg.len(),
+        "expected count = confirmed pre-reorg + all post-reorg events",
+    );
 
-    // reorg shouldnt be detected as we are only sending confirmed block
-    // reorg_depth < confirmed block
-    assert!(!*reorg_detected.lock().await);
+    assert!(final_hashes.starts_with(kept_initial), "prefix should be confirmed pre-reorg events",);
+    assert!(
+        final_hashes.ends_with(kept_post_reorg),
+        "suffix should be post-reorg events on new chain",
+    );
+
+    // Full equality for completeness
+    // let expected: Vec<_> = kept_initial.append(&mut kept_post_reorg);
+    let mut expected = kept_initial.to_owned().clone();
+    let mut post_reorg_clone = kept_post_reorg.to_owned().clone();
+    expected.append(&mut post_reorg_clone);
+    assert_eq!(final_hashes, expected);
+
+    assert!(
+        !*reorg_detected.lock().await,
+        "reorg should be fully mitigated by confirmations (no status emitted)",
+    );
 
     Ok(())
 }
