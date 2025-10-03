@@ -27,9 +27,8 @@
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
 //!
 //!     // Live with confirmations (optional)
-//!     let mut stream = client
-//!         .stream_from(Some(BlockNumberOrTag::Number(5)), Option::None, Option::None)
-//!         .await?;
+//!     let mut stream =
+//!         client.stream_from(BlockNumberOrTag::Number(5), Option::None, Option::None).await?;
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
