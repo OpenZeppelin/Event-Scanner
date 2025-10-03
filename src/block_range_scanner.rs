@@ -462,14 +462,14 @@ impl<N: Network> Service<N> {
         if let Err(e) =
             self.fetch_historical_blocks(start_block, end_block.clone(), reads_per_epoch).await
         {
-            if let Some((handle, _)) = monitor.take() {
+            if let Ok(Some(handler, _)) = monitor.take() {
                 handle.abort();
             }
             return Err(e);
         }
 
         // Post-sync: stop header collection and evaluate correction range
-        if let Some((handle, rx)) = monitor.take() {
+        if let Ok(Some(handle, rx)) = monitor.take() {
             handle.abort();
             self.drain_header_monitor_and_emit_correction(rx, end_num).await;
         }
@@ -786,28 +786,36 @@ impl<N: Network> Service<N> {
         &self,
         end_num: BlockNumber,
         subscriber: mpsc::Sender<BlockRangeMessage>,
-    ) -> Option<(tokio::task::JoinHandle<()>, mpsc::Receiver<BlockNumber>)> {
+    ) -> Result<
+        Option<(tokio::task::JoinHandle<()>, mpsc::Receiver<BlockNumber>)>,
+        BlockRangeScannerError,
+    > {
         // Try to fetch the finalized tip; if unavailable, skip monitoring
         let finalized_block =
             match self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await {
-                Ok(opt) => opt?,
-                Err(_) => return None,
+                Ok(opt) => opt,
+                Err(e) => {
+                    return Err(BlockRangeScannerError::HistoricalSyncError(format!(
+                        "cannot find latest finalized error: {e}",
+                    )))
+                }
             };
 
-        let finalized_num = finalized_block.header().number();
+        let finalized_num = finalized_block.unwrap().header().number();
         if end_num <= finalized_num {
-            return None;
+            return Ok(None);
         }
 
         let (live_block_num_sender, live_block_num_receiver) =
             mpsc::channel::<BlockNumber>(MAX_BUFFERED_MESSAGES);
         let provider = self.provider.clone();
 
-        let handle = tokio::spawn(async move {
+        let live_subscription_task = tokio::spawn(async move {
             match Self::get_block_subscription(&provider).await {
                 Ok(sub) => {
                     let mut stream = sub.into_stream();
                     while let Some(h) = stream.next().await {
+                        println!("{:?}", h);
                         if live_block_num_sender.send(h.number()).await.is_err() {
                             warn!("Downstream channel closed, stopping live header monitor");
                             break;
@@ -822,7 +830,7 @@ impl<N: Network> Service<N> {
             }
         });
 
-        Some((handle, live_block_num_receiver))
+        Ok(Option::Some((live_subscription_task, live_block_num_receiver)))
     }
 
     async fn drain_header_monitor_and_emit_correction(
@@ -1596,6 +1604,60 @@ mod tests {
             }
             other => panic!("unexpected message: {other:?}"),
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(1000), Option::None).await?;
+
+        let finalized_block = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
+        let finalized_num = finalized_block.unwrap().header().number();
+
+        let end_num = finalized_num + 5;
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client
+            .stream_historical(
+                BlockNumberOrTag::Number(0),
+                BlockNumberOrTag::Number(end_num),
+                Option::Some(50),
+            )
+            .await?;
+
+        // Trigger a reorg that goes below `end_num` while historical sync is running
+        let provider_clone = provider.clone();
+        tokio::spawn(async move {
+            // deep reorg
+            let depth = end_num - 10;
+            provider_clone
+                .anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] })
+                .await
+                .unwrap();
+            provider_clone.anvil_mine(Option::Some(200), Option::None).await.unwrap();
+        })
+        .await?;
+
+        // Collect all ranges
+        let mut data_ranges = Vec::new();
+        while let Some(BlockRangeMessage::Data(range)) = stream.next().await {
+            data_ranges.push(range);
+        }
+
+        // Expect correction range [end-10 ..= end]
+        let expected_start = end_num - 10;
+        let last_range = data_ranges.last().unwrap();
+        println!("{:?}", last_range);
+        println!("{:?}", data_ranges);
+        assert!(*last_range.start() == expected_start && *last_range.end() == end_num);
 
         Ok(())
     }
