@@ -43,9 +43,10 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
 
     tokio::spawn(async move {
         client
-            .start_scanner(
+            .stream_historical(
                 BlockNumberOrTag::Number(start_block),
-                Some(BlockNumberOrTag::Number(end_block)),
+                BlockNumberOrTag::Number(end_block),
+                Option::None,
             )
             .await
     });

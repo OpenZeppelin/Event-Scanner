@@ -12,7 +12,6 @@ use alloy::{
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
     EventFilter,
-    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
     event_scanner::{Client, EventScanner, EventScannerMessage},
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -58,7 +57,7 @@ where
 pub async fn setup_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
-    confirmations: Option<u64>,
+    _confirmations: Option<u64>,
 ) -> anyhow::Result<TestSetup<impl Provider<Ethereum> + Clone>> {
     let anvil = spawn_anvil(block_interval.unwrap_or(0.1))?;
     let provider = build_provider(&anvil).await?;
@@ -70,10 +69,7 @@ pub async fn setup_scanner(
 
     let filter = filter.unwrap_or(default_filter);
 
-    let mut client = EventScanner::new()
-        .with_block_confirmations(confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS))
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+    let mut client = EventScanner::new().connect_ws(anvil.ws_endpoint_url()).await?;
 
     let stream = client.create_event_stream(filter);
 

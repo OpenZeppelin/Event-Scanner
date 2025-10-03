@@ -114,7 +114,7 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn start_live(
+    pub async fn stream_live(
         &self,
         block_confirmations: Option<u64>,
     ) -> Result<(), EventScannerError> {
@@ -311,11 +311,11 @@ impl<N: Network> Client<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn start_live(
+    pub async fn stream_live(
         self,
         block_confirmations: Option<u64>,
     ) -> Result<(), EventScannerError> {
-        self.event_scanner.start_live(block_confirmations).await
+        self.event_scanner.stream_live(block_confirmations).await
     }
 
     /// Streams a batch of historical evnets from `start_height` to `end_height`.
@@ -329,7 +329,7 @@ impl<N: Network> Client<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn start_historical(
+    pub async fn stream_historical(
         self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
@@ -349,7 +349,7 @@ impl<N: Network> Client<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn start_from(
+    pub async fn stream_from(
         self,
         start_height: BlockNumberOrTag,
         reads_per_epoch: Option<usize>,
