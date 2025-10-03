@@ -52,7 +52,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "0.1.0-alpha.3"
+event-scanner = "0.2.0-alpha"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
@@ -80,7 +80,7 @@ async fn run_scanner(
         client.start_scanner(BlockNumberOrTag::Earliest, Some(BlockNumberOrTag::Latest)).await
     });
 
-    while let Some(Ok(logs)) = stream.next().await {
+    while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
         println!("Fetched logs: {logs:?}");
     }
 
@@ -122,9 +122,10 @@ let specific_filter = EventFilter::new()
 let specific_filter = EventFilter::new()
     .with_event(Counter::CountIncreased::SIGNATURE);
 
-// Track ALL events from a SPECIFIC contract
+// Track ALL events from a SPECIFIC contracts
 let all_contract_events_filter = EventFilter::new()
-    .with_contract_address(*counter_contract.address());
+    .with_contract_address(*counter_contract.address())
+    .with_contract_address(*other_counter_contract.address());
 
 // Track ALL events from ALL contracts in the block range
 let all_events_filter = EventFilter::new();
