@@ -25,10 +25,9 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
@@ -115,10 +114,9 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
@@ -199,10 +197,9 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
@@ -290,10 +287,9 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let filter = EventFilter {
-        contract_address: Some(contract_address),
-        event: Some(TestCounter::CountIncreased::SIGNATURE.to_owned()),
-    };
+    let filter = EventFilter::new()
+        .with_contract_address(contract_address)
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
