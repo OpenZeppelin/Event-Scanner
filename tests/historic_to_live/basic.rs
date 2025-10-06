@@ -44,12 +44,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     let mut stream = client.create_event_stream(filter).take(historical_events + live_events);
 
     tokio::spawn(async move {
-        client
-            .stream_from(
-                BlockNumberOrTag::Number(first_historical_block),
-                Option::None,
-            )
-            .await
+        client.stream_from(BlockNumberOrTag::Number(first_historical_block), Option::None).await
     });
 
     sleep(Duration::from_millis(200)).await;
