@@ -16,7 +16,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
     let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(1.0), Option::None, Option::Some(block_confirmations)).await?;
+        setup_scanner(Option::Some(1.0), Option::None, Option::None).await?;
 
     provider.anvil_mine(Some(10), None).await?;
 
@@ -24,10 +24,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
 
     tokio::spawn(async move {
         client
-            .stream_from(
-                BlockNumberOrTag::Number(start_height),
-                Option::Some(block_confirmations),
-            )
+            .stream_from(BlockNumberOrTag::Number(start_height), Option::Some(block_confirmations))
             .await
     });
 

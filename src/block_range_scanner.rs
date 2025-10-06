@@ -365,15 +365,12 @@ impl<N: Network> Service<N> {
         &mut self,
         block_confirmations: Option<u64>,
     ) -> Result<(), BlockRangeScannerError> {
-        let provider = self.provider.clone();
-        let latest = self.provider.get_block_number().await?;
-        let max_read_per_epoch = self.reads_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
-
         let Some(sender) = self.subscriber.clone() else {
             return Err(BlockRangeScannerError::ServiceShutdown);
         };
 
         let block_confirmations = block_confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS);
+        let max_read_per_epoch = self.reads_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
 
@@ -383,7 +380,14 @@ impl<N: Network> Service<N> {
         let range_start = (latest + 1).saturating_sub(block_confirmations);
 
         tokio::spawn(async move {
-            Self::stream_live_blocks(range_start, provider, sender, block_confirmations, max_read_per_epoch).await;
+            Self::stream_live_blocks(
+                range_start,
+                provider,
+                sender,
+                block_confirmations,
+                max_read_per_epoch,
+            )
+            .await;
         });
 
         Ok(())
@@ -626,7 +630,7 @@ impl<N: Network> Service<N> {
                         // NOTE: Edge case when difference between range end and range start >= max
                         // reads
                         let range_end = confirmed
-                            .min(expected_next_block.saturating_add(max_read_per_epoch as u64 - 1));
+                            .min(range_start.saturating_add(max_read_per_epoch as u64 - 1));
 
                         if sender
                             .send(BlockRangeMessage::Data(range_start..=range_end))
@@ -889,8 +893,6 @@ impl BlockRangeScannerClient {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use alloy::{
         network::Ethereum,
         providers::{ProviderBuilder, ext::AnvilApi},

@@ -261,7 +261,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
     let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(1.0), Option::None, Option::Some(block_confirmations)).await?;
+        setup_scanner(Option::Some(1.0), Option::None, Option::None).await?;
 
     tokio::spawn(async move { client.stream_live(Some(block_confirmations)).await });
 
