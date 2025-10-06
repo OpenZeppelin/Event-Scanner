@@ -3,7 +3,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 use crate::{
     block_range_scanner::{
         BlockRangeMessage, BlockRangeScanner, BlockRangeScannerError, ConnectedBlockRangeScanner,
-        MAX_BUFFERED_MESSAGES,
+        MAX_BUFFERED_MESSAGES, DEFAULT_BLOCKS_READ_PER_EPOCH,
     },
     event_filter::EventFilter,
     event_listener::EventListener,
@@ -26,6 +26,7 @@ use tracing::{error, info};
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
+    max_read_per_epoch: Option<usize>,
 }
 
 pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
@@ -54,7 +55,7 @@ impl EventScanner {
     #[must_use]
     /// Creates a new builder with default block scanner and callback strategy.
     pub fn new() -> Self {
-        Self { block_range_scanner: BlockRangeScanner::new() }
+        Self { block_range_scanner: BlockRangeScanner::new(), max_read_per_epoch: None }
     }
 
     /// Connects to the provider via WebSocket
@@ -68,7 +69,7 @@ impl EventScanner {
     ) -> Result<EventScannerClient<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         let event_scanner =
-            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
+            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default(), max_read_per_epoch: self.max_read_per_epoch };
         Ok(EventScannerClient { event_scanner })
     }
 
@@ -83,7 +84,7 @@ impl EventScanner {
     ) -> Result<EventScannerClient<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
         let event_scanner =
-            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
+            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default(), max_read_per_epoch: self.max_read_per_epoch };
         Ok(EventScannerClient { event_scanner })
     }
 
@@ -98,7 +99,7 @@ impl EventScanner {
     ) -> Result<EventScannerClient<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_provider(provider)?;
         let event_scanner =
-            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
+            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default(), max_read_per_epoch: self.max_read_per_epoch };
         Ok(EventScannerClient { event_scanner })
     }
 }
@@ -106,6 +107,7 @@ impl EventScanner {
 pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     event_listeners: Vec<EventListener>,
+    max_read_per_epoch: Option<usize>,
 }
 
 impl<N: Network> ConnectedEventScanner<N> {
@@ -119,7 +121,8 @@ impl<N: Network> ConnectedEventScanner<N> {
         block_confirmations: Option<u64>,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
-        let mut stream = client.stream_live(block_confirmations).await?;
+        let reads_per_epoch = self.max_read_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let mut stream = client.stream_live(block_confirmations, reads_per_epoch).await?;
 
         let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
         self.spawn_log_consumers(&range_tx);
@@ -142,9 +145,9 @@ impl<N: Network> ConnectedEventScanner<N> {
         &self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
+        let reads_per_epoch = self.max_read_per_epoch;
         let mut stream =
             client.stream_historical(start_height, end_height, reads_per_epoch).await?;
 
@@ -168,10 +171,10 @@ impl<N: Network> ConnectedEventScanner<N> {
     pub async fn stream_from(
         &self,
         start_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
         block_confirmations: Option<u64>,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
+        let reads_per_epoch = self.max_read_per_epoch;
         let mut stream =
             client.stream_from(start_height, reads_per_epoch, block_confirmations).await?;
 
@@ -315,7 +318,6 @@ impl<N: Network> EventScannerClient<N> {
     ///
     /// * `start_height` - The starting block number or tag.
     /// * `end_height` - The ending block number or tag.
-    /// * `reads_per_epoch` - The number of blocks to process per batch.
     ///
     /// # Errors
     ///
@@ -324,9 +326,8 @@ impl<N: Network> EventScannerClient<N> {
         self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
     ) -> Result<(), EventScannerError> {
-        self.event_scanner.stream_historical(start_height, end_height, reads_per_epoch).await
+        self.event_scanner.stream_historical(start_height, end_height).await
     }
 
     /// Streams events starting from `start_height` and transitions to live mode.
@@ -334,7 +335,6 @@ impl<N: Network> EventScannerClient<N> {
     /// # Arguments
     ///
     /// * `start_height` - The starting block number or tag.
-    /// * `reads_per_epoch` - The number of blocks to process per batch during the historical phase.
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
     ///
     /// # Errors
@@ -343,9 +343,8 @@ impl<N: Network> EventScannerClient<N> {
     pub async fn stream_from(
         self,
         start_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
         block_confirmations: Option<u64>,
     ) -> Result<(), EventScannerError> {
-        self.event_scanner.stream_from(start_height, reads_per_epoch, block_confirmations).await
+        self.event_scanner.stream_from(start_height, block_confirmations).await
     }
 }

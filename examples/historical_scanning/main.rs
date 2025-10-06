@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     sleep(Duration::from_secs(10)).await;
     client
-        .stream_from(BlockNumberOrTag::Number(0), Option::None, Option::None)
+        .stream_from(BlockNumberOrTag::Number(0), Option::None)
         .await
         .expect("failed to start scanner");
 

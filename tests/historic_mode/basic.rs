@@ -46,7 +46,6 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
             .stream_historical(
                 BlockNumberOrTag::Number(start_block),
                 BlockNumberOrTag::Number(end_block),
-                Option::None,
             )
             .await
     });

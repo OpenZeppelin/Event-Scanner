@@ -48,7 +48,6 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
             .stream_from(
                 BlockNumberOrTag::Number(first_historical_block),
                 Option::None,
-                Option::None,
             )
             .await
     });

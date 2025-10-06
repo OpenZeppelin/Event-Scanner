@@ -26,7 +26,6 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
         client
             .stream_from(
                 BlockNumberOrTag::Number(start_height),
-                Option::None,
                 Option::Some(block_confirmations),
             )
             .await
