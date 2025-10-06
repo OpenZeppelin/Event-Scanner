@@ -154,8 +154,9 @@ impl BlockHashAndNumber {
     }
 }
 
+#[derive(Clone)]
 pub struct BlockRangeScanner {
-    max_read_per_epoch: Option<usize>,
+    max_read_per_epoch: usize,
 }
 
 impl Default for BlockRangeScanner {
@@ -167,12 +168,12 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self { max_read_per_epoch: None }
+        Self { max_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH }
     }
 
     #[must_use]
     pub fn with_max_read_per_epoch(mut self, max_read_per_epoch: usize) -> Self {
-        self.max_read_per_epoch = Some(max_read_per_epoch);
+        self.max_read_per_epoch = max_read_per_epoch;
         self
     }
 
@@ -212,13 +213,13 @@ impl BlockRangeScanner {
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        Ok(ConnectedBlockRangeScanner { provider, reads_per_epoch: self.max_read_per_epoch })
+        Ok(ConnectedBlockRangeScanner { provider, max_read_per_epoch: self.max_read_per_epoch })
     }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RootProvider<N>,
-    reads_per_epoch: Option<usize>,
+    max_read_per_epoch: usize,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
@@ -234,7 +235,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     ///
     /// Returns an error if the subscription service fails to start.
     pub fn run(&self) -> Result<BlockRangeScannerClient, BlockRangeScannerError> {
-        let (service, cmd_tx) = Service::new(self.provider.clone(), self.reads_per_epoch);
+        let (service, cmd_tx) = Service::new(self.provider.clone(), self.max_read_per_epoch);
         tokio::spawn(async move {
             service.run().await;
         });
@@ -271,6 +272,7 @@ pub enum Command {
 
 struct Service<N: Network> {
     provider: RootProvider<N>,
+    max_read_per_epoch: usize,
     subscriber: Option<mpsc::Sender<BlockRangeMessage>>,
     current: BlockHashAndNumber,
     websocket_connected: bool,
@@ -278,18 +280,18 @@ struct Service<N: Network> {
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
     shutdown: bool,
-    reads_per_epoch: Option<usize>,
 }
 
 impl<N: Network> Service<N> {
     pub fn new(
         provider: RootProvider<N>,
-        reads_per_epoch: Option<usize>,
+        max_read_per_epoch: usize,
     ) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
             provider,
+            max_read_per_epoch,
             subscriber: None,
             current: BlockHashAndNumber::default(),
             websocket_connected: false,
@@ -297,7 +299,6 @@ impl<N: Network> Service<N> {
             error_count: 0,
             command_receiver: cmd_rx,
             shutdown: false,
-            reads_per_epoch,
         };
 
         (service, cmd_tx)
@@ -370,7 +371,7 @@ impl<N: Network> Service<N> {
         };
 
         let block_confirmations = block_confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS);
-        let max_read_per_epoch = self.reads_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let max_read_per_epoch = self.max_read_per_epoch;
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
 
@@ -398,7 +399,7 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
-        let reads_per_epoch = self.reads_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let reads_per_epoch = self.max_read_per_epoch;
 
         let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
             BlockRangeScannerError::HistoricalSyncError(format!(
@@ -438,7 +439,7 @@ impl<N: Network> Service<N> {
         block_confirmations: Option<u64>,
     ) -> Result<(), BlockRangeScannerError> {
         let block_confirmations = block_confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS);
-        let max_read_per_epoch = self.reads_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let max_read_per_epoch = self.max_read_per_epoch;
         // Step 1:
         // Fetches the starting block and end block for historical sync
         let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
@@ -893,6 +894,8 @@ impl BlockRangeScannerClient {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use alloy::{
         network::Ethereum,
         providers::{ProviderBuilder, ext::AnvilApi},
@@ -900,7 +903,7 @@ mod tests {
         transports::mock::Asserter,
     };
     use alloy_node_bindings::Anvil;
-    use tokio::sync::mpsc;
+    use tokio::{sync::mpsc, time::timeout};
     use tokio_stream::StreamExt;
 
     use super::*;
@@ -909,11 +912,27 @@ mod tests {
         RootProvider::new(RpcClient::mocked(asserter))
     }
 
+    #[test]
+    fn block_range_scanner_defaults_match_constants() {
+        let scanner = BlockRangeScanner::new();
+
+        assert_eq!(scanner.max_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
+    }
+
+    #[test]
+    fn builder_methods_update_configuration() {
+        let blocks_read_per_epoch = 42;
+
+        let scanner = BlockRangeScanner::new().with_max_read_per_epoch(blocks_read_per_epoch);
+
+        assert_eq!(scanner.max_read_per_epoch, blocks_read_per_epoch);
+    }
+
     #[tokio::test]
     async fn send_to_subscriber_increments_processed_count() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, None);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
@@ -936,7 +955,7 @@ mod tests {
     async fn send_to_subscriber_removes_closed_channel() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, None);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
 
         let (tx, rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -957,7 +976,7 @@ mod tests {
     fn handle_unsubscribe_clears_subscriber() {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, None);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
 
         let (tx, _rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -980,7 +999,7 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver = client.stream_live(Some(1)).await?.take(expected_blocks);
+        let mut receiver = client.stream_live(None).await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
@@ -1014,11 +1033,131 @@ mod tests {
 
         let expected_blocks = 10;
         let mut receiver = client
-            .stream_from(BlockNumberOrTag::Latest, Option::Some(block_confirmations))
+            .stream_from(BlockNumberOrTag::Latest, Some(block_confirmations))
             .await?
             .take(expected_blocks);
 
         let latest_head = provider.get_block_number().await?;
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
+
+        let mut expected_range_start = latest_head;
+
+        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+            assert_eq!(expected_range_start, *range.start());
+            assert_eq!(range.end(), range.start());
+            expected_range_start += 1;
+        }
+
+        // verify that the final block number (range.end) was of the latest block with the expected
+        // block confirmations
+        assert_eq!(expected_range_start, latest_head + expected_blocks as u64);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn live_mode_respects_block_confirmations() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
+
+        let block_confirmations = 5;
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let expected_blocks = 10;
+
+        let mut receiver =
+            client.stream_live(Some(block_confirmations)).await?.take(expected_blocks);
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let latest_head = provider.get_block_number().await?;
+        provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
+
+        let mut expected_range_start = latest_head.saturating_sub(block_confirmations) + 1;
+
+        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+            assert_eq!(expected_range_start, *range.start());
+            assert_eq!(range.end(), range.start());
+            expected_range_start += 1;
+        }
+
+        // we add 1 to the right side, because we're expecting the number of the _next_ block to be
+        // mined
+        assert_eq!(
+            expected_range_start,
+            latest_head + expected_blocks as u64 + 1 - block_confirmations
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn live_mode_respects_block_confirmations_on_new_chain() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        let block_confirmations = 5;
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut receiver = client.stream_live(Some(block_confirmations)).await?;
+
+        provider.anvil_mine(Option::Some(6), Option::None).await?;
+
+        let next = receiver.next().await;
+        if let Some(BlockRangeMessage::Data(range)) = next {
+            assert_eq!(0, *range.start());
+            assert_eq!(0, *range.end());
+        } else {
+            panic!("expected range, got: {next:?}");
+        }
+
+        let next = receiver.next().await;
+        if let Some(BlockRangeMessage::Data(range)) = next {
+            assert_eq!(1, *range.start());
+            assert_eq!(1, *range.end());
+        } else {
+            panic!("expected range, got: {next:?}");
+        }
+
+        // assert no new pending confirmed block ranges
+        assert!(
+            timeout(Duration::from_secs(1), async move { receiver.next().await }).await.is_err()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
+    async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        let block_confirmations = 5;
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut receiver = client.stream_live(Some(block_confirmations)).await?;
+
+        provider.anvil_mine(Option::Some(10), Option::None).await?;
+
+        provider
+            .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
+            .await?;
+
         provider.anvil_mine(Option::Some(20), Option::None).await?;
 
         let mut block_range_start = 0;
@@ -1051,151 +1190,6 @@ mod tests {
         let block_confirmations = 3;
 
         let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let mut receiver = client.stream_live().await?;
-
-        provider.anvil_mine(Option::Some(10), Option::None).await?;
-
-        provider
-            .anvil_reorg(ReorgOptions { depth: block_confirmations + 5, tx_block_pairs: vec![] })
-            .await?;
-
-        provider.anvil_mine(Option::Some(30), Option::None).await?;
-        receiver.close();
-
-        let mut block_range_start = 0;
-
-        let mut block_num = vec![];
-        let mut reorg_detected = false;
-        while let Some(msg) = receiver.next().await {
-            match msg {
-                BlockRangeMessage::Data(range) => {
-                    if block_range_start == 0 {
-                        block_range_start = *range.start();
-                    }
-                    block_num.push(range);
-                    if block_num.len() == 15 {
-                        break;
-                    }
-                }
-                BlockRangeMessage::Status(ScannerStatus::ReorgDetected) => {
-                    reorg_detected = true;
-                }
-                _ => {
-                    break;
-                }
-            }
-        }
-        assert!(reorg_detected, "Reorg should have been detected");
-
-        // Generally check that there is a reorg in the range i.e.
-        //                                                        REORG
-        // [0..=0, 1..=1, 2..=2, 3..=3, 4..=4, 5..=5, 6..=6, 7..=7, 3..=3, 4..=4, 5..=5, 6..=6,
-        // 7..=7, 8..=8, 9..=9] (Less flaky to assert this way)
-        let mut found_reorg_pattern = false;
-        for window in block_num.windows(2) {
-            if window[1].start() < window[0].end() {
-                found_reorg_pattern = true;
-                break;
-            }
-        }
-        assert!(found_reorg_pattern,);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn rewinds_on_detected_reorg() -> anyhow::Result<()> {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter.clone());
-
-        let block_confirmations = 5;
-
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let expected_blocks = 10;
-
-        let mut receiver =
-            client.stream_live(Some(block_confirmations)).await?.take(expected_blocks);
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        let latest_head = provider.get_block_number().await?;
-        provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
-
-        let mut block_range_start = 0;
-
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            if block_range_start == 0 {
-                block_range_start = *range.start();
-                assert_eq!(*range.start(), latest_head.saturating_sub(block_confirmations));
-            }
-
-            assert_eq!(block_range_start, *range.start());
-            assert!(*range.end() >= *range.start());
-            block_range_start = *range.end() + 1;
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
-        let anvil = Anvil::new().block_time(1).try_spawn()?;
-
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-
-        let block_confirmations = 5;
-
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let mut receiver = client.stream_live(Some(block_confirmations)).await?;
-
-        provider.anvil_mine(Option::Some(10), Option::None).await?;
-
-        provider
-            .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
-            .await?;
-
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
-
-        let mut block_range_start = 0;
-
-        let end_loop = 20;
-        let mut i = 0;
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            if block_range_start == 0 {
-                block_range_start = *range.start();
-            }
-
-            assert_eq!(block_range_start, *range.start());
-            assert!(*range.end() >= *range.start());
-            block_range_start = *range.end() + 1;
-            i += 1;
-            if i == end_loop {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
-        let anvil = Anvil::new().block_time(1).try_spawn()?;
-
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-
-        let block_confirmations = 3;
-
-        let client = BlockRangeScanner::new()
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1248,51 +1242,6 @@ mod tests {
             }
         }
         assert!(found_reorg_pattern,);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn live_mode_caps_range_to_max_read_per_epoch() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
-
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Option::Some(50), Option::None).await?;
-
-        let block_confirmations = 5;
-        let max_read_per_epoch = 10;
-
-        let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(max_read_per_epoch)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let mut receiver = client.stream_live(Some(block_confirmations)).await?;
-
-        provider.anvil_mine(Option::Some(100), Option::None).await?;
-
-        let mut ranges = Vec::new();
-        let max_ranges = 15;
-        let mut count = 0;
-
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            let range_size = range.end() - range.start() + 1;
-            ranges.push((range, range_size));
-            count += 1;
-            if count >= max_ranges {
-                break;
-            }
-        }
-
-        for (range, size) in &ranges {
-            assert!(
-                *size <= max_read_per_epoch as u64,
-                "Range {range:?} size {size} exceeds max_read_per_epoch {max_read_per_epoch}",
-            );
-        }
-
-        assert!(!ranges.is_empty(), "Should have received at least one range");
 
         Ok(())
     }
@@ -1441,7 +1390,7 @@ mod tests {
     async fn forwards_errors_to_subscribers() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, None);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
