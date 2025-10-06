@@ -68,7 +68,10 @@ async fn run_scanner(
     ws_url: alloy::transports::http::reqwest::Url,
     contract: alloy::primitives::Address,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
+    // Configure scanner with custom batch size (optional)
+    let mut client = EventScanner::new()
+        .with_max_block_range(500)  // Process up to 500 blocks per batch
+        .connect_ws::<Ethereum>(ws_url).await?;
 
     let filter = EventFilter::new()
         .with_contract_address(contract)
@@ -77,7 +80,7 @@ async fn run_scanner(
     let mut stream = client.create_event_stream(filter);
 
     // Live mode with default confirmations
-    tokio::spawn(async move { client.stream_live(Option::None).await });
+    tokio::spawn(async move { client.stream_live(None).await });
 
     while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
         println!("Fetched logs: {logs:?}");
@@ -93,16 +96,24 @@ async fn run_scanner(
 
 ### Building a Scanner
 
-- No builders. Pass parameters to each mode as options.
-- Defaults: `DEFAULT_BLOCKS_READ_PER_EPOCH`, `DEFAULT_BLOCK_CONFIRMATIONS`.
-- Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or an existing provider.
+`EventScanner` provides a builder pattern to configure global settings before connecting:
 
-Mode APIs (all optional params use sensible defaults):
+```rust
+let scanner = EventScanner::new()
+    .with_max_block_range(500)  // Optional: set max blocks per batch (default: 1000)
+    .connect_ws::<Ethereum>(ws_url).await?;
+```
+
+**Configuration Options:**
+- `with_max_block_range(usize)` – Sets the maximum number of blocks to process per epoch. This applies to all modes (live, historical, and hybrid). Prevents RPC provider errors from overly large block range queries.
+- Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or `connect_provider(provider)`.
+
+**Mode APIs** (all use the global `max_block_range` setting):
 - Live: `client.stream_live(block_confirmations: Option<u64>)`
-- Historical: `client.stream_historical(start, end, reads_per_epoch: Option<usize>)`
-- From + Live: `client.stream_from(start, reads_per_epoch: Option<usize>, block_confirmations: Option<u64>)`
+- Historical: `client.stream_historical(start, end)`
+- From + Live: `client.stream_from(start, block_confirmations: Option<u64>)`
 
-Pass `None` to use defaults; provide values to override per call.
+Pass `None` for block confirmations to use the default (`DEFAULT_BLOCK_CONFIRMATIONS = 0`).
 
 ### Defining Event Filters
 
@@ -140,10 +151,13 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 ### Scanning Modes
 
 - **Live mode** – `client.stream_live(None)` subscribes to new blocks using default confirmations.
-- **Historical mode** – `client.stream_historical(start, end, None)` fetches a historical block range using the default batch size.
-- **Historical → Live** – `client.stream_from(start, None, None)` replays from `start` to the confirmed tip, then streams future blocks with default confirmations.
+- **Historical mode** – `client.stream_historical(start, end)` fetches a historical block range using the configured `max_block_range`.
+- **Historical → Live** – `client.stream_from(start, None)` replays from `start` to the confirmed tip, then streams future blocks.
 
-Override defaults by passing `Some(...)` for the optional parameters.
+**Configuration Tips:**
+- Set `max_block_range` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks)
+- For live mode, if the WebSocket subscription lags significantly (e.g., >2000 blocks), ranges are automatically capped to `max_block_range` to prevent RPC errors
+- Pass `Some(block_confirmations)` to override the default confirmation depth (0) for added reorg protection
 
 See integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
 
