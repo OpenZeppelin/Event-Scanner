@@ -816,6 +816,7 @@ impl<N: Network> Service<N> {
                 Ok(sub) => {
                     let mut stream = sub.into_stream();
                     while let Some(h) = stream.next().await {
+                        println!("any");
                         if live_block_num_sender.send(h.number()).await.is_err() {
                             warn!("Downstream channel closed, stopping live header monitor");
                             break;
@@ -1610,7 +1611,7 @@ mod tests {
 
     #[tokio::test]
     async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
+        let anvil = Anvil::new().block_time(1).try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
         provider.anvil_mine(Option::Some(1000), Option::None).await?;
@@ -1625,6 +1626,13 @@ mod tests {
             .await?
             .run()?;
 
+        let provider_clone = provider.clone();
+        let mining_task = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let _ = provider_clone.anvil_mine(Option::Some(1), Option::None).await;
+            }
+        });
         let mut stream = client
             .stream_historical(
                 BlockNumberOrTag::Number(0),
@@ -1632,19 +1640,19 @@ mod tests {
                 Option::Some(50),
             )
             .await?;
+        // Give the monitor time to establish subscription
+        tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Trigger a reorg that goes below `end_num` while historical sync is running
-        let provider_clone = provider.clone();
-        tokio::spawn(async move {
-            // deep reorg
-            let depth = end_num - 10;
-            provider_clone
-                .anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] })
-                .await
-                .unwrap();
-            provider_clone.anvil_mine(Option::Some(200), Option::None).await.unwrap();
-        })
-        .await?;
+        // Now trigger the reorg
+        let depth = end_num - 10;
+        provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await?;
+
+        // Mine more blocks after reorg
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
+
+        // Stop the background mining
+        mining_task.abort();
 
         // Collect all ranges
         let mut data_ranges = Vec::new();
