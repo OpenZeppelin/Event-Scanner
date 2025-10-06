@@ -252,8 +252,8 @@ pub enum Command {
     StreamFrom {
         sender: mpsc::Sender<BlockRangeMessage>,
         start_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
         block_confirmations: Option<u64>,
+        reads_per_epoch: Option<usize>,
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     Unsubscribe {
@@ -368,7 +368,7 @@ impl<N: Network> Service<N> {
     async fn handle_live(
         &mut self,
         block_confirmations: Option<u64>,
-        _max_read_per_epoch: usize,
+        max_read_per_epoch: usize,
     ) -> Result<(), BlockRangeScannerError> {
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
@@ -380,7 +380,14 @@ impl<N: Network> Service<N> {
         let block_confirmations = block_confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS);
         let expected_next = latest.saturating_sub(block_confirmations);
         tokio::spawn(async move {
-            Self::stream_live_blocks(expected_next, provider, sender, block_confirmations).await;
+            Self::stream_live_blocks(
+                expected_next,
+                provider,
+                sender,
+                block_confirmations,
+                max_read_per_epoch,
+            )
+            .await;
         });
 
         Ok(())
@@ -429,11 +436,11 @@ impl<N: Network> Service<N> {
     async fn handle_sync(
         &mut self,
         start_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
+        max_read_per_epoch: Option<usize>,
         block_confirmations: Option<u64>,
     ) -> Result<(), BlockRangeScannerError> {
         let block_confirmations = block_confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS);
-        let reads_per_epoch = reads_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let max_read_per_epoch = max_read_per_epoch.unwrap_or(DEFAULT_BLOCKS_READ_PER_EPOCH);
         // Step 1:
         // Fetches the starting block and end block for historical sync
         let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
@@ -464,8 +471,14 @@ impl<N: Network> Service<N> {
             let provider = self.provider.clone();
             let expected_next = start_block.header().number();
             tokio::spawn(async move {
-                Self::stream_live_blocks(expected_next, provider, sender, block_confirmations)
-                    .await;
+                Self::stream_live_blocks(
+                    expected_next,
+                    provider,
+                    sender,
+                    block_confirmations,
+                    max_read_per_epoch,
+                )
+                .await;
             });
 
             return Ok(());
@@ -501,6 +514,7 @@ impl<N: Network> Service<N> {
                 provider,
                 live_block_buffer_sender,
                 block_confirmations,
+                max_read_per_epoch,
             )
             .await;
         });
@@ -508,7 +522,8 @@ impl<N: Network> Service<N> {
         // Step 4: Perform historical synchronization
         // This processes blocks from start_block to end_block (cutoff)
         // If this fails, we need to abort the live streaming task
-        if let Err(e) = self.sync_historical_data(start_block, end_block, reads_per_epoch).await {
+        if let Err(e) = self.sync_historical_data(start_block, end_block, max_read_per_epoch).await
+        {
             warn!("aborting live_subscription_task");
             live_subscription_task.abort();
             return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
@@ -578,6 +593,7 @@ impl<N: Network> Service<N> {
         provider: P,
         sender: mpsc::Sender<BlockRangeMessage>,
         block_confirmations: u64,
+        max_read_per_epoch: usize,
     ) {
         match Self::get_block_subscription(&provider).await {
             Ok(ws_stream) => {
@@ -613,8 +629,13 @@ impl<N: Network> Service<N> {
 
                     let confirmed = incoming_block_num.saturating_sub(block_confirmations);
                     if confirmed >= expected_next_block {
+                        // NOTE: Edge case when difference between range end and range start >= max
+                        // reads
+                        let end_block = confirmed
+                            .min(expected_next_block.saturating_add(max_read_per_epoch as u64));
+
                         if sender
-                            .send(BlockRangeMessage::Data(expected_next_block..=confirmed))
+                            .send(BlockRangeMessage::Data(expected_next_block..=end_block))
                             .await
                             .is_err()
                         {
@@ -735,6 +756,11 @@ impl BlockRangeScannerClient {
 
     /// Streams live blocks starting from the latest block.
     ///
+    /// # Arguments
+    ///
+    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    /// * `reads_per_epoch` - The number of blocks to process per batch.
+    ///
     /// # Errors
     ///
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
@@ -806,8 +832,8 @@ impl BlockRangeScannerClient {
     /// # Arguments
     ///
     /// * `start_height` - The starting block number or tag.
-    /// * `reads_per_epoch` - The number of blocks to process per batch during the historical phase.
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    /// * `reads_per_epoch` - The number of blocks to process per batch during the historical phase.
     ///
     /// # Errors
     ///
@@ -815,8 +841,8 @@ impl BlockRangeScannerClient {
     pub async fn stream_from(
         &self,
         start_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
         block_confirmations: Option<u64>,
+        reads_per_epoch: Option<usize>,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -824,8 +850,8 @@ impl BlockRangeScannerClient {
         let command = Command::StreamFrom {
             sender: blocks_sender,
             start_height,
-            reads_per_epoch,
             block_confirmations,
+            reads_per_epoch,
             response: response_tx,
         };
 
@@ -965,7 +991,8 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver = client.stream_live(Some(1), DEFAULT_BLOCKS_READ_PER_EPOCH).await?.take(expected_blocks);
+        let mut receiver =
+            client.stream_live(Some(1), DEFAULT_BLOCKS_READ_PER_EPOCH).await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
@@ -1038,8 +1065,10 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver =
-            client.stream_live(Some(block_confirmations), DEFAULT_BLOCKS_READ_PER_EPOCH).await?.take(expected_blocks);
+        let mut receiver = client
+            .stream_live(Some(block_confirmations), DEFAULT_BLOCKS_READ_PER_EPOCH)
+            .await?
+            .take(expected_blocks);
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         let latest_head = provider.get_block_number().await?;
         provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
@@ -1073,7 +1102,8 @@ mod tests {
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live(Some(block_confirmations), DEFAULT_BLOCKS_READ_PER_EPOCH).await?;
+        let mut receiver =
+            client.stream_live(Some(block_confirmations), DEFAULT_BLOCKS_READ_PER_EPOCH).await?;
 
         provider.anvil_mine(Option::Some(10), Option::None).await?;
 
@@ -1116,7 +1146,8 @@ mod tests {
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live(Some(block_confirmations), DEFAULT_BLOCKS_READ_PER_EPOCH).await?;
+        let mut receiver =
+            client.stream_live(Some(block_confirmations), DEFAULT_BLOCKS_READ_PER_EPOCH).await?;
 
         provider.anvil_mine(Option::Some(10), Option::None).await?;
 
