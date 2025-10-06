@@ -632,7 +632,7 @@ impl<N: Network> Service<N> {
                         // NOTE: Edge case when difference between range end and range start >= max
                         // reads
                         let end_block = confirmed
-                            .min(expected_next_block.saturating_add(max_read_per_epoch as u64));
+                            .min(expected_next_block.saturating_add(max_read_per_epoch as u64 - 1));
 
                         if sender
                             .send(BlockRangeMessage::Data(expected_next_block..=end_block))
@@ -644,7 +644,7 @@ impl<N: Network> Service<N> {
                         }
 
                         // Overflow can not realistically happen
-                        expected_next_block = confirmed + 1;
+                        expected_next_block = end_block + 1;
                     }
                 }
             }
@@ -1195,6 +1195,51 @@ mod tests {
             }
         }
         assert!(found_reorg_pattern,);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn live_mode_caps_range_to_max_read_per_epoch() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        provider.anvil_mine(Option::Some(50), Option::None).await?;
+
+        let block_confirmations = 5;
+        let max_read_per_epoch = 10;
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut receiver =
+            client.stream_live(Some(block_confirmations), max_read_per_epoch).await?;
+
+        provider.anvil_mine(Option::Some(100), Option::None).await?;
+
+        let mut ranges = Vec::new();
+        let max_ranges = 15;
+        let mut count = 0;
+
+        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+            let range_size = range.end() - range.start() + 1;
+            ranges.push((range, range_size));
+            count += 1;
+            if count >= max_ranges {
+                break;
+            }
+        }
+
+        for (range, size) in &ranges {
+            assert!(
+                *size <= max_read_per_epoch as u64,
+                "Range {range:?} size {size} exceeds max_read_per_epoch {max_read_per_epoch}",
+            );
+        }
+
+        assert!(!ranges.is_empty(), "Should have received at least one range");
 
         Ok(())
     }
