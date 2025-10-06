@@ -203,13 +203,16 @@ impl<N: Network> ConnectedEventScanner<N> {
                                 .await;
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
-                            if let Err(err) = sender.send(ScannerMessage::Error(e.into())).await {
+                            if let Err(err) =
+                                sender.send(EventScannerMessage::Error(e.into())).await
+                            {
                                 error!(error = %err, "Downstream channel closed, skipping error propagation and stopping streaming.");
                                 break;
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
-                            if let Err(err) = sender.send(ScannerMessage::Status(status)).await {
+                            if let Err(err) = sender.send(EventScannerMessage::Status(status)).await
+                            {
                                 error!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping streaming.");
                                 break;
                             }
