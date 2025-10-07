@@ -914,10 +914,10 @@ impl<N: Network> Service<N> {
 
             let mut current = reorg_start;
             // respect max read
-            while current < end_num {
-                let batch_end = current.saturating_add(max_read).min(end_num);
+            while current <= end_num {
+                let batch_end = current.saturating_add(max_read - 1).min(end_num);
                 self.send_to_subscriber(BlockRangeMessage::Data(current..=batch_end)).await;
-                current = batch_end;
+                current = batch_end + 1;
             }
         }
     }
