@@ -546,6 +546,8 @@ impl<N: Network> Service<N> {
             return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
         }
 
+        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
+
         let Some(sender) = self.subscriber.clone() else {
             return Err(BlockRangeScannerError::ServiceShutdown);
         };
@@ -600,8 +602,6 @@ impl<N: Network> Service<N> {
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
-
-        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
 
         Ok(())
     }
