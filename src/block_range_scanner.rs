@@ -134,7 +134,7 @@ pub enum BlockRangeScannerError {
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
 
-    #[error("Block {0} not found")]
+    #[error("Block not found, block number: {0}")]
     BlockNotFound(BlockNumberOrTag),
 }
 
@@ -954,6 +954,17 @@ mod tests {
 
     use super::*;
 
+    macro_rules! assert_next_range {
+        ($stream: expr, $range: expr) => {
+            let next = $stream.next().await;
+            if let Some(BlockRangeMessage::Data(range)) = next {
+                assert_eq!($range, range);
+            } else {
+                panic!("expected block range, got: {next:?}");
+            }
+        };
+    }
+
     fn test_config() -> Config {
         Config { blocks_read_per_epoch: 5, reorg_rewind_depth: 5, block_confirmations: 0 }
     }
@@ -1350,16 +1361,6 @@ mod tests {
         Ok(())
     }
 
-    macro_rules! assert_next_range {
-        ($stream: expr, $range: expr) => {
-            let next = $stream.next().await;
-            if let Some(BlockRangeMessage::Data(range)) = next {
-                assert_eq!($range, range);
-            } else {
-                panic!("expected block range, got: {next:?}");
-            }
-        };
-    }
     #[tokio::test]
     async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
@@ -1374,14 +1375,43 @@ mod tests {
             .await?
             .run()?;
 
+        // ranges where each batch is of max blocks per epoch size
         let mut stream = client.stream_historical(0, 19).await?;
-
         assert_next_range!(stream, (0..=4));
         assert_next_range!(stream, (5..=9));
         assert_next_range!(stream, (10..=14));
         assert_next_range!(stream, (15..=19));
+        assert!(stream.next().await.is_none());
 
-        // assert no new pending confirmed block ranges
+        // ranges where last batch is smaller than blocks per epoch
+        let mut stream = client.stream_historical(93, 99).await?;
+        assert_next_range!(stream, (93..=97));
+        assert_next_range!(stream, (98..=99));
+        assert!(stream.next().await.is_none());
+
+        // range where blocks per epoch is larger than the number of blocks in the range
+        let mut stream = client.stream_historical(3, 5).await?;
+        assert_next_range!(stream, (3..=5));
+        assert!(stream.next().await.is_none());
+
+        // single item range
+        let mut stream = client.stream_historical(3, 3).await?;
+        assert_next_range!(stream, (3..=3));
+        assert!(stream.next().await.is_none());
+
+        // range where blocks per epoch is larger than the number of blocks on chain
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(200)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.stream_historical(0, 20).await?;
+        assert_next_range!(stream, (0..=20));
+        assert!(stream.next().await.is_none());
+
+        let mut stream = client.stream_historical(0, 99).await?;
+        assert_next_range!(stream, (0..=99));
         assert!(stream.next().await.is_none());
 
         Ok(())
