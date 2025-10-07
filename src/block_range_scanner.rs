@@ -964,6 +964,41 @@ impl BlockRangeScannerClient {
         Ok(ReceiverStream::new(blocks_receiver))
     }
 
+    /// Streams blocks in reverse order from `start_height` to `end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag (defaults to Latest if None).
+    /// * `end_height` - The ending block number or tag (defaults to Earliest if None).
+    ///
+    /// # Errors
+    ///
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn rewind<BN: Into<BlockNumberOrTag>>(
+        &self,
+        start_height: Option<BN>,
+        end_height: Option<BN>,
+    ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
+        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::Rewind {
+            sender: blocks_sender,
+            start_height: start_height.map(|n| n.into()),
+            end_height: end_height.map(|n| n.into()),
+            response: response_tx,
+        };
+
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
+
+        Ok(ReceiverStream::new(blocks_receiver))
+    }
+
     /// Unsubscribes the current subscriber.
     ///
     /// # Errors
