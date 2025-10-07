@@ -65,7 +65,7 @@
 //! }
 //! ```
 
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
@@ -88,7 +88,7 @@ use alloy::{
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-pub const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
+pub const DEFAULT_BLOCKS_READ_PER_EPOCH: u32 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 // const BACK_OFF_MAX_RETRIES: u64 = 5;
@@ -133,6 +133,9 @@ pub enum BlockRangeScannerError {
 
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
+
+    #[error("Block {0} not found")]
+    BlockNotFound(BlockNumberOrTag),
 }
 
 impl From<reqwest::Error> for BlockRangeScannerError {
@@ -170,6 +173,12 @@ pub enum Command {
         start_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
+    Rewind {
+        sender: mpsc::Sender<BlockRangeMessage>,
+        start_height: Option<BlockNumberOrTag>,
+        end_height: Option<BlockNumberOrTag>,
+        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
+    },
     Unsubscribe {
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
@@ -192,7 +201,7 @@ impl BlockHashAndNumber {
 
 #[derive(Clone)]
 struct Config {
-    blocks_read_per_epoch: usize,
+    blocks_read_per_epoch: u32,
     reorg_rewind_depth: u64,
     #[allow(
         dead_code,
@@ -202,7 +211,7 @@ struct Config {
 }
 
 pub struct BlockRangeScanner {
-    blocks_read_per_epoch: usize,
+    blocks_read_per_epoch: u32,
     reorg_rewind_depth: u64,
     block_confirmations: u64,
 }
@@ -224,7 +233,7 @@ impl BlockRangeScanner {
     }
 
     #[must_use]
-    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
+    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: u32) -> Self {
         self.blocks_read_per_epoch = blocks_read_per_epoch;
         self
     }
@@ -390,6 +399,15 @@ impl<N: Network> Service<N> {
                 let result = self.handle_sync(start_height).await;
                 let _ = response.send(result);
             }
+            Command::Rewind { sender, start_height, end_height, response } => {
+                self.ensure_no_subscriber()?;
+                self.subscriber = Some(sender);
+                let start_height = start_height.unwrap_or(BlockNumberOrTag::Latest);
+                let end_height = end_height.unwrap_or(BlockNumberOrTag::Earliest);
+                info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
+                let result = self.handle_rewind(start_height, end_height).await;
+                let _ = response.send(result);
+            }
             Command::Unsubscribe { response } => {
                 self.handle_unsubscribe();
                 let _ = response.send(Ok(()));
@@ -401,6 +419,61 @@ impl<N: Network> Service<N> {
             }
         }
         Ok(())
+    }
+
+    async fn handle_rewind(
+        &mut self,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<(), BlockRangeScannerError> {
+        let start_block = self
+            .provider
+            .get_block_by_number(start_height)
+            .await?
+            .ok_or(BlockRangeScannerError::BlockNotFound(start_height))?
+            .header()
+            .number();
+        let end_block = self
+            .provider
+            .get_block_by_number(end_height)
+            .await?
+            .ok_or(BlockRangeScannerError::BlockNotFound(end_height))?
+            .header()
+            .number();
+
+        let block_range = match start_block.cmp(&end_block) {
+            Ordering::Greater => end_block..=start_block,
+            _ => start_block..=end_block,
+        };
+
+        self.stream_rewind(block_range).await;
+
+        _ = self.subscriber.take();
+
+        Ok(())
+    }
+
+    async fn stream_rewind(&mut self, block_range: RangeInclusive<BlockNumber>) {
+        let mut batch_count = 0;
+        let blocks_read_per_epoch = self.config.blocks_read_per_epoch;
+
+        // we're iterating in reverse
+        let stream_end = *block_range.start();
+        // SAFETY: u32 can always be cast as usize
+        let range_iter = block_range.rev().step_by(blocks_read_per_epoch as usize);
+
+        for batch_end in range_iter {
+            let batch_start = (batch_end - blocks_read_per_epoch as u64 + 1).max(stream_end);
+
+            self.send_to_subscriber(BlockRangeMessage::Data(batch_start..=batch_end)).await;
+
+            batch_count += 1;
+            if batch_count % 10 == 0 {
+                debug!(batch_count = batch_count, "Processed rewind batches");
+            }
+        }
+
+        info!(batch_count = batch_count, "Rewind completed");
     }
 
     async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
