@@ -875,7 +875,6 @@ impl<N: Network> Service<N> {
                 Ok(sub) => {
                     let mut stream = sub.into_stream();
                     while let Some(h) = stream.next().await {
-                        println!("live {}", h.number());
                         if live_block_num_sender.send(h.number()).await.is_err() {
                             warn!("Downstream channel closed, stopping live header monitor");
                             break;
@@ -1735,7 +1734,6 @@ mod tests {
             }
         }
 
-        println!("ranges {data_ranges:?}");
         assert!(reorg, "no reorg detected");
 
         let reorg_start = end_num - 5;
