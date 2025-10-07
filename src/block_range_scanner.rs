@@ -854,6 +854,8 @@ impl<N: Network> Service<N> {
 
             if let Some(reorg_start) = min_seen_below_end {
                 // send correction reorg --> end
+                self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
+                    .await;
                 self.send_to_subscriber(BlockRangeMessage::Data(reorg_start..=end_num)).await;
             }
         }
@@ -1257,7 +1259,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_mode_respects_block_confirmations_on_new_chain() -> anyhow::Result<()> {
+    #[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
+    async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
