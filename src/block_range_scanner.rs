@@ -908,9 +908,18 @@ impl<N: Network> Service<N> {
             }
         }
 
-        if let Some(start) = min_seen_below_end {
+        if let Some(reorg_start) = min_seen_below_end {
+            let max_read = self.max_read_per_epoch as u64;
+
             self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected)).await;
-            self.send_to_subscriber(BlockRangeMessage::Data(start..=end_num)).await;
+
+            let mut current = reorg_start;
+            // respect max read
+            while current < end_num {
+                let batch_end = current.saturating_add(max_read).min(end_num);
+                self.send_to_subscriber(BlockRangeMessage::Data(current..=batch_end)).await;
+                current = batch_end;
+            }
         }
     }
 
