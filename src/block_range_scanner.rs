@@ -878,13 +878,16 @@ impl BlockRangeScannerClient {
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_from(
         &self,
-        start_height: BlockNumberOrTag,
+        start_height: impl Into<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command =
-            Command::StreamFrom { sender: blocks_sender, start_height, response: response_tx };
+        let command = Command::StreamFrom {
+            sender: blocks_sender,
+            start_height: start_height.into(),
+            response: response_tx,
+        };
 
         self.command_sender
             .send(command)
