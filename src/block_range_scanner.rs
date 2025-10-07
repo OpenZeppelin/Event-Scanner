@@ -367,6 +367,7 @@ async fn maybe_delay_historical() {
 }
 
 #[cfg(not(test))]
+#[allow(clippy::unused_async)]
 async fn maybe_delay_historical() {}
 
 struct Service<N: Network> {
