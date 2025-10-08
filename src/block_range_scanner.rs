@@ -578,6 +578,8 @@ impl<N: Network> Service<N> {
 
         self.next_start_block = BlockHashAndNumber::from_header::<N>(start.header());
 
+        // must be <= to include the edge case when start == end (i.e. return the single block
+        // range)
         while self.next_start_block.number <= end.header().number() {
             self.ensure_current_not_reorged().await?;
 
@@ -592,18 +594,29 @@ impl<N: Network> Service<N> {
             ))
             .await;
 
-            let next_start_block_number = (batch_end_block_number + 1).into();
-            self.next_start_block = self
-                .provider
-                .get_block_by_number(next_start_block_number)
-                .await?
-                .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
-                .ok_or(BlockRangeScannerError::BlockNotFound(next_start_block_number))?;
-
             batch_count += 1;
             if batch_count % 10 == 0 {
                 debug!(batch_count = batch_count, "Processed historical batches");
             }
+
+            if batch_end_block_number == end.header().number() {
+                break;
+            }
+
+            let next_start_block_number = (batch_end_block_number + 1).into();
+            let next_start_block =
+                match self.provider.get_block_by_number(next_start_block_number).await {
+                    Ok(block) => {
+                        block.expect("block number is less than 'end', so it should exist")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to get block by number");
+                        let e: BlockRangeScannerError = e.into();
+                        self.send_to_subscriber(BlockRangeMessage::Error(e.clone())).await;
+                        return Err(e);
+                    }
+                };
+            self.next_start_block = BlockHashAndNumber::from_header::<N>(next_start_block.header());
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
