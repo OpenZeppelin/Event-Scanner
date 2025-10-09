@@ -8,10 +8,7 @@ use std::{
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 use alloy::{network::Ethereum, sol_types::SolEvent};
-use event_scanner::{
-    event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
-};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
 use tokio::time::timeout;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 

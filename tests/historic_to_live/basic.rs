@@ -5,8 +5,7 @@ use std::sync::{
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
 use event_scanner::{
-    event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
+    event_lib::{EventFilter, EventScanner, EventScannerMessage},
     types::ScannerStatus,
 };
 use tokio::{

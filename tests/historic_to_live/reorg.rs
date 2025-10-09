@@ -4,10 +4,9 @@ use alloy::{
     eips::BlockNumberOrTag,
     providers::{Provider, ext::AnvilApi},
 };
+use event_scanner::{EventScannerMessage, types::ScannerStatus};
 use tokio::{sync::Mutex, time::timeout};
 use tokio_stream::StreamExt;
-
-use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
 
 use crate::common::{TestSetup, reorg_with_new_txs, setup_scanner};
 

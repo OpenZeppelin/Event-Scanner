@@ -7,10 +7,7 @@ use std::{
 };
 
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{
-    event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
-};
+use event_scanner::event_lib::{EventFilter, EventScanner, EventScannerMessage};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 

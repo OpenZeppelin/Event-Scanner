@@ -11,9 +11,8 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
-    EventFilter,
-    block_range_scanner::DEFAULT_BLOCKS_READ_PER_EPOCH,
-    event_scanner::{Client, EventScanner, EventScannerMessage},
+    EventFilter, EventScanner, EventScannerMessage,
+    block_range_scanner::DEFAULT_BLOCKS_READ_PER_EPOCH, event_lib::Client,
 };
 use tokio_stream::wrappers::ReceiverStream;
 // Shared test contract used across integration tests

@@ -5,7 +5,9 @@ pub mod scanner;
 
 pub use filter::EventFilter;
 pub use modes::{
-    ConnectedHistoricMode, ConnectedLatestMode, ConnectedSubscribeMode, ConnectedSyncMode,
-    HistoricMode, LatestMode, SubscribeMode, SyncMode,
+    ConnectedHistoricMode, ConnectedSubscribeMode, ConnectedSyncMode, HistoricMode, SubscribeMode,
+    SyncMode,
 };
-pub use scanner::{Client, EventScanner, EventScannerError};
+pub use scanner::{
+    ConnectedEventScanner as Client, EventScanner, EventScannerError, EventScannerMessage,
+};

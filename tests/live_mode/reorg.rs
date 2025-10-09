@@ -6,7 +6,7 @@ use tokio::{sync::Mutex, time::timeout};
 
 use crate::common::{TestSetup, reorg_with_new_txs, setup_scanner};
 use alloy::providers::ext::AnvilApi;
-use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
+use event_scanner::{EventScannerMessage, types::ScannerStatus};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
