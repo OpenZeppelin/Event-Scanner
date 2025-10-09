@@ -317,35 +317,6 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     }
 }
 
-#[derive(Debug)]
-pub enum Command {
-    StreamLive {
-        sender: mpsc::Sender<BlockRangeMessage>,
-        block_confirmations: Option<u64>,
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    StreamHistorical {
-        sender: mpsc::Sender<BlockRangeMessage>,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    StreamFrom {
-        sender: mpsc::Sender<BlockRangeMessage>,
-        start_height: BlockNumberOrTag,
-        reads_per_epoch: Option<usize>,
-        block_confirmations: Option<u64>,
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    Unsubscribe {
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    Shutdown {
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-}
-
 #[cfg(test)]
 static HIST_FETCH_DELAY_MS: AtomicU64 = AtomicU64::new(0);
 
@@ -515,7 +486,7 @@ impl<N: Network> Service<N> {
         let end_num = end_block.header().number();
         let monitor = self.spawn_live_header_monitor_if_needed(end_num, subscriber).await?;
 
-        match self.fetch_historical_blocks(start_block, end_block.clone(), reads_per_epoch).await {
+        match self.sync_historical_data(start_block, end_block.clone()).await {
             Ok(()) => {
                 // Post-sync: stop header collection and evaluate correction range
                 if let Some((handle, rx)) = monitor {
@@ -644,7 +615,7 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn fetch_historical_blocks(
+    async fn sync_historical_data(
         &mut self,
         start: N::BlockResponse,
         end: N::BlockResponse,
@@ -908,7 +879,7 @@ impl<N: Network> Service<N> {
         }
 
         if let Some(reorg_start) = min_seen_below_end {
-            let max_read = self.max_read_per_epoch as u64;
+            let max_read = self.config.blocks_read_per_epoch as u64;
 
             self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected)).await;
 
@@ -1092,6 +1063,7 @@ impl BlockRangeScannerClient {
 mod tests {
 
     use std::time::Duration;
+    use tokio::time::timeout;
 
     use alloy::{
         network::Ethereum,
@@ -1104,6 +1076,7 @@ mod tests {
         transports::mock::Asserter,
     };
     use alloy_node_bindings::Anvil;
+    use serde_json::{Value, json};
     use tokio::{join, sync::mpsc};
     use tokio_stream::StreamExt;
 
@@ -1316,8 +1289,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
-    async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
+    async fn live_mode_respects_block_confirmations_on_new_chain() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
@@ -1709,11 +1681,8 @@ mod tests {
             provider_reorg.anvil_mine(Option::Some(20), Option::None).await.unwrap();
         };
 
-        let fut_stream = client.stream_historical(
-            BlockNumberOrTag::Number(0),
-            BlockNumberOrTag::Number(end_num),
-            Option::Some(3),
-        );
+        let fut_stream = client
+            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
         let (stream_res, ()) = join!(fut_stream, reorg);
         let mut stream = stream_res.unwrap();
