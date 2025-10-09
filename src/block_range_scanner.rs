@@ -1051,10 +1051,44 @@ mod tests {
     };
     use alloy_node_bindings::Anvil;
     use serde_json::{Value, json};
-    use tokio::{sync::mpsc, time::timeout};
+    use tokio::{
+        sync::mpsc::{self, Receiver},
+        time::timeout,
+    };
     use tokio_stream::StreamExt;
 
     use super::*;
+
+    trait RangeReceiver {
+        async fn next_range(&mut self) -> Option<BlockRangeMessage>;
+    }
+
+    impl RangeReceiver for ReceiverStream<BlockRangeMessage> {
+        async fn next_range(&mut self) -> Option<BlockRangeMessage> {
+            self.next().await
+        }
+    }
+
+    impl RangeReceiver for Receiver<BlockRangeMessage> {
+        async fn next_range(&mut self) -> Option<BlockRangeMessage> {
+            self.recv().await
+        }
+    }
+
+    macro_rules! assert_next_range {
+        ($recv:expr, None) => {
+            let next = $recv.next_range().await;
+            assert!(next.is_none());
+        };
+        ($recv:expr, $range:expr) => {
+            let next = $recv.next_range().await;
+            if let Some(BlockRangeMessage::Data(range)) = next {
+                assert_eq!($range, range);
+            } else {
+                panic!("expected block range, got: {next:?}");
+            }
+        };
+    }
 
     fn test_config() -> Config {
         Config { blocks_read_per_epoch: 5, reorg_rewind_depth: 5, block_confirmations: 0 }
@@ -1634,14 +1668,9 @@ mod tests {
         service.stream_rewind(100..=150).await;
         service.handle_unsubscribe();
 
-        let mut received = Vec::new();
-        while let Some(msg) = rx.recv().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
+        assert_next_range!(rx, 100..=150);
+        assert_next_range!(rx, None);
 
-        assert_eq!(received, vec![100..=150]);
         Ok(())
     }
 
@@ -1662,14 +1691,11 @@ mod tests {
         service.stream_rewind(0..=14).await;
         service.handle_unsubscribe();
 
-        let mut received = Vec::new();
-        while let Some(msg) = rx.recv().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
+        assert_next_range!(rx, 10..=14);
+        assert_next_range!(rx, 5..=9);
+        assert_next_range!(rx, 0..=4);
+        assert_next_range!(rx, None);
 
-        assert_eq!(received, vec![10..=14, 5..=9, 0..=4]);
         Ok(())
     }
 
@@ -1689,14 +1715,11 @@ mod tests {
         service.stream_rewind(3..=12).await;
         service.handle_unsubscribe();
 
-        let mut received = Vec::new();
-        while let Some(msg) = rx.recv().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
+        assert_next_range!(rx, 9..=12);
+        assert_next_range!(rx, 5..=8);
+        assert_next_range!(rx, 3..=4);
+        assert_next_range!(rx, None);
 
-        assert_eq!(received, vec![9..=12, 5..=8, 3..=4]);
         Ok(())
     }
 
@@ -1715,14 +1738,9 @@ mod tests {
         service.stream_rewind(7..=7).await;
         service.handle_unsubscribe();
 
-        let mut received = Vec::new();
-        while let Some(msg) = rx.recv().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
+        assert_next_range!(rx, 7..=7);
+        assert_next_range!(rx, None);
 
-        assert_eq!(received, vec![7..=7]);
         Ok(())
     }
 
@@ -1742,14 +1760,12 @@ mod tests {
         service.stream_rewind(5..=8).await;
         service.handle_unsubscribe();
 
-        let mut received = Vec::new();
-        while let Some(msg) = rx.recv().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
+        assert_next_range!(rx, 8..=8);
+        assert_next_range!(rx, 7..=7);
+        assert_next_range!(rx, 6..=6);
+        assert_next_range!(rx, 5..=5);
+        assert_next_range!(rx, None);
 
-        assert_eq!(received, vec![8..=8, 7..=7, 6..=6, 5..=5]);
         Ok(())
     }
 
@@ -1771,15 +1787,11 @@ mod tests {
             .rewind::<BlockNumberOrTag>(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
             .await?;
 
-        let mut received = Vec::new();
-        while let Some(msg) = stream.next().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
+        assert_next_range!(stream, 14..=20);
+        assert_next_range!(stream, 7..=13);
+        assert_next_range!(stream, 0..=6);
+        assert_next_range!(stream, None);
 
-        // With epoch=7 over [0..=20] -> [14..=20, 7..=13, 0..=6]
-        assert_eq!(received, vec![14..=20, 7..=13, 0..=6]);
         Ok(())
     }
 
@@ -1799,27 +1811,17 @@ mod tests {
 
         let mut stream = client.rewind(15, 3).await?;
 
-        let mut received = Vec::new();
-        while let Some(msg) = stream.next().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
-
-        // Range normalized to [3..=15] with epoch=5 -> [11..=15, 6..=10, 3..=5]
-        assert_eq!(received, vec![11..=15, 6..=10, 3..=5]);
+        assert_next_range!(stream, 11..=15);
+        assert_next_range!(stream, 6..=10);
+        assert_next_range!(stream, 3..=5);
+        assert_next_range!(stream, None);
 
         let mut stream = client.rewind(3, 15).await?;
 
-        let mut received = Vec::new();
-        while let Some(msg) = stream.next().await {
-            if let BlockRangeMessage::Data(range) = msg {
-                received.push(range);
-            }
-        }
-
-        // Range normalized to [3..=15] with epoch=5 -> [11..=15, 6..=10, 3..=5]
-        assert_eq!(received, vec![11..=15, 6..=10, 3..=5]);
+        assert_next_range!(stream, 11..=15);
+        assert_next_range!(stream, 6..=10);
+        assert_next_range!(stream, 3..=5);
+        assert_next_range!(stream, None);
 
         Ok(())
     }
