@@ -156,7 +156,7 @@ impl BlockHashAndNumber {
 
 #[derive(Clone)]
 pub struct BlockRangeScanner {
-    max_read_per_epoch: usize,
+    pub max_read_per_epoch: usize,
 }
 
 impl Default for BlockRangeScanner {

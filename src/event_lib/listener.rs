@@ -1,4 +1,4 @@
-use crate::{event_filter::EventFilter, event_scanner::EventScannerMessage};
+use crate::event_lib::{filter::EventFilter, scanner::EventScannerMessage};
 use tokio::sync::mpsc::Sender;
 
 #[derive(Clone)]

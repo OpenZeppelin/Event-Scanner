@@ -5,8 +5,7 @@ use crate::{
         BlockRangeMessage, BlockRangeScanner, BlockRangeScannerError, ConnectedBlockRangeScanner,
         MAX_BUFFERED_MESSAGES,
     },
-    event_filter::EventFilter,
-    event_listener::EventListener,
+    event_lib::{filter::EventFilter, listener::EventListener},
     types::ScannerMessage,
 };
 use alloy::{
