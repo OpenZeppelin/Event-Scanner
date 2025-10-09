@@ -486,7 +486,7 @@ impl<N: Network> Service<N> {
         let end_num = end_block.header().number();
         let monitor = self.spawn_live_header_monitor_if_needed(end_num, subscriber).await?;
 
-        match self.sync_historical_data(start_block, end_block.clone()).await {
+        match self.stream_historical_blocks(start_block, end_block.clone()).await {
             Ok(()) => {
                 // Post-sync: stop header collection and evaluate correction range
                 if let Some((handle, rx)) = monitor {
@@ -589,7 +589,7 @@ impl<N: Network> Service<N> {
         // Step 4: Perform historical synchronization
         // This processes blocks from start_block to end_block (cutoff)
         // If this fails, we need to abort the live streaming task
-        if let Err(e) = self.sync_historical_data(start_block, end_block).await {
+        if let Err(e) = self.stream_historical_blocks(start_block, end_block).await {
             warn!("aborting live_subscription_task");
             live_subscription_task.abort();
             return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
@@ -615,7 +615,7 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn sync_historical_data(
+    async fn stream_historical_blocks(
         &mut self,
         start: N::BlockResponse,
         end: N::BlockResponse,
