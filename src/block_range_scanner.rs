@@ -463,7 +463,8 @@ impl<N: Network> Service<N> {
         let range_iter = block_range.rev().step_by(blocks_read_per_epoch as usize);
 
         for batch_end in range_iter {
-            let batch_start = (batch_end - blocks_read_per_epoch as u64 + 1).max(stream_end);
+            let batch_start =
+                batch_end.saturating_sub(blocks_read_per_epoch as u64 - 1).max(stream_end);
 
             self.send_to_subscriber(BlockRangeMessage::Data(batch_start..=batch_end)).await;
 
