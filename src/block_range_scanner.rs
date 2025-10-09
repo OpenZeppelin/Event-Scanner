@@ -1619,4 +1619,139 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn rewind_single_batch_when_epoch_larger_than_range() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+
+        let mut config = test_config();
+        config.blocks_read_per_epoch = 100;
+        let (mut service, _cmd) = Service::new(config, provider);
+
+        let (tx, mut rx) = mpsc::channel(16);
+        service.subscriber = Some(tx);
+
+        // Range length is 51, epoch is 100 -> single batch [100..=150]
+        service.stream_rewind(100..=150).await;
+        service.handle_unsubscribe();
+
+        let mut received = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        assert_eq!(received, vec![100..=150]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_exact_multiple_of_epoch_creates_full_batches_in_reverse() -> anyhow::Result<()>
+    {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+
+        let mut config = test_config();
+        config.blocks_read_per_epoch = 5;
+        let (mut service, _cmd) = Service::new(config, provider);
+
+        let (tx, mut rx) = mpsc::channel(16);
+        service.subscriber = Some(tx);
+
+        // 0..=14 with epoch 5 -> [10..=14, 5..=9, 0..=4]
+        service.stream_rewind(0..=14).await;
+        service.handle_unsubscribe();
+
+        let mut received = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        assert_eq!(received, vec![10..=14, 5..=9, 0..=4]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_with_remainder_trims_first_batch_to_stream_start() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+
+        let mut config = test_config();
+        config.blocks_read_per_epoch = 4;
+        let (mut service, _cmd) = Service::new(config, provider);
+
+        let (tx, mut rx) = mpsc::channel(16);
+        service.subscriber = Some(tx);
+
+        // 3..=12 with epoch 4 -> ends: 12,8,4 -> batches: [9..=12, 5..=8, 3..=4]
+        service.stream_rewind(3..=12).await;
+        service.handle_unsubscribe();
+
+        let mut received = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        assert_eq!(received, vec![9..=12, 5..=8, 3..=4]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_single_block_range() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+
+        let mut config = test_config();
+        config.blocks_read_per_epoch = 5;
+        let (mut service, _cmd) = Service::new(config, provider);
+
+        let (tx, mut rx) = mpsc::channel(4);
+        service.subscriber = Some(tx);
+
+        service.stream_rewind(7..=7).await;
+        service.handle_unsubscribe();
+
+        let mut received = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        assert_eq!(received, vec![7..=7]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_epoch_of_one_sends_each_block_in_reverse_order() -> anyhow::Result<()> {
+        let asserter = Asserter::new();
+        let provider = mocked_provider(asserter);
+
+        let mut config = test_config();
+        config.blocks_read_per_epoch = 1;
+        let (mut service, _cmd) = Service::new(config, provider);
+
+        let (tx, mut rx) = mpsc::channel(16);
+        service.subscriber = Some(tx);
+
+        // 5..=8 with epoch 1 -> [8..=8, 7..=7, 6..=6, 5..=5]
+        service.stream_rewind(5..=8).await;
+        service.handle_unsubscribe();
+
+        let mut received = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        assert_eq!(received, vec![8..=8, 7..=7, 6..=6, 5..=5]);
+        Ok(())
+    }
 }
