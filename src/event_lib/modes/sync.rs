@@ -63,7 +63,7 @@ impl SyncMode {
         let block_range_scanner = self.base.block_range_scanner.connect_ws(ws_url).await?;
         let event_scanner =
             ConnectedSyncMode { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(event_scanner)
     }
 
     /// Connects to the provider via IPC
@@ -75,21 +75,24 @@ impl SyncMode {
         self,
         ipc_path: String,
     ) -> TransportResult<ConnectedSyncMode<N>> {
-        let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
+        let block_range_scanner = self.base.block_range_scanner.connect_ipc(ipc_path).await?;
 
-        Ok(ConnectedSyncMode { _provider: provider })
+        let event_scanner =
+            ConnectedSyncMode { block_range_scanner, event_listeners: Vec::default() };
+        Ok(event_scanner)
     }
 
-    pub fn connect_provider<N: Network>(self, provider: RootProvider<N>) -> ConnectedSyncMode<N> {
+    pub fn connect_provider<N: Network>(
+        self,
+        provider: RootProvider<N>,
+    ) -> TransportResult<ConnectedSyncMode<N>> {
         let block_range_scanner = self.base.block_range_scanner.connect_provider(provider)?;
         let event_scanner =
             ConnectedSyncMode { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(event_scanner)
     }
 }
 
 impl<N: Network> ConnectedSyncMode<N> {
-    pub fn stream(self) -> EventStream {
-        EventStream
-    }
+    pub fn stream(self) -> EventStream {}
 }
