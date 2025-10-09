@@ -175,8 +175,8 @@ pub enum Command {
     },
     Rewind {
         sender: mpsc::Sender<BlockRangeMessage>,
-        start_height: Option<BlockNumberOrTag>,
-        end_height: Option<BlockNumberOrTag>,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     Unsubscribe {
@@ -402,8 +402,6 @@ impl<N: Network> Service<N> {
             Command::Rewind { sender, start_height, end_height, response } => {
                 self.ensure_no_subscriber()?;
                 self.subscriber = Some(sender);
-                let start_height = start_height.unwrap_or(BlockNumberOrTag::Latest);
-                let end_height = end_height.unwrap_or(BlockNumberOrTag::Earliest);
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
                 let result = self.handle_rewind(start_height, end_height).await;
                 let _ = response.send(result);
@@ -977,16 +975,16 @@ impl BlockRangeScannerClient {
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn rewind<BN: Into<BlockNumberOrTag>>(
         &self,
-        start_height: Option<BN>,
-        end_height: Option<BN>,
+        start_height: BN,
+        end_height: BN,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Rewind {
             sender: blocks_sender,
-            start_height: start_height.map(|n| n.into()),
-            end_height: end_height.map(|n| n.into()),
+            start_height: start_height.into(),
+            end_height: end_height.into(),
             response: response_tx,
         };
 
@@ -1752,6 +1750,98 @@ mod tests {
         }
 
         assert_eq!(received, vec![8..=8, 7..=7, 6..=6, 5..=5]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn command_rewind_defaults_latest_to_earliest_batches_correctly() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(7)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client
+            .rewind::<BlockNumberOrTag>(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
+            .await?;
+
+        let mut received = Vec::new();
+        while let Some(msg) = stream.next().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        // With epoch=7 over [0..=20] -> [14..=20, 7..=13, 0..=6]
+        assert_eq!(received, vec![14..=20, 7..=13, 0..=6]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn command_rewind_handles_start_and_end_in_any_order() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        // Ensure blocks at 3 and 15 exist
+        provider.anvil_mine(Option::Some(16), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.rewind(15, 3).await?;
+
+        let mut received = Vec::new();
+        while let Some(msg) = stream.next().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        // Range normalized to [3..=15] with epoch=5 -> [11..=15, 6..=10, 3..=5]
+        assert_eq!(received, vec![11..=15, 6..=10, 3..=5]);
+
+        let mut stream = client.rewind(3, 15).await?;
+
+        let mut received = Vec::new();
+        while let Some(msg) = stream.next().await {
+            if let BlockRangeMessage::Data(range) = msg {
+                received.push(range);
+            }
+        }
+
+        // Range normalized to [3..=15] with epoch=5 -> [11..=15, 6..=10, 3..=5]
+        assert_eq!(received, vec![11..=15, 6..=10, 3..=5]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        // Do not mine up to 999 so start won't exist
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let res = client.rewind(0, 999).await;
+
+        match res {
+            Err(BlockRangeScannerError::BlockNotFound(_)) => {}
+            other => panic!("unexpected result: {other:?}"),
+        }
+
         Ok(())
     }
 }
