@@ -16,6 +16,7 @@ use event_scanner::{
     event_scanner::{Client, EventScanner, EventScannerMessage},
 };
 use tokio_stream::wrappers::ReceiverStream;
+
 // Shared test contract used across integration tests
 sol! {
     #[allow(missing_docs)]
