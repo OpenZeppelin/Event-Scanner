@@ -84,7 +84,7 @@ pub async fn setup_scanner(
 
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::missing_panics_doc)]
-pub async fn reorg_with_new_txs<P>(
+pub async fn reorg_with_new_count_incr_txs<P>(
     provider: RootProvider,
     contract: TestCounter::TestCounterInstance<Arc<P>>,
     num_initial_events: u64,

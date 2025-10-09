@@ -199,3 +199,99 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
 
     Ok(())
 }
+
+#[tokio::test]
+async fn scan_latest_different_filters_receive_different_results() -> anyhow::Result<()> {
+    let setup = setup_scanner(None, None, None).await?;
+    let contract = setup.contract;
+    let mut client = setup.client;
+
+    // First listener for CountDecreased
+    let filter_inc = EventFilter::new()
+        .with_contract_address(*contract.address())
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
+    let mut stream_inc = client.create_event_stream(filter_inc);
+
+    // Second listener for CountDecreased
+    let filter_dec = EventFilter::new()
+        .with_contract_address(*contract.address())
+        .with_event(TestCounter::CountDecreased::SIGNATURE);
+    let mut stream_dec = client.create_event_stream(filter_dec);
+
+    // Produce 5 increases, then 2 decreases
+    let mut inc_hashes: Vec<FixedBytes<32>> = Vec::new();
+    for _ in 0..5u8 {
+        let r = contract.increase().send().await?.get_receipt().await?;
+        inc_hashes.push(r.transaction_hash);
+    }
+    let mut dec_hashes: Vec<FixedBytes<32>> = Vec::new();
+    for _ in 0..2u8 {
+        let r = contract.decrease().send().await?.get_receipt().await?;
+        dec_hashes.push(r.transaction_hash);
+    }
+
+    // Ask for latest 3 across the full range: each filtered listener should receive their own last
+    // 3 events
+    client.scan_latest(3, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+
+    let logs_inc = collect_events(&mut stream_inc).await;
+    let logs_dec = collect_events(&mut stream_dec).await;
+
+    // Should be different sequences and lengths match the requested count (or fewer if not enough)
+    assert_eq!(logs_inc.len(), 3);
+    assert_eq!(logs_dec.len(), 2); // only 2 decreases exist
+
+    // Validate increases: expect counts 3,4,5 and the corresponding tx hashes from inc_hashes[2..5]
+    let expected_hashes_inc = inc_hashes[2..5].to_vec();
+    assert_ordering(logs_inc, 3, expected_hashes_inc, contract.address());
+
+    // Validate decreases: expect counts 4,3 (after two decreases)
+    let mut expected_count_dec = U256::from(4);
+    for (log, &expected_hash) in logs_dec.iter().zip(dec_hashes.iter()) {
+        let ev = log.log_decode::<TestCounter::CountDecreased>()?;
+        assert_eq!(&ev.address(), contract.address());
+        assert_eq!(ev.transaction_hash.unwrap(), expected_hash);
+        assert_eq!(ev.inner.newCount, expected_count_dec);
+        expected_count_dec -= ONE;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn scan_latest_ignores_reorg_and_returns_canonical_latest() -> anyhow::Result<()> {
+    let setup = setup_scanner(None, None, None).await?;
+    let contract = setup.contract;
+    let provider = setup.provider;
+    let client = setup.client;
+    let mut stream = setup.stream;
+
+    // Create 4 events, then reorg last 2 blocks with 2 new txs
+    let _initial_hashes = crate::common::reorg_with_new_count_incr_txs(
+        provider.clone(),
+        contract.clone(),
+        4,     // num_initial_events
+        2,     // num_new_events (these will be the canonical latest)
+        2,     // reorg depth
+        false, // place new events in separate blocks
+    )
+    .await?;
+
+    // Now query latest 2 from full range
+    client.scan_latest(2, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+
+    let logs = collect_events(&mut stream).await;
+    assert_eq!(logs.len(), 2);
+
+    // After reorg, counts should be 3 and 4 (the chain kept the first two increments; then two new
+    // increments) Validate exact address, tx hashes ordering via decode and count values.
+    let mut expected_count = U256::from(3u64);
+    for log in &logs {
+        let ev = log.log_decode::<TestCounter::CountIncreased>()?;
+        assert_eq!(&ev.address(), contract.address());
+        assert_eq!(ev.inner.newCount, expected_count);
+        expected_count += ONE;
+    }
+
+    Ok(())
+}

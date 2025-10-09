@@ -67,6 +67,10 @@
 
 use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
 
+#[cfg(test)]
+use std::sync::LazyLock;
+#[cfg(test)]
+use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
@@ -321,6 +325,14 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
         });
         Ok(BlockRangeScannerClient::new(cmd_tx))
     }
+}
+
+#[cfg(test)]
+static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+#[cfg(test)]
+async fn proceed_if_test_lock_acquired() {
+    _ = TEST_LOCK.lock().await;
 }
 
 struct Service<N: Network> {
@@ -624,6 +636,9 @@ impl<N: Network> Service<N> {
         let range_iter = block_range.rev().step_by(blocks_read_per_epoch as usize);
 
         for batch_end in range_iter {
+            #[cfg(test)]
+            proceed_if_test_lock_acquired().await;
+
             let batch_start =
                 batch_end.saturating_sub(blocks_read_per_epoch as u64 - 1).max(stream_end);
 
