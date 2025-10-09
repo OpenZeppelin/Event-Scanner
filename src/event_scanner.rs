@@ -22,13 +22,28 @@ use tokio::sync::{
     mpsc,
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
 }
 
 pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
+
+impl From<Result<Vec<Log>, RpcError<TransportErrorKind>>> for EventScannerMessage {
+    fn from(logs: Result<Vec<Log>, RpcError<TransportErrorKind>>) -> Self {
+        match logs {
+            Ok(logs) => EventScannerMessage::Data(logs),
+            Err(e) => EventScannerMessage::Error(e.into()),
+        }
+    }
+}
+
+impl From<Vec<Log>> for EventScannerMessage {
+    fn from(logs: Vec<Log>) -> Self {
+        EventScannerMessage::Data(logs)
+    }
+}
 
 #[derive(Error, Debug, Clone)]
 pub enum EventScannerError {
@@ -41,6 +56,18 @@ pub enum EventScannerError {
 impl From<RpcError<TransportErrorKind>> for EventScannerError {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
         EventScannerError::Provider(Arc::new(e))
+    }
+}
+
+impl From<RpcError<TransportErrorKind>> for EventScannerMessage {
+    fn from(e: RpcError<TransportErrorKind>) -> Self {
+        EventScannerMessage::Error(e.into())
+    }
+}
+
+impl From<BlockRangeScannerError> for EventScannerMessage {
+    fn from(e: BlockRangeScannerError) -> Self {
+        EventScannerMessage::Error(e.into())
     }
 }
 
@@ -155,7 +182,31 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         while let Some(message) = stream.next().await {
             if let Err(err) = range_tx.send(message) {
-                error!(error = %err, "failed sending message to broadcast channel");
+                error!(error = %err, "No receivers, stopping broadcast");
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn scan_latest(
+        self,
+        count: usize,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<(), EventScannerError> {
+        let client = self.block_range_scanner.run()?;
+        let mut stream = client.rewind(start_height, end_height).await?;
+
+        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
+
+        self.spawn_latest_log_consumers(&range_tx, count);
+
+        while let Some(message) = stream.next().await {
+            if let Err(err) = range_tx.send(message) {
+                error!(error = %err, "No receivers, stopping broadcast");
+                break;
             }
         }
 
@@ -174,23 +225,26 @@ impl<N: Network> ConnectedEventScanner<N> {
                 loop {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
-                            Self::process_range(range, &filter, &log_filter, &provider, &sender)
-                                .await;
+                            let logs = Self::get_logs(range, &filter, &log_filter, &provider).await;
+                            if let Err(send_err) = sender.send(logs.into()).await {
+                                warn!(error = %send_err, "Downstream channel closed, stopping stream");
+                                break;
+                            }
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
                             if let Err(err) = sender.send(ScannerMessage::Error(e.into())).await {
-                                error!(error = %err, "Downstream channel closed, skipping error propagation and stopping streaming.");
+                                warn!(error = %err, "Downstream channel closed, skipping error propagation and stopping stream.");
                                 break;
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
                             if let Err(err) = sender.send(ScannerMessage::Status(status)).await {
-                                error!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping streaming.");
+                                warn!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping stream.");
                                 break;
                             }
                         }
                         Err(RecvError::Closed) => {
-                            error!("No block ranges to receive, stopping streaming.");
+                            warn!("No block ranges to receive, stopping stream.");
                             break;
                         }
                         Err(RecvError::Lagged(_)) => {}
@@ -200,47 +254,101 @@ impl<N: Network> ConnectedEventScanner<N> {
         }
     }
 
-    async fn process_range(
+    fn spawn_latest_log_consumers(&self, range_tx: &Sender<BlockRangeMessage>, count: usize) {
+        for listener in &self.event_listeners {
+            let provider = self.block_range_scanner.provider().clone();
+            let filter = listener.filter.clone();
+            let log_filter = Filter::from(&filter);
+            let sender = listener.sender.clone();
+            let mut sub = range_tx.subscribe();
+
+            tokio::spawn(async move {
+                let mut events = Vec::with_capacity(count as usize);
+                loop {
+                    match sub.recv().await {
+                        Ok(BlockRangeMessage::Data(range)) => {
+                            match Self::get_logs(range, &filter, &log_filter, &provider).await {
+                                Ok(logs) => {
+                                    // SAFETY: events.len() <= count
+                                    let take = count - events.len();
+                                    let logs_rev = logs.into_iter().rev().take(take);
+                                    events.extend(logs_rev);
+                                    if events.len() == count {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(send_err) = sender.send(e.into()).await {
+                                        error!(error = %send_err, "Downstream channel closed, skip log result propagation and stopping stream");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Ok(BlockRangeMessage::Error(e)) => {
+                            if let Err(err) = sender.send(e.into()).await {
+                                warn!(error = %err, "Downstream channel closed, skipping error propagation and stopping streaming.");
+                                break;
+                            }
+                        }
+                        Ok(BlockRangeMessage::Status(status)) => {
+                            if let Err(err) = sender.send(status.into()).await {
+                                warn!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping streaming.");
+                                break;
+                            }
+                        }
+                        Err(RecvError::Closed) => {
+                            info!("No block ranges to receive, dropping receiver.");
+                            break;
+                        }
+                        Err(RecvError::Lagged(_)) => {}
+                    }
+                }
+
+                info!(event_count = events.len(), "Collected events");
+
+                // we collected events in reverse, so put them in correct order before streaming
+                events.reverse();
+
+                if let Err(e) = sender.send(events.into()).await {
+                    warn!(error = %e, "Downstream channel closed, skipping sending info to receiver stream.");
+                }
+            });
+        }
+    }
+
+    async fn get_logs(
         range: RangeInclusive<u64>,
         event_filter: &EventFilter,
         log_filter: &Filter,
         provider: &RootProvider<N>,
-        sender: &mpsc::Sender<EventScannerMessage>,
-    ) {
-        let (from_block, to_block) = (*range.start(), *range.end());
-
-        let log_filter = log_filter.clone().from_block(from_block).to_block(to_block);
+    ) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
+        let log_filter = log_filter.clone().from_block(*range.start()).to_block(*range.end());
 
         match provider.get_logs(&log_filter).await {
             Ok(logs) => {
                 if logs.is_empty() {
-                    return;
+                    return Ok(logs);
                 }
 
                 info!(
                     filter = %event_filter,
                     log_count = logs.len(),
-                    from_block,
-                    to_block,
+                    block_range = ?range,
                     "found logs for event in block range"
                 );
 
-                if let Err(e) = sender.send(EventScannerMessage::Data(logs)).await {
-                    error!(filter = %event_filter, error = %e, "failed to enqueue log for processing");
-                }
+                Ok(logs)
             }
             Err(e) => {
                 error!(
                     filter = %event_filter,
                     error = %e,
-                    from_block,
-                    to_block,
+                    block_range = ?range,
                     "failed to get logs for block range"
                 );
 
-                if let Err(send_err) = sender.send(EventScannerMessage::Error(e.into())).await {
-                    error!(filter = %event_filter, error = %send_err, "failed to enqueue error for processing");
-                }
+                Err(e)
             }
         }
     }
@@ -277,5 +385,19 @@ impl<N: Network> Client<N> {
         end_height: Option<BlockNumberOrTag>,
     ) -> Result<(), EventScannerError> {
         self.event_scanner.start(start_height, end_height).await
+    }
+
+    /// Scans the latest `count` blocks in a given block range.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to scan
+    pub async fn scan_latest(
+        self,
+        count: usize,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<(), EventScannerError> {
+        self.event_scanner.scan_latest(count, start_height, end_height).await
     }
 }
