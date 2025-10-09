@@ -280,3 +280,5 @@ impl<N: Network> ConnectedEventScanner<N> {
         self.event_listeners.push(event_listener);
     }
 }
+
+pub type Client<N> = ConnectedEventScanner<N>;

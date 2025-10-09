@@ -1,13 +1,17 @@
 use alloy::{
     network::Network,
     providers::RootProvider,
-    rpc::client::ClientBuilder,
     transports::{TransportResult, http::reqwest::Url},
 };
 
-use crate::block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS;
+use tokio_stream::wrappers::ReceiverStream;
 
-use super::{BaseConfig, BaseConfigBuilder, EventStream};
+use crate::event_lib::{
+    filter::EventFilter,
+    scanner::{ConnectedEventScanner, EventScannerError, EventScannerMessage},
+};
+
+use super::{BaseConfig, BaseConfigBuilder};
 
 pub struct SubscribeMode {
     base: BaseConfig,
@@ -15,7 +19,8 @@ pub struct SubscribeMode {
 }
 
 pub struct ConnectedSubscribeMode<N: Network> {
-    _provider: RootProvider<N>,
+    inner: ConnectedEventScanner<N>,
+    block_confirmations: Option<u64>,
 }
 
 impl BaseConfigBuilder for SubscribeMode {
@@ -26,47 +31,60 @@ impl BaseConfigBuilder for SubscribeMode {
 
 impl SubscribeMode {
     pub(super) fn new() -> Self {
-        Self { base: BaseConfig::new(), block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
+        Self {
+            base: BaseConfig::new(),
+            block_confirmations: crate::block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
+        }
     }
 
-    #[must_use]
     pub fn block_confirmations(mut self, count: u64) -> Self {
         self.block_confirmations = count;
         self
     }
 
-    /// Connects to the provider via WebSocket
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
     ) -> TransportResult<ConnectedSubscribeMode<N>> {
-        let provider = RootProvider::<N>::new(
-            ClientBuilder::default().ws(alloy::providers::WsConnect::new(ws_url)).await?,
-        );
-
-        Ok(ConnectedSubscribeMode { _provider: provider })
+        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(ConnectedSubscribeMode {
+            inner: ConnectedEventScanner::from_connected(brs),
+            block_confirmations: Some(self.block_confirmations),
+        })
     }
 
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
     ) -> TransportResult<ConnectedSubscribeMode<N>> {
-        let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-
-        Ok(ConnectedSubscribeMode { _provider: provider })
+        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(ConnectedSubscribeMode {
+            inner: ConnectedEventScanner::from_connected(brs),
+            block_confirmations: Some(self.block_confirmations),
+        })
     }
 
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedSubscribeMode<N> {
-        ConnectedSubscribeMode { _provider: provider }
+    pub fn connect_provider<N: Network>(
+        self,
+        provider: RootProvider<N>,
+    ) -> TransportResult<ConnectedSubscribeMode<N>> {
+        let brs = self.base.block_range_scanner.connect_provider::<N>(provider)?;
+        Ok(ConnectedSubscribeMode {
+            inner: ConnectedEventScanner::from_connected(brs),
+            block_confirmations: Some(self.block_confirmations),
+        })
     }
 }
 
 impl<N: Network> ConnectedSubscribeMode<N> {
-    pub fn stream(self) -> EventStream {
-        EventStream
+    pub fn create_event_stream(
+        &mut self,
+        filter: EventFilter,
+    ) -> ReceiverStream<EventScannerMessage> {
+        self.inner.create_event_stream(filter)
+    }
+
+    pub async fn stream(self) -> Result<(), EventScannerError> {
+        self.inner.stream_live(self.block_confirmations).await
     }
 }

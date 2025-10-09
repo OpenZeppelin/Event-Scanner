@@ -2,11 +2,17 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
     providers::RootProvider,
-    rpc::client::ClientBuilder,
     transports::{TransportResult, http::reqwest::Url},
 };
 
-use super::{BaseConfig, BaseConfigBuilder, EventStream};
+use tokio_stream::wrappers::ReceiverStream;
+
+use crate::event_lib::{
+    filter::EventFilter,
+    scanner::{ConnectedEventScanner, EventScannerError, EventScannerMessage},
+};
+
+use super::{BaseConfig, BaseConfigBuilder};
 
 pub struct HistoricMode {
     base: BaseConfig,
@@ -15,7 +21,9 @@ pub struct HistoricMode {
 }
 
 pub struct ConnectedHistoricMode<N: Network> {
-    _provider: RootProvider<N>,
+    inner: ConnectedEventScanner<N>,
+    from_block: BlockNumberOrTag,
+    to_block: BlockNumberOrTag,
 }
 
 impl BaseConfigBuilder for HistoricMode {
@@ -38,44 +46,57 @@ impl HistoricMode {
         self
     }
 
-    #[must_use]
     pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.to_block = block.into();
         self
     }
 
-    /// Connects to the provider via WebSocket
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
     ) -> TransportResult<ConnectedHistoricMode<N>> {
-        let provider = RootProvider::<N>::new(
-            ClientBuilder::default().ws(alloy::providers::WsConnect::new(ws_url)).await?,
-        );
-
-        Ok(ConnectedHistoricMode { _provider: provider })
+        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(ConnectedHistoricMode {
+            inner: ConnectedEventScanner::from_connected(brs),
+            from_block: self.from_block,
+            to_block: self.to_block,
+        })
     }
 
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
     ) -> TransportResult<ConnectedHistoricMode<N>> {
-        let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-
-        Ok(ConnectedHistoricMode { _provider: provider })
+        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(ConnectedHistoricMode {
+            inner: ConnectedEventScanner::from_connected(brs),
+            from_block: self.from_block,
+            to_block: self.to_block,
+        })
     }
 
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedHistoricMode<N> {
-        ConnectedHistoricMode { _provider: provider }
+    pub fn connect_provider<N: Network>(
+        self,
+        provider: RootProvider<N>,
+    ) -> TransportResult<ConnectedHistoricMode<N>> {
+        let brs = self.base.block_range_scanner.connect_provider::<N>(provider)?;
+        Ok(ConnectedHistoricMode {
+            inner: ConnectedEventScanner::from_connected(brs),
+            from_block: self.from_block,
+            to_block: self.to_block,
+        })
     }
 }
 
 impl<N: Network> ConnectedHistoricMode<N> {
-    pub fn stream(self) -> EventStream {
-        EventStream
+    pub fn create_event_stream(
+        &mut self,
+        filter: EventFilter,
+    ) -> ReceiverStream<EventScannerMessage> {
+        self.inner.create_event_stream(filter)
+    }
+
+    pub async fn stream(self) -> Result<(), EventScannerError> {
+        self.inner.stream_historical(self.from_block, self.to_block).await
     }
 }

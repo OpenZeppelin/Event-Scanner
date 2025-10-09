@@ -3,9 +3,8 @@ mod latest;
 mod subscribe;
 mod sync;
 
-use alloy::eips::BlockNumberOrTag;
 pub use historic::{ConnectedHistoricMode, HistoricMode};
-pub use latest::{ConnectedLatestMode, LatestMode};
+// pub use latest::{ConnectedLatestMode, LatestMode};
 pub use subscribe::{ConnectedSubscribeMode, SubscribeMode};
 pub use sync::{ConnectedSyncMode, SyncMode};
 
@@ -29,10 +28,10 @@ impl DummyEventScanner {
         SyncMode::new()
     }
 
-    #[must_use]
-    pub fn latest() -> LatestMode {
-        LatestMode::new()
-    }
+    // #[must_use]
+    // pub fn latest() -> LatestMode {
+    //     LatestMode::new()
+    // }
 }
 
 #[derive(Clone)]
