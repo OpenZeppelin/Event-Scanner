@@ -23,8 +23,8 @@ impl BaseConfigBuilder for LatestMode {
 }
 
 impl LatestMode {
-    fn new(count: u64) -> Self {
-        Self { base: BaseConfig::new(), count }
+    pub(super) fn new() -> Self {
+        Self { base: BaseConfig::new(), count: 1 }
     }
 
     /// Connects to the provider via WebSocket

@@ -1,19 +1,16 @@
 use alloy::{
     eips::BlockNumberOrTag,
-    network::Network,
+    network::{Ethereum, Network},
     providers::RootProvider,
     transports::{TransportResult, http::reqwest::Url},
 };
 
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::{
-    EventScanner,
-    block_range_scanner::BlockRangeScanner,
-    event_lib::{
-        filter::EventFilter,
-        scanner::{Client, EventScannerError, EventScannerMessage},
-    },
+use crate::event_lib::{
+    filter::EventFilter,
+    modes::DummyEventScanner,
+    scanner::{Client, EventScannerError, EventScannerMessage},
 };
 
 use super::{BaseConfig, BaseConfigBuilder};
@@ -116,7 +113,3 @@ impl<N: Network> ConnectedSyncMode<N> {
         self.inner.stream_from(self.from_block, self.block_confirmations).await
     }
 }
-
-// fn hello() {
-//     let scanners = EventScanner::
-// }

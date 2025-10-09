@@ -3,12 +3,37 @@ mod latest;
 mod subscribe;
 mod sync;
 
+use alloy::eips::BlockNumberOrTag;
 pub use historic::{ConnectedHistoricMode, HistoricMode};
 pub use latest::{ConnectedLatestMode, LatestMode};
 pub use subscribe::{ConnectedSubscribeMode, SubscribeMode};
 pub use sync::{ConnectedSyncMode, SyncMode};
 
 use crate::{block_range_scanner::BlockRangeScanner, event_lib::EventFilter};
+
+pub struct DummyEventScanner;
+
+impl DummyEventScanner {
+    #[must_use]
+    pub fn historic() -> HistoricMode {
+        HistoricMode::new()
+    }
+
+    #[must_use]
+    pub fn subscribe() -> SubscribeMode {
+        SubscribeMode::new()
+    }
+
+    #[must_use]
+    pub fn sync() -> SyncMode {
+        SyncMode::new()
+    }
+
+    #[must_use]
+    pub fn latest() -> LatestMode {
+        LatestMode::new()
+    }
+}
 
 #[derive(Clone)]
 struct BaseConfig {
@@ -18,7 +43,7 @@ struct BaseConfig {
 
 impl BaseConfig {
     fn new() -> Self {
-        Self { event_filters: Vec::new(), block_range_scanner: Default::default() }
+        Self { event_filters: Vec::new(), block_range_scanner: BlockRangeScanner::new() }
     }
 }
 

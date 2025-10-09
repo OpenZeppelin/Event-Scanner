@@ -25,7 +25,7 @@ impl BaseConfigBuilder for SubscribeMode {
 }
 
 impl SubscribeMode {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self { base: BaseConfig::new(), block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
     }
 

@@ -25,7 +25,7 @@ impl BaseConfigBuilder for HistoricMode {
 }
 
 impl HistoricMode {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             base: BaseConfig::new(),
             from_block: BlockNumberOrTag::Earliest,
