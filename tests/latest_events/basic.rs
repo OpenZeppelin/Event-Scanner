@@ -295,3 +295,182 @@ async fn scan_latest_ignores_reorg_and_returns_canonical_latest() -> anyhow::Res
 
     Ok(())
 }
+
+#[tokio::test]
+async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()> {
+    let setup = setup_scanner(None, None, None).await?;
+    let contract = setup.contract;
+    let mut client = setup.client;
+    let mut inc_stream = setup.stream; // CountIncreased by default
+
+    // Add a CountDecreased listener
+    let filter_dec = EventFilter::new()
+        .with_contract_address(*contract.address())
+        .with_event(TestCounter::CountDecreased::SIGNATURE);
+    let mut dec_stream = client.create_event_stream(filter_dec);
+
+    // Sequence: inc(1), inc(2), dec(1), inc(2), dec(1)
+    let mut inc_hashes: Vec<FixedBytes<32>> = Vec::new();
+    let mut dec_hashes: Vec<FixedBytes<32>> = Vec::new();
+
+    // inc -> 1
+    inc_hashes.push(contract.increase().send().await?.get_receipt().await?.transaction_hash);
+    // inc -> 2
+    inc_hashes.push(contract.increase().send().await?.get_receipt().await?.transaction_hash);
+    // dec -> 1
+    dec_hashes.push(contract.decrease().send().await?.get_receipt().await?.transaction_hash);
+    // inc -> 2
+    inc_hashes.push(contract.increase().send().await?.get_receipt().await?.transaction_hash);
+    // dec -> 1
+    dec_hashes.push(contract.decrease().send().await?.get_receipt().await?.transaction_hash);
+
+    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+
+    let inc_logs = collect_events(&mut inc_stream).await;
+    let dec_logs = collect_events(&mut dec_stream).await;
+
+    assert_eq!(inc_logs.len(), 3);
+    assert_eq!(dec_logs.len(), 2);
+
+    // Validate increases: counts [1,2,2] with matching hashes
+    let expected_inc_counts = [1u64, 2, 2];
+    for ((log, &expected_hash), &expected_count) in
+        inc_logs.iter().zip(inc_hashes.iter()).zip(expected_inc_counts.iter())
+    {
+        let ev = log.log_decode::<TestCounter::CountIncreased>()?;
+        assert_eq!(&ev.address(), contract.address());
+        assert_eq!(ev.transaction_hash.unwrap(), expected_hash);
+        assert_eq!(ev.inner.newCount, U256::from(expected_count));
+    }
+
+    // Validate decreases: counts [1,1] with matching hashes
+    let expected_dec_counts = [1u64, 1];
+    for ((log, &expected_hash), &expected_count) in
+        dec_logs.iter().zip(dec_hashes.iter()).zip(expected_dec_counts.iter())
+    {
+        let ev = log.log_decode::<TestCounter::CountDecreased>()?;
+        assert_eq!(&ev.address(), contract.address());
+        assert_eq!(ev.transaction_hash.unwrap(), expected_hash);
+        assert_eq!(ev.inner.newCount, U256::from(expected_count));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
+    // Manual setup to deploy two contracts
+    let anvil = spawn_anvil(None)?;
+    let provider: RootProvider = build_provider(&anvil).await?;
+    let contract_a = deploy_counter(Arc::new(provider.clone())).await?;
+    let contract_b = deploy_counter(Arc::new(provider.clone())).await?;
+
+    // Listener only for contract A CountIncreased
+    let filter_a = EventFilter::new()
+        .with_contract_address(*contract_a.address())
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
+
+    let mut client = event_scanner::event_scanner::EventScanner::new()
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let mut stream_a = client.create_event_stream(filter_a);
+
+    // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
+    let mut a_hashes: Vec<FixedBytes<32>> = Vec::new();
+    a_hashes.push(contract_a.increase().send().await?.get_receipt().await?.transaction_hash);
+    let _ = contract_b.increase().send().await?.get_receipt().await?; // ignored by filter
+    a_hashes.push(contract_a.increase().send().await?.get_receipt().await?.transaction_hash);
+    let _ = contract_b.increase().send().await?.get_receipt().await?; // ignored by filter
+    a_hashes.push(contract_a.increase().send().await?.get_receipt().await?.transaction_hash);
+
+    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+
+    let logs_a = collect_events(&mut stream_a).await;
+    assert_eq!(logs_a.len(), 3);
+
+    // Validate only contract A logs with counts 1,2,3
+    for ((log, &expected_hash), expected_count) in logs_a.iter().zip(a_hashes.iter()).zip(1u64..=3)
+    {
+        let ev = log.log_decode::<TestCounter::CountIncreased>()?;
+        assert_eq!(&ev.address(), contract_a.address());
+        assert_eq!(ev.transaction_hash.unwrap(), expected_hash);
+        assert_eq!(ev.inner.newCount, U256::from(expected_count));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
+    // Manual setup to mine empty blocks
+    let anvil = spawn_anvil(None)?;
+    let provider: RootProvider = build_provider(&anvil).await?;
+    let contract = deploy_counter(Arc::new(provider.clone())).await?;
+
+    let filter = EventFilter::new()
+        .with_contract_address(*contract.address())
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
+
+    let mut client = event_scanner::event_scanner::EventScanner::new()
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let mut stream = client.create_event_stream(filter);
+
+    // Emit 2 events
+    let mut hashes: Vec<FixedBytes<32>> = Vec::new();
+    for _ in 0..2u8 {
+        hashes.push(contract.increase().send().await?.get_receipt().await?.transaction_hash);
+    }
+    // Mine 10 empty blocks
+    provider.anvil_mine(Some(10), None).await?;
+    // Emit 1 more event
+    hashes.push(contract.increase().send().await?.get_receipt().await?.transaction_hash);
+
+    let head = provider.get_block_number().await?;
+    let start = BlockNumberOrTag::from(head - 12);
+    let end = BlockNumberOrTag::from(head);
+
+    client.scan_latest(5, start, end).await?;
+    let logs = collect_events(&mut stream).await;
+
+    assert_eq!(logs.len(), 3);
+    // Expect counts 1,2,3 and hashes in order
+    assert_ordering(logs, 1, hashes, contract.address());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
+    let setup = setup_scanner(None, None, None).await?;
+    let provider = setup.provider;
+    let contract = setup.contract;
+    let client = setup.client;
+    let mut stream = setup.stream;
+
+    // Each tx auto-mines a block: we will target the middle block specifically
+    let mut receipt_blocks: Vec<(FixedBytes<32>, u64)> = Vec::new();
+    for _ in 0..3u8 {
+        let r = contract.increase().send().await?.get_receipt().await?;
+        // fetch the mined block number from provider to be exact
+        let tx = provider.get_transaction_by_hash(r.transaction_hash).await?.unwrap();
+        let block_num = tx.block_number.unwrap();
+        receipt_blocks.push((r.transaction_hash, block_num));
+    }
+
+    // Pick the middle tx's block number
+    let (_mid_hash, mid_block) = receipt_blocks[1];
+    let start = BlockNumberOrTag::from(mid_block);
+    let end = BlockNumberOrTag::from(mid_block);
+
+    client.scan_latest(5, start, end).await?;
+    let logs = collect_events(&mut stream).await;
+
+    // Expect exactly the middle event only, with count 2
+    assert_eq!(logs.len(), 1);
+    let ev = logs[0].log_decode::<TestCounter::CountIncreased>()?;
+    assert_eq!(&ev.address(), contract.address());
+    assert_eq!(ev.inner.newCount, U256::from(2u64));
+
+    Ok(())
+}
