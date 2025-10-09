@@ -276,6 +276,11 @@ pub struct Client<N: Network> {
 }
 
 impl<N: Network> Client<N> {
+    pub(crate) fn from_connected(block_range_scanner: ConnectedBlockRangeScanner<N>) -> Self {
+        let event_scanner = ConnectedEventScanner { block_range_scanner, event_listeners: Vec::new() };
+        Client { event_scanner }
+    }
+
     pub fn create_event_stream(
         &mut self,
         event_filter: EventFilter,

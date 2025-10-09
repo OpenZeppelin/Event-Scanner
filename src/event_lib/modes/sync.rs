@@ -2,16 +2,21 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
     providers::RootProvider,
-    rpc::client::ClientBuilder,
     transports::{TransportResult, http::reqwest::Url},
 };
 
+use tokio_stream::wrappers::ReceiverStream;
+
 use crate::{
-    block_range_scanner::{ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS},
-    event_lib::{Client, listener::EventListener},
+    EventScanner,
+    block_range_scanner::BlockRangeScanner,
+    event_lib::{
+        filter::EventFilter,
+        scanner::{Client, EventScannerError, EventScannerMessage},
+    },
 };
 
-use super::{BaseConfig, BaseConfigBuilder, EventStream};
+use super::{BaseConfig, BaseConfigBuilder};
 
 pub struct SyncMode {
     base: BaseConfig,
@@ -20,8 +25,9 @@ pub struct SyncMode {
 }
 
 pub struct ConnectedSyncMode<N: Network> {
-    block_range_scanner: ConnectedBlockRangeScanner<N>,
-    event_listeners: Vec<EventListener>,
+    inner: Client<N>,
+    from_block: BlockNumberOrTag,
+    block_confirmations: Option<u64>,
 }
 
 impl BaseConfigBuilder for SyncMode {
@@ -31,11 +37,11 @@ impl BaseConfigBuilder for SyncMode {
 }
 
 impl SyncMode {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             base: BaseConfig::new(),
             from_block: BlockNumberOrTag::Earliest,
-            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            block_confirmations: crate::block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
         }
     }
 
@@ -60,10 +66,12 @@ impl SyncMode {
         self,
         ws_url: Url,
     ) -> TransportResult<ConnectedSyncMode<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ws(ws_url).await?;
-        let event_scanner =
-            ConnectedSyncMode { block_range_scanner, event_listeners: Vec::default() };
-        Ok(event_scanner)
+        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(ConnectedSyncMode {
+            inner: Client::from_connected(brs),
+            from_block: self.from_block,
+            block_confirmations: Some(self.block_confirmations),
+        })
     }
 
     /// Connects to the provider via IPC
@@ -75,24 +83,40 @@ impl SyncMode {
         self,
         ipc_path: String,
     ) -> TransportResult<ConnectedSyncMode<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ipc(ipc_path).await?;
-
-        let event_scanner =
-            ConnectedSyncMode { block_range_scanner, event_listeners: Vec::default() };
-        Ok(event_scanner)
+        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(ConnectedSyncMode {
+            inner: Client::from_connected(brs),
+            from_block: self.from_block,
+            block_confirmations: Some(self.block_confirmations),
+        })
     }
 
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedSyncMode<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_provider(provider)?;
-        let event_scanner =
-            ConnectedSyncMode { block_range_scanner, event_listeners: Vec::default() };
-        Ok(event_scanner)
+        let brs = self.base.block_range_scanner.connect_provider::<N>(provider)?;
+        Ok(ConnectedSyncMode {
+            inner: Client::from_connected(brs),
+            from_block: self.from_block,
+            block_confirmations: Some(self.block_confirmations),
+        })
     }
 }
 
 impl<N: Network> ConnectedSyncMode<N> {
-    pub fn stream(self) -> EventStream {}
+    pub fn create_event_stream(
+        &mut self,
+        filter: EventFilter,
+    ) -> ReceiverStream<EventScannerMessage> {
+        self.inner.create_event_stream(filter)
+    }
+
+    pub async fn stream(self) -> Result<(), EventScannerError> {
+        self.inner.stream_from(self.from_block, self.block_confirmations).await
+    }
 }
+
+// fn hello() {
+//     let scanners = EventScanner::
+// }
