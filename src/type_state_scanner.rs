@@ -1,47 +1,53 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
-    primitives::{Address, B256},
     providers::{RootProvider, WsConnect},
     rpc::client::ClientBuilder,
     transports::{TransportResult, http::reqwest::Url},
 };
 
-use crate::block_range_scanner::DEFAULT_BLOCKS_READ_PER_EPOCH;
+use crate::{
+    block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_BLOCKS_READ_PER_EPOCH},
+    event_filter::EventFilter,
+};
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub struct EventStream;
 
+#[derive(Clone, Debug)]
+struct BaseConfig {
+    event_filters: Vec<EventFilter>,
+    max_reads: usize,
+}
+
+impl BaseConfig {
+    fn new() -> Self {
+        Self { event_filters: Vec::new(), max_reads: DEFAULT_BLOCKS_READ_PER_EPOCH }
+    }
+}
+
 pub struct HistoricMode {
+    base: BaseConfig,
     from_block: BlockNumberOrTag,
     to_block: BlockNumberOrTag,
-    address: Address,
-    events: Vec<B256>,
-    max_reads: usize,
 }
 
 pub struct SubscribeMode {
-    address: Address,
-    events: Vec<B256>,
+    base: BaseConfig,
     block_confirmations: u64,
-    max_reads: usize,
 }
 
 pub struct SyncMode {
+    base: BaseConfig,
     from_block: BlockNumberOrTag,
-    address: Address,
-    events: Vec<B256>,
     block_confirmations: u64,
-    max_reads: usize,
 }
 
 pub struct LatestMode {
+    base: BaseConfig,
     count: u64,
-    address: Address,
-    events: Vec<B256>,
-    max_reads: usize,
 }
 
 pub struct ConnectedHistoricMode<N: Network> {
@@ -65,40 +71,26 @@ pub struct EventScanner;
 impl EventScanner {
     pub fn historic() -> HistoricMode {
         HistoricMode {
+            base: BaseConfig::new(),
             from_block: BlockNumberOrTag::Earliest,
             to_block: BlockNumberOrTag::Latest,
-            address: Address::ZERO,
-            events: Vec::new(),
-            max_reads: DEFAULT_BLOCKS_READ_PER_EPOCH,
         }
     }
 
     pub fn subscribe() -> SubscribeMode {
-        SubscribeMode {
-            address: Address::ZERO,
-            events: Vec::new(),
-            block_confirmations: 0,
-            max_reads: DEFAULT_BLOCKS_READ_PER_EPOCH,
-        }
+        SubscribeMode { base: BaseConfig::new(), block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
     }
 
     pub fn sync() -> SyncMode {
         SyncMode {
+            base: BaseConfig::new(),
             from_block: BlockNumberOrTag::Earliest,
-            address: Address::ZERO,
-            events: Vec::new(),
-            block_confirmations: 0,
-            max_reads: DEFAULT_BLOCKS_READ_PER_EPOCH,
+            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
         }
     }
 
     pub fn latest(count: u64) -> LatestMode {
-        LatestMode {
-            count,
-            address: Address::ZERO,
-            events: Vec::new(),
-            max_reads: DEFAULT_BLOCKS_READ_PER_EPOCH,
-        }
+        LatestMode { base: BaseConfig::new(), count }
     }
 }
 
@@ -113,23 +105,18 @@ impl HistoricMode {
         self
     }
 
-    pub fn contract_address(mut self, address: Address) -> Self {
-        self.address = address;
+    pub fn event_filter(mut self, filter: EventFilter) -> Self {
+        self.base.event_filters.push(filter);
         self
     }
 
-    pub fn event(mut self, signature: B256) -> Self {
-        self.events.push(signature);
-        self
-    }
-
-    pub fn events(mut self, signatures: Vec<B256>) -> Self {
-        self.events.extend(signatures);
+    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
+        self.base.event_filters.extend(filters);
         self
     }
 
     pub fn max_reads(mut self, max: usize) -> Self {
-        self.max_reads = max;
+        self.base.max_reads = max;
         self
     }
 
@@ -164,18 +151,13 @@ impl<N: Network> ConnectedHistoricMode<N> {
 }
 
 impl SubscribeMode {
-    pub fn contract_address(mut self, address: Address) -> Self {
-        self.address = address;
+    pub fn event_filter(mut self, filter: EventFilter) -> Self {
+        self.base.event_filters.push(filter);
         self
     }
 
-    pub fn event(mut self, signature: B256) -> Self {
-        self.events.push(signature);
-        self
-    }
-
-    pub fn events(mut self, signatures: Vec<B256>) -> Self {
-        self.events.extend(signatures);
+    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
+        self.base.event_filters.extend(filters);
         self
     }
 
@@ -185,7 +167,7 @@ impl SubscribeMode {
     }
 
     pub fn max_reads(mut self, max: usize) -> Self {
-        self.max_reads = max;
+        self.base.max_reads = max;
         self
     }
 
@@ -225,18 +207,13 @@ impl SyncMode {
         self
     }
 
-    pub fn contract_address(mut self, address: Address) -> Self {
-        self.address = address;
+    pub fn event_filter(mut self, filter: EventFilter) -> Self {
+        self.base.event_filters.push(filter);
         self
     }
 
-    pub fn event(mut self, signature: B256) -> Self {
-        self.events.push(signature);
-        self
-    }
-
-    pub fn events(mut self, signatures: Vec<B256>) -> Self {
-        self.events.extend(signatures);
+    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
+        self.base.event_filters.extend(filters);
         self
     }
 
@@ -246,7 +223,7 @@ impl SyncMode {
     }
 
     pub fn max_reads(mut self, max: usize) -> Self {
-        self.max_reads = max;
+        self.base.max_reads = max;
         self
     }
 
@@ -281,23 +258,18 @@ impl<N: Network> ConnectedSyncMode<N> {
 }
 
 impl LatestMode {
-    pub fn contract_address(mut self, address: Address) -> Self {
-        self.address = address;
+    pub fn event_filter(mut self, filter: EventFilter) -> Self {
+        self.base.event_filters.push(filter);
         self
     }
 
-    pub fn event(mut self, signature: B256) -> Self {
-        self.events.push(signature);
-        self
-    }
-
-    pub fn events(mut self, signatures: Vec<B256>) -> Self {
-        self.events.extend(signatures);
+    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
+        self.base.event_filters.extend(filters);
         self
     }
 
     pub fn max_reads(mut self, max: usize) -> Self {
-        self.max_reads = max;
+        self.base.max_reads = max;
         self
     }
 
@@ -333,17 +305,19 @@ impl<N: Network> ConnectedLatestMode<N> {
 
 #[cfg(test)]
 mod demo {
-    use alloy::network::Ethereum;
+    use alloy::{network::Ethereum, primitives::address};
 
     use super::*;
 
     async fn demo_historic_earliest_to_latest() {
-        let address = Address::ZERO;
-        let event_sig = B256::ZERO;
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+
+        let filter = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
 
         let scanner = EventScanner::historic()
-            .contract_address(address)
-            .event(event_sig)
+            .event_filter(filter)
             .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
             .await
             .unwrap();
@@ -351,129 +325,153 @@ mod demo {
         let _stream = scanner.stream();
     }
 
-    // async fn demo_historic_from_3_to_latest() {
-    //     let address = Address::ZERO;
-    //     let event_sig = B256::ZERO;
-    //
-    //     let scanner = EventScanner::historic()
-    //         .from_block(3u64)
-    //         .contract_address(address)
-    //         .event(event_sig)
-    //         .connect_ws("wss://eth-mainnet.example.com".parse().unwrap())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
-    //
-    // async fn demo_historic_earliest_to_50() {
-    //     let address = Address::ZERO;
-    //     let event_sig = B256::ZERO;
-    //
-    //     let scanner = EventScanner::historic()
-    //         .to_block(50u64)
-    //         .contract_address(address)
-    //         .event(event_sig)
-    //         .connect_ws("wss://eth-mainnet.example.com".parse().unwrap())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
-    //
-    // async fn demo_historic_from_3_to_50() {
-    //     let address = Address::ZERO;
-    //     let event_sig = B256::ZERO;
-    //
-    //     let scanner = EventScanner::historic()
-    //         .from_block(3u64)
-    //         .to_block(50u64)
-    //         .contract_address(address)
-    //         .event(event_sig)
-    //         .connect_ws("wss://eth-mainnet.example.com".parse().unwrap())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
-    //
-    // async fn demo_subscribe_mode() {
-    //     let address = Address::ZERO;
-    //     let event_sig = B256::ZERO;
-    //
-    //     let scanner = EventScanner::subscribe()
-    //         .contract_address(address)
-    //         .event(event_sig)
-    //         .block_confirmations(4)
-    //         .connect_ipc("/tmp/geth.ipc".to_string())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
-    //
-    // async fn demo_sync_mode() {
-    //     let address = Address::ZERO;
-    //     let event_sig = B256::ZERO;
-    //
-    //     let scanner = EventScanner::sync()
-    //         .from_block(100u64)
-    //         .contract_address(address)
-    //         .event(event_sig)
-    //         .block_confirmations(4)
-    //         .connect_ws("wss://eth-mainnet.example.com".parse().unwrap())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
-    //
-    // async fn demo_latest_mode() {
-    //     let address = Address::ZERO;
-    //     let event_sig = B256::ZERO;
-    //
-    //     let scanner = EventScanner::latest(100)
-    //         .contract_address(address)
-    //         .event(event_sig)
-    //         .connect_ws("wss://eth-mainnet.example.com".parse().unwrap())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
-    //
-    // async fn demo_multiple_events() {
-    //     let address = Address::ZERO;
-    //     let transfer_event = B256::ZERO;
-    //     let approval_event = B256::ZERO;
-    //
-    //     let scanner = EventScanner::sync()
-    //         .from_block(1000u64)
-    //         .contract_address(address)
-    //         .event(transfer_event)
-    //         .event(approval_event)
-    //         .block_confirmations(6)
-    //         .connect_ws("wss://eth-mainnet.example.com".parse().unwrap())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
-    //
-    // async fn demo_events_vector() {
-    //     let address = Address::ZERO;
-    //     let transfer_event = B256::ZERO;
-    //     let approval_event = B256::ZERO;
-    //
-    //     let scanner = EventScanner::sync()
-    //         .from_block(1000u64)
-    //         .contract_address(address)
-    //         .events(vec![transfer_event, approval_event])
-    //         .block_confirmations(6)
-    //         .connect_ws("wss://eth-mainnet.example.com".parse().unwrap())
-    //         .await
-    //         .unwrap();
-    //
-    //     let _stream = scanner.stream();
-    // }
+    async fn demo_historic_from_3_to_latest() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+
+        let filter = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let scanner = EventScanner::historic()
+            .from_block(3u64)
+            .event_filter(filter)
+            .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
+
+    async fn demo_historic_earliest_to_50() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+
+        let filter = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let scanner = EventScanner::historic()
+            .to_block(50u64)
+            .event_filter(filter)
+            .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
+
+    async fn demo_historic_from_3_to_50() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+
+        let filter = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let scanner = EventScanner::historic()
+            .from_block(3u64)
+            .to_block(50u64)
+            .event_filter(filter)
+            .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
+
+    async fn demo_subscribe_mode() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+
+        let filter = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let scanner = EventScanner::subscribe()
+            .event_filter(filter)
+            .block_confirmations(4)
+            .connect_ipc::<Ethereum>("/tmp/geth.ipc".to_string())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
+
+    async fn demo_sync_mode() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+
+        let filter = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let scanner = EventScanner::sync()
+            .from_block(100u64)
+            .event_filter(filter)
+            .block_confirmations(4)
+            .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
+
+    async fn demo_latest_mode() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+
+        let filter = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let scanner = EventScanner::latest(100)
+            .event_filter(filter)
+            .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
+
+    async fn demo_multiple_event_filters() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+        let contract_b = address!("0x0000000000000000000000000000000000000001");
+
+        let transfer = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let approve = EventFilter::new()
+            .with_contract_address(contract_b)
+            .with_event("Approval(address,address,uint256)");
+
+        let scanner = EventScanner::sync()
+            .from_block(1000u64)
+            .event_filter(transfer)
+            .event_filter(approve)
+            .block_confirmations(6)
+            .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
+
+    async fn demo_event_filters_vector() {
+        let contract_a = address!("0x000000000000000000000000000000000000dEaD");
+        let contract_b = address!("0x0000000000000000000000000000000000000001");
+
+        let transfer = EventFilter::new()
+            .with_contract_address(contract_a)
+            .with_event("Transfer(address,address,uint256)");
+
+        let approve = EventFilter::new()
+            .with_contract_address(contract_b)
+            .with_event("Approval(address,address,uint256)");
+
+        let scanner = EventScanner::sync()
+            .from_block(1000u64)
+            .event_filters(vec![transfer, approve])
+            .block_confirmations(6)
+            .connect_ws::<Ethereum>("wss://eth-mainnet.example.com".parse().unwrap())
+            .await
+            .unwrap();
+
+        let _stream = scanner.stream();
+    }
 }
