@@ -1059,6 +1059,7 @@ mod tests {
 
     use super::*;
 
+    // Trait to enable receiver-type-agnostic range receival
     trait RangeReceiver {
         async fn next_range(&mut self) -> Option<BlockRangeMessage>;
     }
