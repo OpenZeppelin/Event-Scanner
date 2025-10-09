@@ -28,6 +28,25 @@ impl BaseConfig {
     }
 }
 
+trait BaseConfigBuilder: Sized {
+    fn base_mut(&mut self) -> &mut BaseConfig;
+
+    fn event_filter(mut self, filter: EventFilter) -> Self {
+        self.base_mut().event_filters.push(filter);
+        self
+    }
+
+    fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
+        self.base_mut().event_filters.extend(filters);
+        self
+    }
+
+    fn max_reads(mut self, max: usize) -> Self {
+        self.base_mut().max_reads = max;
+        self
+    }
+}
+
 pub struct HistoricMode {
     base: BaseConfig,
     from_block: BlockNumberOrTag,
@@ -94,6 +113,12 @@ impl EventScanner {
     }
 }
 
+impl BaseConfigBuilder for HistoricMode {
+    fn base_mut(&mut self) -> &mut BaseConfig {
+        &mut self.base
+    }
+}
+
 impl HistoricMode {
     pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.from_block = block.into();
@@ -102,21 +127,6 @@ impl HistoricMode {
 
     pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.to_block = block.into();
-        self
-    }
-
-    pub fn event_filter(mut self, filter: EventFilter) -> Self {
-        self.base.event_filters.push(filter);
-        self
-    }
-
-    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
-        self.base.event_filters.extend(filters);
-        self
-    }
-
-    pub fn max_reads(mut self, max: usize) -> Self {
-        self.base.max_reads = max;
         self
     }
 
@@ -150,24 +160,15 @@ impl<N: Network> ConnectedHistoricMode<N> {
     }
 }
 
+impl BaseConfigBuilder for SubscribeMode {
+    fn base_mut(&mut self) -> &mut BaseConfig {
+        &mut self.base
+    }
+}
+
 impl SubscribeMode {
-    pub fn event_filter(mut self, filter: EventFilter) -> Self {
-        self.base.event_filters.push(filter);
-        self
-    }
-
-    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
-        self.base.event_filters.extend(filters);
-        self
-    }
-
     pub fn block_confirmations(mut self, count: u64) -> Self {
         self.block_confirmations = count;
-        self
-    }
-
-    pub fn max_reads(mut self, max: usize) -> Self {
-        self.base.max_reads = max;
         self
     }
 
@@ -201,29 +202,20 @@ impl<N: Network> ConnectedSubscribeMode<N> {
     }
 }
 
+impl BaseConfigBuilder for SyncMode {
+    fn base_mut(&mut self) -> &mut BaseConfig {
+        &mut self.base
+    }
+}
+
 impl SyncMode {
     pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.from_block = block.into();
         self
     }
 
-    pub fn event_filter(mut self, filter: EventFilter) -> Self {
-        self.base.event_filters.push(filter);
-        self
-    }
-
-    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
-        self.base.event_filters.extend(filters);
-        self
-    }
-
     pub fn block_confirmations(mut self, count: u64) -> Self {
         self.block_confirmations = count;
-        self
-    }
-
-    pub fn max_reads(mut self, max: usize) -> Self {
-        self.base.max_reads = max;
         self
     }
 
@@ -257,22 +249,13 @@ impl<N: Network> ConnectedSyncMode<N> {
     }
 }
 
+impl BaseConfigBuilder for LatestMode {
+    fn base_mut(&mut self) -> &mut BaseConfig {
+        &mut self.base
+    }
+}
+
 impl LatestMode {
-    pub fn event_filter(mut self, filter: EventFilter) -> Self {
-        self.base.event_filters.push(filter);
-        self
-    }
-
-    pub fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
-        self.base.event_filters.extend(filters);
-        self
-    }
-
-    pub fn max_reads(mut self, max: usize) -> Self {
-        self.base.max_reads = max;
-        self
-    }
-
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
