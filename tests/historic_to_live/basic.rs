@@ -11,7 +11,7 @@ use event_scanner::{
 };
 use tokio::{
     sync::Mutex,
-    time::{Duration, sleep, timeout},
+    time::{Duration, timeout},
 };
 use tokio_stream::StreamExt;
 
@@ -46,8 +46,6 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     tokio::spawn(async move {
         client.start_scanner(BlockNumberOrTag::Number(first_historical_block), None).await
     });
-
-    sleep(Duration::from_millis(200)).await;
 
     for _ in 0..live_events {
         contract.increase().send().await?.watch().await?;
