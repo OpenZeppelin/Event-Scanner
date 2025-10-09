@@ -67,8 +67,7 @@
 
 use std::{ops::RangeInclusive, sync::Arc};
 
-#[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
@@ -317,29 +316,15 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     }
 }
 
-#[cfg(test)]
-static HIST_FETCH_DELAY_MS: AtomicU64 = AtomicU64::new(0);
+#[allow(dead_code)]
+static TEST_HIST_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
-#[cfg(test)]
-fn set_historical_fetch_delay_ms(ms: u64) {
-    HIST_FETCH_DELAY_MS.store(ms, Ordering::Relaxed);
-}
-
-#[cfg(test)]
-async fn maybe_delay_historical() {
-    let ms = HIST_FETCH_DELAY_MS.load(Ordering::Relaxed);
-    if ms > 0 {
-        use std::time::Duration;
-
-        use tokio::time::sleep;
-
-        sleep(Duration::from_millis(ms)).await;
-    }
-}
-
-#[cfg(not(test))]
+#[allow(dead_code)]
 #[allow(clippy::unused_async)]
-async fn maybe_delay_historical() {}
+async fn lock_historical_for_testing() {
+    let lock = TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+    let _guard = lock.lock().await;
+}
 
 struct Service<N: Network> {
     config: Config,
@@ -484,7 +469,9 @@ impl<N: Network> Service<N> {
         };
 
         let end_num = end_block.header().number();
+        println!("spawning monitor..");
         let monitor = self.spawn_live_header_monitor_if_needed(end_num, subscriber).await?;
+        println!("monitor spawned!");
 
         match self.stream_historical_blocks(start_block, end_block.clone()).await {
             Ok(()) => {
@@ -624,6 +611,10 @@ impl<N: Network> Service<N> {
 
         self.current = BlockHashAndNumber::from_header::<N>(start.header());
 
+        println!("lock");
+        #[cfg(test)]
+        lock_historical_for_testing().await;
+
         while self.current.number < end.header().number() {
             self.ensure_current_not_reorged().await?;
 
@@ -641,8 +632,6 @@ impl<N: Network> Service<N> {
                 .expect("end of the batch should already be ensured to exist");
 
             self.send_to_subscriber(BlockRangeMessage::Data(self.current.number..=batch_to)).await;
-
-            maybe_delay_historical().await;
 
             self.current = BlockHashAndNumber::from_header::<N>(batch_end_block.header());
 
@@ -846,6 +835,7 @@ impl<N: Network> Service<N> {
                 Ok(sub) => {
                     let mut stream = sub.into_stream();
                     while let Some(h) = stream.next().await {
+                        println!("h {}", h.number());
                         if live_block_num_sender.send(h.number()).await.is_err() {
                             warn!("Downstream channel closed, stopping live header monitor");
                             break;
@@ -1063,7 +1053,7 @@ impl BlockRangeScannerClient {
 mod tests {
 
     use std::time::Duration;
-    use tokio::time::timeout;
+    use tokio::{join, time::timeout};
 
     use alloy::{
         network::Ethereum,
@@ -1077,7 +1067,7 @@ mod tests {
     };
     use alloy_node_bindings::Anvil;
     use serde_json::{Value, json};
-    use tokio::{join, sync::mpsc};
+    use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
 
     use super::*;
@@ -1645,10 +1635,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Flaky test as it relies on timing roerg between start of historical scan and end (when its getting live blocks)"]
     async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
-        super::set_historical_fetch_delay_ms(100);
-
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
@@ -1666,26 +1653,24 @@ mod tests {
             .await?
             .run()?;
 
-        let provider_reorg = provider.clone();
+        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
 
-        let reorg = async move {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            let head_now = provider_reorg.get_block_number().await.unwrap();
-            let reorg_start = end_num - 5;
-            let depth = head_now - reorg_start + 1;
-            provider_reorg
-                .anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] })
-                .await
-                .unwrap();
-            provider_reorg.anvil_mine(Option::Some(20), Option::None).await.unwrap();
-        };
-
-        let fut_stream = client
+        let fut = client
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
-        let (stream_res, ()) = join!(fut_stream, reorg);
-        let mut stream = stream_res.unwrap();
+        let roerg = async {
+            let head_now = provider.get_block_number().await.unwrap();
+            let reorg_start = end_num - 5;
+            let depth = head_now - reorg_start + 1;
+            let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+
+            drop(lock);
+        };
+
+        let (res_stream, ()) = join!(fut, roerg);
+
+        let mut stream = res_stream.unwrap();
 
         let mut data_ranges = Vec::new();
         let mut reorg = false;
