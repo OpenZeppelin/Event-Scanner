@@ -858,28 +858,30 @@ impl<N: Network> Service<N> {
         mut rx: mpsc::Receiver<BlockNumber>,
         end_num: BlockNumber,
     ) {
-        let mut min_seen_below_end: Option<BlockNumber> = None;
-        while let Ok(live_blocks) = rx.try_recv() {
-            if live_blocks < end_num {
-                min_seen_below_end =
-                    Some(min_seen_below_end.map_or(live_blocks, |latest_smallest_seen| {
-                        latest_smallest_seen.min(live_blocks)
-                    }));
+        let Ok(mut min_live_block) = rx.try_recv() else {
+            return;
+        };
+
+        while let Ok(live_block) = rx.try_recv() {
+            if live_block < min_live_block {
+                min_live_block = live_block;
             }
         }
 
-        if let Some(reorg_start) = min_seen_below_end {
-            let max_read = self.config.blocks_read_per_epoch as u64;
+        if min_live_block >= end_num {
+            return;
+        }
 
-            self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected)).await;
+        let reorg_start = min_live_block;
+        let max_read = self.config.blocks_read_per_epoch as u64;
 
-            let mut current = reorg_start;
-            // respect max read
-            while current <= end_num {
-                let batch_end = current.saturating_add(max_read - 1).min(end_num);
-                self.send_to_subscriber(BlockRangeMessage::Data(current..=batch_end)).await;
-                current = batch_end + 1;
-            }
+        self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected)).await;
+
+        let mut current = reorg_start;
+        while current <= end_num {
+            let batch_end = current.saturating_add(max_read - 1).min(end_num);
+            self.send_to_subscriber(BlockRangeMessage::Data(current..=batch_end)).await;
+            current = batch_end + 1;
         }
     }
 
