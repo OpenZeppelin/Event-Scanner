@@ -419,62 +419,6 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn handle_rewind(
-        &mut self,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
-    ) -> Result<(), BlockRangeScannerError> {
-        let start_block = self
-            .provider
-            .get_block_by_number(start_height)
-            .await?
-            .ok_or(BlockRangeScannerError::BlockNotFound(start_height))?
-            .header()
-            .number();
-        let end_block = self
-            .provider
-            .get_block_by_number(end_height)
-            .await?
-            .ok_or(BlockRangeScannerError::BlockNotFound(end_height))?
-            .header()
-            .number();
-
-        let block_range = match start_block.cmp(&end_block) {
-            Ordering::Greater => end_block..=start_block,
-            _ => start_block..=end_block,
-        };
-
-        self.stream_rewind(block_range).await;
-
-        _ = self.subscriber.take();
-
-        Ok(())
-    }
-
-    async fn stream_rewind(&mut self, block_range: RangeInclusive<BlockNumber>) {
-        let mut batch_count = 0;
-        let blocks_read_per_epoch = self.config.blocks_read_per_epoch;
-
-        // we're iterating in reverse
-        let stream_end = *block_range.start();
-        // SAFETY: u32 can always be cast as usize
-        let range_iter = block_range.rev().step_by(blocks_read_per_epoch as usize);
-
-        for batch_end in range_iter {
-            let batch_start =
-                batch_end.saturating_sub(blocks_read_per_epoch as u64 - 1).max(stream_end);
-
-            self.send_to_subscriber(BlockRangeMessage::Data(batch_start..=batch_end)).await;
-
-            batch_count += 1;
-            if batch_count % 10 == 0 {
-                debug!(batch_count = batch_count, "Processed rewind batches");
-            }
-        }
-
-        info!(batch_count = batch_count, "Rewind completed");
-    }
-
     async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
         let Some(sender) = self.subscriber.clone() else {
             return Err(BlockRangeScannerError::ServiceShutdown);
@@ -636,6 +580,62 @@ impl<N: Network> Service<N> {
 
         info!("Successfully transitioned from historical to live data");
         Ok(())
+    }
+
+    async fn handle_rewind(
+        &mut self,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<(), BlockRangeScannerError> {
+        let start_block = self
+            .provider
+            .get_block_by_number(start_height)
+            .await?
+            .ok_or(BlockRangeScannerError::BlockNotFound(start_height))?
+            .header()
+            .number();
+        let end_block = self
+            .provider
+            .get_block_by_number(end_height)
+            .await?
+            .ok_or(BlockRangeScannerError::BlockNotFound(end_height))?
+            .header()
+            .number();
+
+        let block_range = match start_block.cmp(&end_block) {
+            Ordering::Greater => end_block..=start_block,
+            _ => start_block..=end_block,
+        };
+
+        self.stream_rewind(block_range).await;
+
+        _ = self.subscriber.take();
+
+        Ok(())
+    }
+
+    async fn stream_rewind(&mut self, block_range: RangeInclusive<BlockNumber>) {
+        let mut batch_count = 0;
+        let blocks_read_per_epoch = self.config.blocks_read_per_epoch;
+
+        // we're iterating in reverse
+        let stream_end = *block_range.start();
+        // SAFETY: u32 can always be cast as usize
+        let range_iter = block_range.rev().step_by(blocks_read_per_epoch as usize);
+
+        for batch_end in range_iter {
+            let batch_start =
+                batch_end.saturating_sub(blocks_read_per_epoch as u64 - 1).max(stream_end);
+
+            self.send_to_subscriber(BlockRangeMessage::Data(batch_start..=batch_end)).await;
+
+            batch_count += 1;
+            if batch_count % 10 == 0 {
+                debug!(batch_count = batch_count, "Processed rewind batches");
+            }
+        }
+
+        info!(batch_count = batch_count, "Rewind completed");
     }
 
     async fn sync_historical_data(
