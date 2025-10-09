@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::FixedBytes,
+    primitives::{Address, FixedBytes, U256, uint},
     providers::{Provider, RootProvider, ext::AnvilApi},
     rpc::types::Log,
     sol_types::SolEvent,
@@ -12,6 +12,8 @@ use tokio_stream::StreamExt;
 
 use crate::common::{TestCounter, build_provider, deploy_counter, setup_scanner, spawn_anvil};
 use event_scanner::{event_filter::EventFilter, event_scanner::EventScannerMessage};
+
+const ONE: U256 = uint!(1_U256);
 
 async fn collect_events(
     stream: &mut tokio_stream::wrappers::ReceiverStream<EventScannerMessage>,
@@ -26,11 +28,22 @@ async fn collect_events(
     }
 }
 
-fn assert_ordering(logs: &[Log]) {
-    for w in logs.windows(2) {
-        let a = (&w[0].block_number.unwrap(), &w[0].transaction_index.unwrap());
-        let b = (&w[1].block_number.unwrap(), &w[1].transaction_index.unwrap());
-        assert!(a <= b, "events must be ordered ascending by (block, tx index)");
+fn assert_ordering(
+    logs: Vec<Log>,
+    expected_first_count: u64,
+    expected_hashes: Vec<FixedBytes<32>>,
+    expected_address: &Address,
+) {
+    let mut expected_count = U256::from(expected_first_count);
+    for (log, &expected_hash) in logs.iter().zip(expected_hashes.iter()) {
+        let event = log.log_decode::<TestCounter::CountIncreased>().expect(
+            format!("expected sig: 'TestCounter::CountIncreased', got: {:?}", log.topic0())
+                .as_str(),
+        );
+        assert_eq!(&event.address(), expected_address);
+        assert_eq!(event.transaction_hash.unwrap(), expected_hash);
+        assert_eq!(expected_count, event.inner.newCount);
+        expected_count += ONE;
     }
 }
 
@@ -55,17 +68,11 @@ async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Resul
 
     assert_eq!(logs.len(), 5, "should receive exactly 5 latest events");
 
-    // Ensure logs are in ascending block/tx order
-    assert_ordering(&logs);
-
     // Verify exact events (address, signature, tx hashes)
+    let expected_first_count = 4;
     let expected_hashes = tx_hashes[3..8].to_vec();
-    let sig = TestCounter::CountIncreased::SIGNATURE_HASH;
-    for (log, expected_hash) in logs.iter().zip(expected_hashes.iter()) {
-        assert_eq!(log.address(), *contract.address());
-        assert_eq!(log.topics()[0], sig);
-        assert_eq!(log.transaction_hash.unwrap(), *expected_hash);
-    }
+
+    assert_ordering(logs, expected_first_count, expected_hashes, contract.address());
 
     Ok(())
 }
@@ -91,12 +98,10 @@ async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<
     assert_eq!(logs.len(), 3, "should receive only available events");
 
     // Verify exact events
-    let sig = TestCounter::CountIncreased::SIGNATURE_HASH;
-    for (log, expected_hash) in logs.iter().zip(tx_hashes.iter()) {
-        assert_eq!(log.address(), *contract.address());
-        assert_eq!(log.topics()[0], sig);
-        assert_eq!(log.transaction_hash.unwrap(), *expected_hash);
-    }
+    let expected_first_count = 1;
+
+    assert_ordering(logs, expected_first_count, tx_hashes, contract.address());
+
     Ok(())
 }
 
@@ -149,19 +154,17 @@ async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
 
     // Expect last 4 emitted events exactly (the 2 empty blocks contain no events)
     assert_eq!(logs.len(), 2);
-    let sig = TestCounter::CountIncreased::SIGNATURE_HASH;
+
     let expected_hashes = tx_hashes[4..6].to_vec(); // counts 5..6
-    for (log, expected_hash) in logs.iter().zip(expected_hashes.iter()) {
-        assert_eq!(log.address(), *contract.address());
-        assert_eq!(log.topics()[0], sig);
-        assert_eq!(log.transaction_hash.unwrap(), *expected_hash);
-    }
+    let expected_first_count = 5;
+
+    assert_ordering(logs, expected_first_count, expected_hashes, contract.address());
 
     Ok(())
 }
 
 #[tokio::test]
-async fn scan_latest_multiple_listeners_receive_results() -> anyhow::Result<()> {
+async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> anyhow::Result<()> {
     let setup = setup_scanner(None, None, None).await?;
     let contract = setup.contract;
     let mut client = setup.client;
@@ -174,8 +177,10 @@ async fn scan_latest_multiple_listeners_receive_results() -> anyhow::Result<()> 
     let mut stream2 = client.create_event_stream(filter2);
 
     // Produce 7 events
+    let mut tx_hashes: Vec<FixedBytes<32>> = Vec::new();
     for _ in 0..7u8 {
-        let _ = contract.increase().send().await?.get_receipt().await?;
+        let receipt = contract.increase().send().await?.get_receipt().await?;
+        tx_hashes.push(receipt.transaction_hash);
     }
 
     client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
@@ -183,13 +188,14 @@ async fn scan_latest_multiple_listeners_receive_results() -> anyhow::Result<()> 
     let logs1 = collect_events(&mut stream1).await;
     let logs2 = collect_events(&mut stream2).await;
 
-    assert_eq!(logs1.len(), 5);
-    assert_eq!(logs2.len(), 5);
-    assert_eq!(
-        logs1.iter().map(|l| (l.block_number, l.transaction_index)).collect::<Vec<_>>(),
-        logs2.iter().map(|l| (l.block_number, l.transaction_index)).collect::<Vec<_>>(),
-        "both listeners should receive identical results"
-    );
+    assert_eq!(logs1, logs2);
+
+    // since logs are equal, asserting for one, asserts for both
+    assert_eq!(5, logs1.len());
+
+    let expected_hashes = tx_hashes[2..7].to_vec();
+    let expected_first_count = 3;
+    assert_ordering(logs1, expected_first_count, expected_hashes, contract.address());
 
     Ok(())
 }
