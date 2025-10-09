@@ -1,6 +1,6 @@
 use alloy::{
     eips::BlockNumberOrTag,
-    network::{Ethereum, Network},
+    network::Network,
     providers::RootProvider,
     transports::{TransportResult, http::reqwest::Url},
 };
@@ -9,8 +9,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::event_lib::{
     filter::EventFilter,
-    modes::DummyEventScanner,
-    scanner::{Client, EventScannerError, EventScannerMessage},
+    scanner::{ConnectedEventScanner, EventScannerError, EventScannerMessage},
 };
 
 use super::{BaseConfig, BaseConfigBuilder};
@@ -22,7 +21,7 @@ pub struct SyncMode {
 }
 
 pub struct ConnectedSyncMode<N: Network> {
-    inner: Client<N>,
+    inner: ConnectedEventScanner<N>,
     from_block: BlockNumberOrTag,
     block_confirmations: Option<u64>,
 }
@@ -65,7 +64,7 @@ impl SyncMode {
     ) -> TransportResult<ConnectedSyncMode<N>> {
         let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
         Ok(ConnectedSyncMode {
-            inner: Client::from_connected(brs),
+            inner: ConnectedEventScanner::from_connected(brs),
             from_block: self.from_block,
             block_confirmations: Some(self.block_confirmations),
         })
@@ -82,7 +81,7 @@ impl SyncMode {
     ) -> TransportResult<ConnectedSyncMode<N>> {
         let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
         Ok(ConnectedSyncMode {
-            inner: Client::from_connected(brs),
+            inner: ConnectedEventScanner::from_connected(brs),
             from_block: self.from_block,
             block_confirmations: Some(self.block_confirmations),
         })
@@ -94,7 +93,7 @@ impl SyncMode {
     ) -> TransportResult<ConnectedSyncMode<N>> {
         let brs = self.base.block_range_scanner.connect_provider::<N>(provider)?;
         Ok(ConnectedSyncMode {
-            inner: Client::from_connected(brs),
+            inner: ConnectedEventScanner::from_connected(brs),
             from_block: self.from_block,
             block_confirmations: Some(self.block_confirmations),
         })

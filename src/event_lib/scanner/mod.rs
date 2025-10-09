@@ -68,11 +68,12 @@ impl EventScanner {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> Result<Client<N>, EventScannerError> {
+    pub async fn connect_ws<N: Network>(
+        self,
+        ws_url: Url,
+    ) -> Result<ConnectedEventScanner<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
-        let event_scanner =
-            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(ConnectedEventScanner::from_connected(block_range_scanner))
     }
 
     /// Connects to the provider via IPC
@@ -83,11 +84,9 @@ impl EventScanner {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<Client<N>, EventScannerError> {
+    ) -> Result<ConnectedEventScanner<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
-        let event_scanner =
-            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(ConnectedEventScanner::from_connected(block_range_scanner))
     }
 
     /// Connects to an existing provider
@@ -98,11 +97,9 @@ impl EventScanner {
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> Result<Client<N>, EventScannerError> {
+    ) -> Result<ConnectedEventScanner<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_provider(provider)?;
-        let event_scanner =
-            ConnectedEventScanner { block_range_scanner, event_listeners: Vec::default() };
-        Ok(Client { event_scanner })
+        Ok(ConnectedEventScanner::from_connected(block_range_scanner))
     }
 }
 
@@ -112,6 +109,19 @@ pub struct ConnectedEventScanner<N: Network> {
 }
 
 impl<N: Network> ConnectedEventScanner<N> {
+    pub(crate) fn from_connected(block_range_scanner: ConnectedBlockRangeScanner<N>) -> Self {
+        Self { block_range_scanner, event_listeners: Vec::new() }
+    }
+
+    pub fn create_event_stream(
+        &mut self,
+        event_filter: EventFilter,
+    ) -> ReceiverStream<EventScannerMessage> {
+        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
+        self.add_event_listener(EventListener { filter: event_filter, sender });
+        ReceiverStream::new(receiver)
+    }
+
     /// Implementation of stream live
     ///
     /// # Errors
@@ -268,78 +278,5 @@ impl<N: Network> ConnectedEventScanner<N> {
 
     fn add_event_listener(&mut self, event_listener: EventListener) {
         self.event_listeners.push(event_listener);
-    }
-}
-
-pub struct Client<N: Network> {
-    event_scanner: ConnectedEventScanner<N>,
-}
-
-impl<N: Network> Client<N> {
-    pub(crate) fn from_connected(block_range_scanner: ConnectedBlockRangeScanner<N>) -> Self {
-        let event_scanner = ConnectedEventScanner { block_range_scanner, event_listeners: Vec::new() };
-        Client { event_scanner }
-    }
-
-    pub fn create_event_stream(
-        &mut self,
-        event_filter: EventFilter,
-    ) -> ReceiverStream<EventScannerMessage> {
-        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
-
-        self.event_scanner.add_event_listener(EventListener { filter: event_filter, sender });
-
-        ReceiverStream::new(receiver)
-    }
-
-    /// Streams live events starting from the latest block.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_confirmation`: Number of confirmations to apply once in live mode.
-    /// # Errors
-    ///
-    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_live(
-        self,
-        block_confirmations: Option<u64>,
-    ) -> Result<(), EventScannerError> {
-        self.event_scanner.stream_live(block_confirmations).await
-    }
-
-    /// Streams a batch of historical evnets from `start_height` to `end_height`.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_height` - The starting block number or tag.
-    /// * `end_height` - The ending block number or tag.
-    ///
-    /// # Errors
-    ///
-    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_historical(
-        self,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
-    ) -> Result<(), EventScannerError> {
-        self.event_scanner.stream_historical(start_height, end_height).await
-    }
-
-    /// Streams events starting from `start_height` and transitions to live mode.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_height` - The starting block number or tag.
-    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
-    ///
-    /// # Errors
-    ///
-    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_from(
-        self,
-        start_height: BlockNumberOrTag,
-        block_confirmations: Option<u64>,
-    ) -> Result<(), EventScannerError> {
-        self.event_scanner.stream_from(start_height, block_confirmations).await
     }
 }
