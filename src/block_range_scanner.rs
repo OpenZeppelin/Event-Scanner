@@ -965,14 +965,38 @@ mod tests {
     };
     use alloy_node_bindings::Anvil;
     use serde_json::{Value, json};
-    use tokio::{sync::mpsc, time::timeout};
+    use tokio::{
+        sync::mpsc::{self, Receiver},
+        time::timeout,
+    };
     use tokio_stream::StreamExt;
 
     use super::*;
 
+    // Trait to enable receiver-type-agnostic range receival
+    trait RangeReceiver {
+        async fn next_range(&mut self) -> Option<BlockRangeMessage>;
+    }
+
+    impl RangeReceiver for ReceiverStream<BlockRangeMessage> {
+        async fn next_range(&mut self) -> Option<BlockRangeMessage> {
+            self.next().await
+        }
+    }
+
+    impl RangeReceiver for Receiver<BlockRangeMessage> {
+        async fn next_range(&mut self) -> Option<BlockRangeMessage> {
+            self.recv().await
+        }
+    }
+
     macro_rules! assert_next_range {
-        ($stream: expr, $range: expr) => {
-            let next = $stream.next().await;
+        ($recv:expr, None) => {
+            let next = $recv.next_range().await;
+            assert!(next.is_none());
+        };
+        ($recv:expr, $range:expr) => {
+            let next = $recv.next_range().await;
             if let Some(BlockRangeMessage::Data(range)) = next {
                 assert_eq!($range, range);
             } else {
@@ -1393,27 +1417,27 @@ mod tests {
 
         // ranges where each batch is of max blocks per epoch size
         let mut stream = client.stream_historical(0, 19).await?;
-        assert_next_range!(stream, (0..=4));
-        assert_next_range!(stream, (5..=9));
-        assert_next_range!(stream, (10..=14));
-        assert_next_range!(stream, (15..=19));
-        assert!(stream.next().await.is_none());
+        assert_next_range!(stream, 0..=4);
+        assert_next_range!(stream, 5..=9);
+        assert_next_range!(stream, 10..=14);
+        assert_next_range!(stream, 15..=19);
+        assert_next_range!(stream, None);
 
         // ranges where last batch is smaller than blocks per epoch
         let mut stream = client.stream_historical(93, 99).await?;
-        assert_next_range!(stream, (93..=97));
-        assert_next_range!(stream, (98..=99));
-        assert!(stream.next().await.is_none());
+        assert_next_range!(stream, 93..=97);
+        assert_next_range!(stream, 98..=99);
+        assert_next_range!(stream, None);
 
         // range where blocks per epoch is larger than the number of blocks in the range
         let mut stream = client.stream_historical(3, 5).await?;
-        assert_next_range!(stream, (3..=5));
-        assert!(stream.next().await.is_none());
+        assert_next_range!(stream, 3..=5);
+        assert_next_range!(stream, None);
 
         // single item range
         let mut stream = client.stream_historical(3, 3).await?;
-        assert_next_range!(stream, (3..=3));
-        assert!(stream.next().await.is_none());
+        assert_next_range!(stream, 3..=3);
+        assert_next_range!(stream, None);
 
         // range where blocks per epoch is larger than the number of blocks on chain
         let client = BlockRangeScanner::new()
@@ -1423,12 +1447,12 @@ mod tests {
             .run()?;
 
         let mut stream = client.stream_historical(0, 20).await?;
-        assert_next_range!(stream, (0..=20));
-        assert!(stream.next().await.is_none());
+        assert_next_range!(stream, 0..=20);
+        assert_next_range!(stream, None);
 
         let mut stream = client.stream_historical(0, 99).await?;
-        assert_next_range!(stream, (0..=99));
-        assert!(stream.next().await.is_none());
+        assert_next_range!(stream, 0..=99);
+        assert_next_range!(stream, None);
 
         Ok(())
     }
