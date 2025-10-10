@@ -19,7 +19,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     let contract = deploy_counter(provider.clone()).await?;
     let contract_address = *contract.address();
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     // Create filter that tracks ALL events from a specific contract (no event signature specified)
     let filter = EventFilter::new().with_contract_address(contract_address);
@@ -27,7 +27,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
 
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     // Generate both increase and decrease events
     for _ in 0..expected_event_count {
@@ -63,11 +63,11 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
     let filter = EventFilter::new();
     let expected_event_count = 3;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     // Generate events from our contract
     for _ in 0..expected_event_count {
@@ -106,13 +106,13 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
     let all_events_filter = EventFilter::new();
     let expected_all_count = 3;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut specific_stream =
         client.create_event_stream(specific_filter).take(expected_specific_count);
     let mut all_stream = client.create_event_stream(all_events_filter).take(expected_all_count);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     // First increase the counter to have some balance
     for _ in 0..expected_all_count {

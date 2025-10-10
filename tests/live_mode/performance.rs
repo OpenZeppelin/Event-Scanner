@@ -24,11 +24,11 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         .with_event(TestCounter::CountIncreased::SIGNATURE);
     let expected_event_count = 100;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;

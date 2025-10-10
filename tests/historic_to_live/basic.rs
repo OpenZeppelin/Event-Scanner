@@ -3,11 +3,8 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{
-    event_lib::{EventFilter, EventScanner, EventScannerMessage},
-    types::ScannerStatus,
-};
+use alloy::{network::Ethereum, sol_types::SolEvent};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage, ScannerStatus};
 use tokio::{
     sync::Mutex,
     time::{Duration, sleep, timeout},
@@ -38,13 +35,14 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         .with_contract_address(contract_address)
         .with_event(TestCounter::CountIncreased::SIGNATURE);
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::sync()
+        .from_block(first_historical_block)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
 
     let mut stream = client.create_event_stream(filter).take(historical_events + live_events);
 
-    tokio::spawn(async move {
-        client.stream_from(BlockNumberOrTag::Number(first_historical_block), 0).await
-    });
+    tokio::spawn(async move { client.stream().await });
 
     sleep(Duration::from_millis(200)).await;
 

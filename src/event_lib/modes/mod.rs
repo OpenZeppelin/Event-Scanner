@@ -19,7 +19,7 @@ impl EventScanner {
     }
 
     #[must_use]
-    pub fn subscribe() -> LiveModeConfig {
+    pub fn live() -> LiveModeConfig {
         LiveModeConfig::new()
     }
 
@@ -35,7 +35,7 @@ impl EventScanner {
 }
 
 #[derive(Clone)]
-pub(crate) struct BaseConfig {
+pub struct BaseConfig {
     event_filters: Vec<EventFilter>,
     block_range_scanner: BlockRangeScanner,
 }
@@ -46,7 +46,7 @@ impl BaseConfig {
     }
 }
 
-pub(crate) trait BaseConfigBuilder: Sized {
+pub trait BaseConfigBuilder: Sized {
     fn base_mut(&mut self) -> &mut BaseConfig;
 
     #[must_use]

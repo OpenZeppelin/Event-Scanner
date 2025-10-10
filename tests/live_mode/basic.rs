@@ -25,10 +25,10 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
 
     let expected_event_count = 5;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
@@ -83,12 +83,12 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let expected_events_a = 3;
     let expected_events_b = 2;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let a_stream = client.create_event_stream(a_filter);
     let b_stream = client.create_event_stream(b_filter);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     for _ in 0..expected_events_a {
         a.increase().send().await?.watch().await?;
@@ -155,12 +155,12 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let expected_incr_events = 6;
     let expected_decr_events = 2;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut incr_stream = client.create_event_stream(increase_filter).take(expected_incr_events);
     let mut decr_stream = client.create_event_stream(decrease_filter).take(expected_decr_events);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     for _ in 0..expected_incr_events {
         contract.increase().send().await?.watch().await?;
@@ -223,11 +223,11 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     let num_of_events = 3;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut stream = client.create_event_stream(filter).take(num_of_events);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
@@ -256,11 +256,11 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
 
     let num_of_events = 3;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut stream = client.create_event_stream(filter).take(num_of_events);
 
-    tokio::spawn(async move { client.stream_live(0).await });
+    tokio::spawn(async move { client.stream().await });
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
