@@ -2,7 +2,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use crate::{
     block_range_scanner::{
-        BlockRangeMessage, BlockRangeScanner, BlockRangeScannerError, ConnectedBlockRangeScanner,
+        BlockRangeMessage, BlockRangeScannerError, ConnectedBlockRangeScanner,
         MAX_BUFFERED_MESSAGES,
     },
     event_lib::{filter::EventFilter, listener::EventListener},
@@ -13,7 +13,7 @@ use alloy::{
     network::Network,
     providers::{Provider, RootProvider},
     rpc::types::{Filter, Log},
-    transports::{RpcError, TransportErrorKind, http::reqwest::Url},
+    transports::{RpcError, TransportErrorKind},
 };
 use thiserror::Error;
 use tokio::sync::{
@@ -22,10 +22,6 @@ use tokio::sync::{
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info};
-
-pub struct EventScanner {
-    block_range_scanner: BlockRangeScanner,
-}
 
 pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
 
@@ -40,66 +36,6 @@ pub enum EventScannerError {
 impl From<RpcError<TransportErrorKind>> for EventScannerError {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
         EventScannerError::Provider(Arc::new(e))
-    }
-}
-
-impl Default for EventScanner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl EventScanner {
-    #[must_use]
-    /// Creates a new builder with default block scanner and callback strategy.
-    pub fn new() -> Self {
-        Self { block_range_scanner: BlockRangeScanner::new() }
-    }
-
-    #[must_use]
-    pub fn with_max_block_range(mut self, max_block_range: usize) -> Self {
-        self.block_range_scanner =
-            self.block_range_scanner.with_max_read_per_epoch(max_block_range);
-        self
-    }
-
-    /// Connects to the provider via WebSocket
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> Result<EventScannerService<N>, EventScannerError> {
-        let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
-        Ok(EventScannerService::from_config(block_range_scanner))
-    }
-
-    /// Connects to the provider via IPC
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: impl Into<String>,
-    ) -> Result<EventScannerService<N>, EventScannerError> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
-        Ok(EventScannerService::from_config(block_range_scanner))
-    }
-
-    /// Connects to an existing provider
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub fn connect_provider<N: Network>(
-        self,
-        provider: RootProvider<N>,
-    ) -> Result<EventScannerService<N>, EventScannerError> {
-        let block_range_scanner = self.block_range_scanner.connect_provider(provider)?;
-        Ok(EventScannerService::from_config(block_range_scanner))
     }
 }
 

@@ -10,9 +10,9 @@ pub use sync::{SyncModeConfig, SyncModeScanner};
 
 use crate::{block_range_scanner::BlockRangeScanner, event_lib::EventFilter};
 
-pub struct DummyEventScanner;
+pub struct EventScanner;
 
-impl DummyEventScanner {
+impl EventScanner {
     #[must_use]
     pub fn historic() -> HistoricModeConfig {
         HistoricModeConfig::new()
@@ -35,7 +35,7 @@ impl DummyEventScanner {
 }
 
 #[derive(Clone)]
-struct BaseConfig {
+pub(crate) struct BaseConfig {
     event_filters: Vec<EventFilter>,
     block_range_scanner: BlockRangeScanner,
 }
@@ -46,19 +46,22 @@ impl BaseConfig {
     }
 }
 
-pub trait BaseConfigBuilder: Sized {
+pub(crate) trait BaseConfigBuilder: Sized {
     fn base_mut(&mut self) -> &mut BaseConfig;
 
+    #[must_use]
     fn event_filter(mut self, filter: EventFilter) -> Self {
         self.base_mut().event_filters.push(filter);
         self
     }
 
+    #[must_use]
     fn event_filters(mut self, filters: Vec<EventFilter>) -> Self {
         self.base_mut().event_filters.extend(filters);
         self
     }
 
+    #[must_use]
     fn max_reads(mut self, max: usize) -> Self {
         self.base_mut().block_range_scanner.max_read_per_epoch = max;
         self

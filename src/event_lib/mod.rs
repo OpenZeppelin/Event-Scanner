@@ -8,6 +8,4 @@ pub use modes::{
     HistoricModeConfig, HistoricModeScanner, SubscribeModeConfig, SubscribeModeScanner,
     SyncModeConfig, SyncModeScanner,
 };
-pub use scanner::{
-    EventScanner, EventScannerError, EventScannerMessage, EventScannerService as Client,
-};
+pub use scanner::{EventScannerError, EventScannerMessage, EventScannerService};
