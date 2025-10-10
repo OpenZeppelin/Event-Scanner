@@ -20,7 +20,6 @@
 //!     // Configuration
 //!     let block_range_scanner = BlockRangeScanner::new()
 //!         .with_blocks_read_per_epoch(1000)
-//!         .with_reorg_rewind_depth(5)
 //!         .with_block_confirmations(5)
 //!         .connect_ws::<Ethereum>(Url::parse("ws://localhost:8546").unwrap())
 //!         .await?;
@@ -67,6 +66,8 @@
 
 use std::{ops::RangeInclusive, sync::Arc};
 
+use std::sync::OnceLock;
+
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
@@ -74,8 +75,8 @@ use crate::types::{ScannerMessage, ScannerStatus};
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
-    network::{BlockResponse, Network, primitives::HeaderResponse},
-    primitives::{BlockHash, BlockNumber},
+    network::{BlockResponse, Network},
+    primitives::BlockNumber,
     providers::{Provider, RootProvider},
     pubsub::Subscription,
     rpc::client::ClientBuilder,
@@ -94,8 +95,6 @@ pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 // const BACK_OFF_MAX_RETRIES: u64 = 5;
 
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
-
-pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 
 // // State sync aware retry settings
 // const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -181,32 +180,14 @@ pub enum Command {
     },
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct BlockHashAndNumber {
-    pub hash: BlockHash,
-    pub number: BlockNumber,
-}
-
-impl BlockHashAndNumber {
-    fn from_header<N: Network>(header: &N::HeaderResponse) -> Self {
-        Self { hash: header.hash(), number: header.number() }
-    }
-}
-
 #[derive(Clone)]
 struct Config {
     blocks_read_per_epoch: usize,
-    reorg_rewind_depth: u64,
-    #[allow(
-        dead_code,
-        reason = "Will be used in reorg mechanism: https://github.com/OpenZeppelin/Event-Scanner/issues/5"
-    )]
     block_confirmations: u64,
 }
 
 pub struct BlockRangeScanner {
     blocks_read_per_epoch: usize,
-    reorg_rewind_depth: u64,
     block_confirmations: u64,
 }
 
@@ -221,7 +202,6 @@ impl BlockRangeScanner {
     pub fn new() -> Self {
         Self {
             blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
-            reorg_rewind_depth: DEFAULT_REORG_REWIND_DEPTH,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
         }
     }
@@ -229,12 +209,6 @@ impl BlockRangeScanner {
     #[must_use]
     pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
         self.blocks_read_per_epoch = blocks_read_per_epoch;
-        self
-    }
-
-    #[must_use]
-    pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
-        self.reorg_rewind_depth = reorg_rewind_depth;
         self
     }
 
@@ -284,7 +258,6 @@ impl BlockRangeScanner {
             provider,
             config: Config {
                 blocks_read_per_epoch: self.blocks_read_per_epoch,
-                reorg_rewind_depth: self.reorg_rewind_depth,
                 block_confirmations: self.block_confirmations,
             },
         })
@@ -317,11 +290,21 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     }
 }
 
+#[allow(dead_code)]
+static TEST_HIST_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+#[allow(dead_code)]
+#[allow(clippy::unused_async)]
+async fn lock_historical_for_testing() {
+    let lock = TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+    let _guard = lock.lock().await;
+}
+
 struct Service<N: Network> {
     config: Config,
     provider: RootProvider<N>,
     subscriber: Option<mpsc::Sender<BlockRangeMessage>>,
-    next_start_block: BlockHashAndNumber,
+    next_start_block: BlockNumber,
     websocket_connected: bool,
     processed_count: u64,
     error_count: u64,
@@ -337,7 +320,7 @@ impl<N: Network> Service<N> {
             config,
             provider,
             subscriber: None,
-            next_start_block: BlockHashAndNumber::default(),
+            next_start_block: 0,
             websocket_connected: false,
             processed_count: 0,
             error_count: 0,
@@ -407,9 +390,8 @@ impl<N: Network> Service<N> {
     }
 
     async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
-        let Some(sender) = self.subscriber.clone() else {
-            return Err(BlockRangeScannerError::ServiceShutdown);
-        };
+        let sender =
+            self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
         let block_confirmations = self.config.block_confirmations;
         let provider = self.provider.clone();
@@ -432,30 +414,50 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
-        let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError(format!(
-                "Start block {start_height:?} not found"
-            )),
-        )?;
-        let end_block = self.provider.get_block_by_number(end_height).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError(format!(
-                "End block {end_height:?} not found"
-            )),
+        let (start_block, end_block) = tokio::try_join!(
+            self.provider.get_block_by_number(start_height),
+            self.provider.get_block_by_number(end_height)
         )?;
 
-        if end_block.header().number() < start_block.header().number() {
+        let start_block_num = start_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
+            .header()
+            .number();
+        let end_block_num = end_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(end_height))?
+            .header()
+            .number();
+
+        if end_block_num < start_block_num {
             return Err(BlockRangeScannerError::HistoricalSyncError(format!(
                 "End block {end_height:?} is lower than start block {start_height:?}"
             )));
         }
 
-        info!(
-            start_block = start_block.header().number(),
-            end_block = end_block.header().number(),
-            "Syncing historical data"
-        );
+        info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
-        self.sync_historical_data(start_block, end_block).await?;
+        let Some(subscriber) = self.subscriber.clone() else {
+            return Err(BlockRangeScannerError::ServiceShutdown);
+        };
+
+        let monitor = self.spawn_reorg_monitor_if_needed(end_block_num, subscriber).await?;
+
+        match self.stream_historical_blocks(start_block_num, end_block_num).await {
+            Ok(()) => {
+                // Post-sync: stop header collection and evaluate correction range
+                if let Some((handle, rx)) = monitor {
+                    self.drain_reorg_monitor_and_emit_correction(rx, end_block_num).await;
+                    handle.abort();
+                }
+            }
+            Err(e) => {
+                // abort live fetching if historical fetching fails
+                if let Some((handle, _)) = monitor {
+                    handle.abort();
+                }
+                return Err(e);
+            }
+        }
 
         _ = self.subscriber.take();
 
@@ -468,53 +470,48 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
+        let block_confirmations = self.config.block_confirmations;
         // Step 1:
-        // Fetches the starting block and end block for historical sync
-        let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError(format!(
-                "Start block {start_height:?} not found"
-            )),
+        // Fetches the starting block and end block for historical sync in parallel
+        let (start_block, latest_block) = tokio::try_join!(
+            self.provider.get_block_by_number(start_height),
+            self.provider.get_block_by_number(BlockNumberOrTag::Latest)
         )?;
 
-        let latest_block =
-            self.provider.get_block_by_number(BlockNumberOrTag::Latest).await?.ok_or(
-                BlockRangeScannerError::HistoricalSyncError("Latest block not found".to_string()),
-            )?;
+        let start_block_num = start_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
+            .header()
+            .number();
+        let latest_block = latest_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
+            .header()
+            .number();
 
-        let block_confirmations = self.config.block_confirmations;
-        let confirmed_tip_num = latest_block.header().number().saturating_sub(block_confirmations);
+        let confirmed_tip_num = latest_block.saturating_sub(block_confirmations);
 
         // If start is beyond confirmed tip, skip historical and go straight to live
-        if start_block.header().number() > confirmed_tip_num {
+        if start_block_num > confirmed_tip_num {
             info!(
-                start_block = start_block.header().number(),
+                start_block = start_block_num,
                 confirmed_tip = confirmed_tip_num,
                 "Start block is beyond confirmed tip, starting live stream"
             );
 
-            let Some(sender) = self.subscriber.clone() else {
-                return Err(BlockRangeScannerError::ServiceShutdown);
-            };
+            let sender =
+                self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
             let provider = self.provider.clone();
-            let expected_next = start_block.header().number();
             tokio::spawn(async move {
-                Self::stream_live_blocks(expected_next, provider, sender, block_confirmations)
+                Self::stream_live_blocks(start_block_num, provider, sender, block_confirmations)
                     .await;
             });
 
             return Ok(());
         }
 
-        let end_block = self.provider.get_block_by_number(confirmed_tip_num.into()).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError(format!(
-                "Confirmed tip block {confirmed_tip_num} not found"
-            )),
-        )?;
-
         info!(
-            start_block = start_block.header().number(),
-            end_block = end_block.header().number(),
+            start_block = start_block_num,
+            end_block = confirmed_tip_num,
             "Syncing historical data"
         );
 
@@ -527,7 +524,7 @@ impl<N: Network> Service<N> {
 
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
-        let cutoff = end_block.header().number();
+        let cutoff = confirmed_tip_num;
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
@@ -543,7 +540,7 @@ impl<N: Network> Service<N> {
         // Step 4: Perform historical synchronization
         // This processes blocks from start_block to end_block (cutoff)
         // If this fails, we need to abort the live streaming task
-        if let Err(e) = self.sync_historical_data(start_block, end_block).await {
+        if let Err(e) = self.stream_historical_blocks(start_block_num, confirmed_tip_num).await {
             warn!("aborting live_subscription_task");
             live_subscription_task.abort();
             return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
@@ -551,9 +548,9 @@ impl<N: Network> Service<N> {
 
         self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
 
-        let Some(sender) = self.subscriber.clone() else {
-            return Err(BlockRangeScannerError::ServiceShutdown);
-        };
+        let sender =
+            self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
+
         // Step 5:
         // Spawn the buffer processor task
         // This will:
@@ -569,28 +566,28 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn sync_historical_data(
+    async fn stream_historical_blocks(
         &mut self,
-        start: N::BlockResponse,
-        end: N::BlockResponse,
+        start: BlockNumber,
+        end: BlockNumber,
     ) -> Result<(), BlockRangeScannerError> {
         let mut batch_count = 0;
 
-        self.next_start_block = BlockHashAndNumber::from_header::<N>(start.header());
+        self.next_start_block = start;
+
+        #[cfg(test)]
+        lock_historical_for_testing().await;
 
         // must be <= to include the edge case when start == end (i.e. return the single block
         // range)
-        while self.next_start_block.number <= end.header().number() {
-            self.ensure_current_not_reorged().await?;
-
+        while self.next_start_block <= end {
             let batch_end_block_number = self
                 .next_start_block
-                .number
                 .saturating_add(self.config.blocks_read_per_epoch as u64 - 1)
-                .min(end.header().number());
+                .min(end);
 
             self.send_to_subscriber(BlockRangeMessage::Data(
-                self.next_start_block.number..=batch_end_block_number,
+                self.next_start_block..=batch_end_block_number,
             ))
             .await;
 
@@ -599,24 +596,14 @@ impl<N: Network> Service<N> {
                 debug!(batch_count = batch_count, "Processed historical batches");
             }
 
-            if batch_end_block_number == end.header().number() {
+            if batch_end_block_number == end {
                 break;
             }
 
-            let next_start_block_number = (batch_end_block_number + 1).into();
-            let next_start_block =
-                match self.provider.get_block_by_number(next_start_block_number).await {
-                    Ok(block) => {
-                        block.expect("block number is less than 'end', so it should exist")
-                    }
-                    Err(e) => {
-                        error!(error = %e, "Failed to get block by number");
-                        let e: BlockRangeScannerError = e.into();
-                        self.send_to_subscriber(BlockRangeMessage::Error(e.clone())).await;
-                        return Err(e);
-                    }
-                };
-            self.next_start_block = BlockHashAndNumber::from_header::<N>(next_start_block.header());
+            // Next block number always exists as we checked end block previously
+            let next_start_block_number = batch_end_block_number.saturating_add(1);
+
+            self.next_start_block = next_start_block_number;
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
@@ -731,44 +718,6 @@ impl<N: Network> Service<N> {
         info!(processed = processed, discarded = discarded, "Processed buffered messages");
     }
 
-    async fn ensure_current_not_reorged(&mut self) -> Result<(), BlockRangeScannerError> {
-        let current_block = self.provider.get_block_by_hash(self.next_start_block.hash).await?;
-        if current_block.is_some() {
-            return Ok(());
-        }
-
-        self.rewind_on_reorg_detected().await
-    }
-
-    async fn rewind_on_reorg_detected(&mut self) -> Result<(), BlockRangeScannerError> {
-        let mut new_current_height =
-            self.next_start_block.number.saturating_sub(self.config.reorg_rewind_depth);
-
-        let head = self.provider.get_block_number().await?;
-        if head < new_current_height {
-            new_current_height = head;
-        }
-
-        let current = self
-            .provider
-            .get_block_by_number(new_current_height.into())
-            .await?
-            .map(|block| BlockHashAndNumber::from_header::<N>(block.header()))
-            .ok_or(BlockRangeScannerError::HistoricalSyncError(format!(
-                "Block {new_current_height} not found during rewind",
-            )))?;
-
-        info!(
-            old_current = self.next_start_block.number,
-            new_current = current.number,
-            "Rewind on reorg detected"
-        );
-
-        self.next_start_block = current;
-
-        Ok(())
-    }
-
     async fn get_block_subscription(
         provider: &impl Provider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, BlockRangeScannerError> {
@@ -778,6 +727,99 @@ impl<N: Network> Service<N> {
             .map_err(|_| BlockRangeScannerError::WebSocketConnectionFailed(1))?;
 
         Ok(ws_stream)
+    }
+
+    async fn spawn_reorg_monitor_if_needed(
+        &self,
+        end_num: BlockNumber,
+        subscriber: mpsc::Sender<BlockRangeMessage>,
+    ) -> Result<
+        Option<(tokio::task::JoinHandle<()>, mpsc::Receiver<BlockNumber>)>,
+        BlockRangeScannerError,
+    > {
+        // Try to fetch the finalized tip; if unavailable, skip monitoring
+        let finalized_block =
+            match self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await {
+                Ok(opt) => opt,
+                Err(e) => {
+                    return Err(BlockRangeScannerError::HistoricalSyncError(format!(
+                        "cannot find latest finalized error: {e}",
+                    )));
+                }
+            };
+
+        let finalized_num = finalized_block.unwrap().header().number();
+        if end_num <= finalized_num {
+            return Ok(None);
+        }
+
+        let (live_block_num_sender, live_block_num_receiver) =
+            mpsc::channel::<BlockNumber>(MAX_BUFFERED_MESSAGES);
+        let provider = self.provider.clone();
+
+        let live_subscription_task = tokio::spawn(async move {
+            match Self::get_block_subscription(&provider).await {
+                Ok(sub) => {
+                    let mut stream = sub.into_stream();
+                    let mut last_seen: Option<BlockNumber> = None;
+
+                    while let Some(incoming_block) = stream.next().await {
+                        let incoming_block_num = incoming_block.number();
+                        // Emit only non-increasing heads at/below end_num (reorg signals)
+                        let emit = match last_seen {
+                            Some(prev) => {
+                                incoming_block_num <= prev && incoming_block_num <= end_num
+                            }
+                            None => false,
+                        };
+
+                        last_seen = Some(incoming_block_num);
+
+                        if emit && live_block_num_sender.send(incoming_block_num).await.is_err() {
+                            warn!("Downstream channel closed, stopping live header monitor");
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    if subscriber.send(BlockRangeMessage::Error(e)).await.is_err() {
+                        warn!("Downstream channel closed, stopping live header monitor");
+                    }
+                }
+            }
+        });
+
+        Ok(Option::Some((live_subscription_task, live_block_num_receiver)))
+    }
+
+    async fn drain_reorg_monitor_and_emit_correction(
+        &mut self,
+        mut rx: mpsc::Receiver<BlockNumber>,
+        end_num: BlockNumber,
+    ) {
+        let Ok(first) = rx.try_recv() else {
+            return;
+        };
+
+        // Live monitor forwards only non-increasing heads at/below end_num (reorg signals).
+        // Determine earliest affected block and re-emit [reorg_start..=end_num].
+        let mut reorg_start = first;
+        while let Ok(reorged_blocks) = rx.try_recv() {
+            if reorged_blocks < reorg_start {
+                reorg_start = reorged_blocks;
+            }
+        }
+
+        let max_read = self.config.blocks_read_per_epoch as u64;
+
+        self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected)).await;
+
+        let mut current = reorg_start;
+        while current <= end_num {
+            let batch_end = current.saturating_add(max_read - 1).min(end_num);
+            self.send_to_subscriber(BlockRangeMessage::Data(current..=batch_end)).await;
+            current = batch_end + 1;
+        }
     }
 
     async fn send_to_subscriber(&mut self, message: BlockRangeMessage) {
@@ -951,24 +993,22 @@ impl BlockRangeScannerClient {
 
 #[cfg(test)]
 mod tests {
+
     use std::time::Duration;
+    use tokio::{
+        join,
+        sync::mpsc::Receiver,
+        time::{sleep, timeout},
+    };
 
     use alloy::{
         network::Ethereum,
-        primitives::{B256, keccak256},
         providers::{ProviderBuilder, ext::AnvilApi},
-        rpc::{
-            client::RpcClient,
-            types::{Block as RpcBlock, Header, Transaction, anvil::ReorgOptions},
-        },
+        rpc::{client::RpcClient, types::anvil::ReorgOptions},
         transports::mock::Asserter,
     };
     use alloy_node_bindings::Anvil;
-    use serde_json::{Value, json};
-    use tokio::{
-        sync::mpsc::{self, Receiver},
-        time::timeout,
-    };
+    use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
 
     use super::*;
@@ -1006,18 +1046,11 @@ mod tests {
     }
 
     fn test_config() -> Config {
-        Config { blocks_read_per_epoch: 5, reorg_rewind_depth: 5, block_confirmations: 0 }
+        Config { blocks_read_per_epoch: 5, block_confirmations: 0 }
     }
 
     fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
         RootProvider::new(RpcClient::mocked(asserter))
-    }
-
-    fn mock_block(number: u64, hash: B256) -> RpcBlock<Transaction, Header> {
-        let mut block: RpcBlock<Transaction, Header> = RpcBlock::default();
-        block.header.hash = hash;
-        block.header.number = number;
-        block
     }
 
     #[test]
@@ -1025,19 +1058,16 @@ mod tests {
         let scanner = BlockRangeScanner::new();
 
         assert_eq!(scanner.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
-        assert_eq!(scanner.reorg_rewind_depth, DEFAULT_REORG_REWIND_DEPTH);
         assert_eq!(scanner.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
     #[test]
     fn builder_methods_update_configuration() {
         let blocks_read_per_epoch = 42;
-        let reorg_rewind_depth = 12;
         let block_confirmations = 7;
 
         let scanner = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(blocks_read_per_epoch)
-            .with_reorg_rewind_depth(reorg_rewind_depth)
             .with_block_confirmations(block_confirmations);
 
         assert_eq!(scanner.blocks_read_per_epoch, blocks_read_per_epoch);
@@ -1366,37 +1396,146 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rewinds_on_detected_reorg() -> anyhow::Result<()> {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter.clone());
+    async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-        let mut config = test_config();
-        config.reorg_rewind_depth = 6;
-        let (mut service, _cmd) = Service::new(config.clone(), provider);
+        provider.anvil_mine(Option::Some(120), Option::None).await?;
 
-        let original_height = 10;
-        let original_hash = keccak256(b"original block");
-        let original_block = mock_block(original_height, original_hash);
-        service.next_start_block =
-            BlockHashAndNumber::from_header::<Ethereum>(original_block.header());
+        let finalized_block = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
+        let finalized_num = finalized_block.unwrap().header().number();
 
-        let expected_rewind_height = original_height - config.reorg_rewind_depth;
-        let expected_rewind_hash = keccak256(b"rewound block");
-        let rewound_block = mock_block(expected_rewind_height, expected_rewind_hash);
+        let end_num = finalized_num + 10;
+        let head_before = provider.get_block_number().await?;
+        assert!(end_num <= head_before);
 
-        // Mock provider responses for reorg detection and rewind:
-        // 1. get_block_by_hash(original_hash) -> None (block not found = reorg detected)
-        asserter.push_success(&Value::Null);
-        // 2. get_block_number() -> 12 (current chain head is at 12)
-        asserter.push_success(&json!(format!("0x{:x}", original_height + 2)));
-        // 3. get_block_by_number(expected_rewind_height) -> rewound_block
-        asserter.push_success(&rewound_block);
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
 
-        service.ensure_current_not_reorged().await?;
+        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
 
-        let current = service.next_start_block;
-        assert_eq!(current.number, expected_rewind_height, "should rewind by reorg_rewind_depth");
-        assert_eq!(current.hash, expected_rewind_hash, "should use hash of block at rewind height");
+        let fut_stream = client
+            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
+
+        let roerg = async {
+            sleep(Duration::from_secs(1)).await;
+            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+            let head_now = provider.get_block_number().await.unwrap();
+            let reorg_start = end_num - 5;
+            let depth = head_now - reorg_start + 1;
+            let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+
+            drop(lock);
+        };
+
+        let (res_stream, ()) = join!(fut_stream, roerg);
+
+        let mut stream = res_stream.unwrap();
+
+        let mut data_ranges = Vec::new();
+        let mut reorg = false;
+        while let Some(msg) = stream.next().await {
+            match msg {
+                BlockRangeMessage::Data(range) => data_ranges.push(range),
+                BlockRangeMessage::Status(status) => {
+                    if matches!(status, ScannerStatus::ReorgDetected) {
+                        reorg = true;
+                    }
+                }
+                BlockRangeMessage::Error(_) => {
+                    panic!("error");
+                }
+            }
+        }
+
+        assert!(reorg, "no reorg detected");
+
+        let reorg_start = end_num - 5;
+        let last_range = data_ranges.last().expect("should have at least one range");
+        assert_eq!(
+            *last_range.start(),
+            reorg_start,
+            "expected last range to start at {reorg_start}, got: {last_range:?}"
+        );
+        assert_eq!(
+            *last_range.end(),
+            end_num,
+            "expected last range to end at {end_num}, got: {last_range:?}"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(120), Option::None).await?;
+
+        let head_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?;
+        let end_num = head_block.unwrap().header().number();
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+
+        let fut_stream = client
+            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
+
+        let roerg = async {
+            sleep(Duration::from_secs(1)).await;
+            let pre_reorg_mine = 20;
+            let _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
+            // Reorg back to previous head aka our end num
+            let depth = pre_reorg_mine + 1;
+            let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+
+            drop(lock);
+        };
+
+        let (res_stream, ()) = join!(fut_stream, roerg);
+
+        let mut stream = res_stream.unwrap();
+
+        let mut data_ranges = Vec::new();
+        let mut reorg = false;
+        while let Some(msg) = stream.next().await {
+            match msg {
+                BlockRangeMessage::Data(range) => data_ranges.push(range),
+                BlockRangeMessage::Status(status) => {
+                    if matches!(status, ScannerStatus::ReorgDetected) {
+                        reorg = true;
+                    }
+                }
+                BlockRangeMessage::Error(_) => {
+                    panic!("error");
+                }
+            }
+        }
+
+        assert!(reorg, "no reorg detected");
+
+        // reorg of 1 so last range should be end num
+        let reorg_start = end_num;
+        let last_range = data_ranges.last().expect("should have at least one range");
+        assert_eq!(
+            *last_range.start(),
+            reorg_start,
+            "expected last range to start at {reorg_start}, got: {last_range:?}"
+        );
+        assert_eq!(
+            *last_range.end(),
+            end_num,
+            "expected last range to end at {end_num}, got: {last_range:?}"
+        );
 
         Ok(())
     }
