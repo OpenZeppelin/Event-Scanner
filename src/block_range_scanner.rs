@@ -154,7 +154,7 @@ impl BlockHashAndNumber {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
     pub max_read_per_epoch: usize,
 }
@@ -247,7 +247,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
 pub enum Command {
     StreamLive {
         sender: mpsc::Sender<BlockRangeMessage>,
-        block_confirmations: Option<u64>,
+        block_confirmations: u64,
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     StreamHistorical {
@@ -259,7 +259,7 @@ pub enum Command {
     StreamFrom {
         sender: mpsc::Sender<BlockRangeMessage>,
         start_height: BlockNumberOrTag,
-        block_confirmations: Option<u64>,
+        block_confirmations: u64,
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     Unsubscribe {
@@ -364,13 +364,12 @@ impl<N: Network> Service<N> {
 
     async fn handle_live(
         &mut self,
-        block_confirmations: Option<u64>,
+        block_confirmations: u64,
     ) -> Result<(), BlockRangeScannerError> {
         let Some(sender) = self.subscriber.clone() else {
             return Err(BlockRangeScannerError::ServiceShutdown);
         };
 
-        let block_confirmations = block_confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS);
         let max_read_per_epoch = self.max_read_per_epoch;
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
@@ -436,9 +435,8 @@ impl<N: Network> Service<N> {
     async fn handle_sync(
         &mut self,
         start_height: BlockNumberOrTag,
-        block_confirmations: Option<u64>,
+        block_confirmations: u64,
     ) -> Result<(), BlockRangeScannerError> {
-        let block_confirmations = block_confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS);
         let max_read_per_epoch = self.max_read_per_epoch;
         // Step 1:
         // Fetches the starting block and end block for historical sync
@@ -764,7 +762,7 @@ impl BlockRangeScannerClient {
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_live(
         &self,
-        block_confirmations: Option<u64>,
+        block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -833,7 +831,7 @@ impl BlockRangeScannerClient {
     pub async fn stream_from(
         &self,
         start_height: BlockNumberOrTag,
-        block_confirmations: Option<u64>,
+        block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -999,7 +997,8 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver = client.stream_live(None).await?.take(expected_blocks);
+        let mut receiver =
+            client.stream_live(DEFAULT_BLOCK_CONFIRMATIONS).await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
@@ -1033,7 +1032,7 @@ mod tests {
 
         let expected_blocks = 10;
         let mut receiver = client
-            .stream_from(BlockNumberOrTag::Latest, Some(block_confirmations))
+            .stream_from(BlockNumberOrTag::Latest, block_confirmations)
             .await?
             .take(expected_blocks);
 
@@ -1071,8 +1070,7 @@ mod tests {
 
         let expected_blocks = 10;
 
-        let mut receiver =
-            client.stream_live(Some(block_confirmations)).await?.take(expected_blocks);
+        let mut receiver = client.stream_live(block_confirmations).await?.take(expected_blocks);
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         let latest_head = provider.get_block_number().await?;
         provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
@@ -1108,7 +1106,7 @@ mod tests {
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live(Some(block_confirmations)).await?;
+        let mut receiver = client.stream_live(block_confirmations).await?;
 
         provider.anvil_mine(Option::Some(6), Option::None).await?;
 
@@ -1150,7 +1148,7 @@ mod tests {
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live(Some(block_confirmations)).await?;
+        let mut receiver = client.stream_live(block_confirmations).await?;
 
         provider.anvil_mine(Option::Some(10), Option::None).await?;
 
@@ -1194,7 +1192,7 @@ mod tests {
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live(Some(block_confirmations)).await?;
+        let mut receiver = client.stream_live(block_confirmations).await?;
 
         provider.anvil_mine(Option::Some(10), Option::None).await?;
 

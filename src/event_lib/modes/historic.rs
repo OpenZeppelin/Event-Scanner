@@ -9,30 +9,29 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::event_lib::{
     filter::EventFilter,
-    scanner::{ConnectedEventScanner, EventScannerError, EventScannerMessage},
+    scanner::{EventScannerError, EventScannerMessage, EventScannerService},
 };
 
 use super::{BaseConfig, BaseConfigBuilder};
 
-pub struct HistoricMode {
+pub struct HistoricModeConfig {
     base: BaseConfig,
     from_block: BlockNumberOrTag,
     to_block: BlockNumberOrTag,
 }
 
-pub struct ConnectedHistoricMode<N: Network> {
-    inner: ConnectedEventScanner<N>,
-    from_block: BlockNumberOrTag,
-    to_block: BlockNumberOrTag,
+pub struct HistoricModeScanner<N: Network> {
+    config: HistoricModeConfig,
+    inner: EventScannerService<N>,
 }
 
-impl BaseConfigBuilder for HistoricMode {
+impl BaseConfigBuilder for HistoricModeConfig {
     fn base_mut(&mut self) -> &mut BaseConfig {
         &mut self.base
     }
 }
 
-impl HistoricMode {
+impl HistoricModeConfig {
     pub(super) fn new() -> Self {
         Self {
             base: BaseConfig::new(),
@@ -54,41 +53,35 @@ impl HistoricMode {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> TransportResult<ConnectedHistoricMode<N>> {
-        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(ConnectedHistoricMode {
-            inner: ConnectedEventScanner::from_connected(brs),
-            from_block: self.from_block,
-            to_block: self.to_block,
-        })
+    ) -> TransportResult<HistoricModeScanner<N>> {
+        let HistoricModeConfig { base, from_block, to_block } = self;
+        let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        let mode = HistoricModeConfig { base, from_block, to_block };
+        Ok(HistoricModeScanner { config: mode, inner: EventScannerService::from_config(brs) })
     }
 
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
-    ) -> TransportResult<ConnectedHistoricMode<N>> {
-        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(ConnectedHistoricMode {
-            inner: ConnectedEventScanner::from_connected(brs),
-            from_block: self.from_block,
-            to_block: self.to_block,
-        })
+    ) -> TransportResult<HistoricModeScanner<N>> {
+        let HistoricModeConfig { base, from_block, to_block } = self;
+        let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        let mode = HistoricModeConfig { base, from_block, to_block };
+        Ok(HistoricModeScanner { config: mode, inner: EventScannerService::from_config(brs) })
     }
 
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> TransportResult<ConnectedHistoricMode<N>> {
-        let brs = self.base.block_range_scanner.connect_provider::<N>(provider)?;
-        Ok(ConnectedHistoricMode {
-            inner: ConnectedEventScanner::from_connected(brs),
-            from_block: self.from_block,
-            to_block: self.to_block,
-        })
+    ) -> TransportResult<HistoricModeScanner<N>> {
+        let HistoricModeConfig { base, from_block, to_block } = self;
+        let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
+        let mode = HistoricModeConfig { base, from_block, to_block };
+        Ok(HistoricModeScanner { config: mode, inner: EventScannerService::from_config(brs) })
     }
 }
 
-impl<N: Network> ConnectedHistoricMode<N> {
+impl<N: Network> HistoricModeScanner<N> {
     pub fn create_event_stream(
         &mut self,
         filter: EventFilter,
@@ -97,6 +90,6 @@ impl<N: Network> ConnectedHistoricMode<N> {
     }
 
     pub async fn stream(self) -> Result<(), EventScannerError> {
-        self.inner.stream_historical(self.from_block, self.to_block).await
+        self.inner.stream_historical(self.config.from_block, self.config.to_block).await
     }
 }

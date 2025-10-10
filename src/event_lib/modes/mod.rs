@@ -3,10 +3,10 @@ mod latest;
 mod subscribe;
 mod sync;
 
-pub use historic::{ConnectedHistoricMode, HistoricMode};
+pub use historic::{HistoricModeConfig, HistoricModeScanner};
 // pub use latest::{ConnectedLatestMode, LatestMode};
-pub use subscribe::{ConnectedSubscribeMode, SubscribeMode};
-pub use sync::{ConnectedSyncMode, SyncMode};
+pub use subscribe::{SubscribeModeConfig, SubscribeModeScanner};
+pub use sync::{SyncModeConfig, SyncModeScanner};
 
 use crate::{block_range_scanner::BlockRangeScanner, event_lib::EventFilter};
 
@@ -14,18 +14,18 @@ pub struct DummyEventScanner;
 
 impl DummyEventScanner {
     #[must_use]
-    pub fn historic() -> HistoricMode {
-        HistoricMode::new()
+    pub fn historic() -> HistoricModeConfig {
+        HistoricModeConfig::new()
     }
 
     #[must_use]
-    pub fn subscribe() -> SubscribeMode {
-        SubscribeMode::new()
+    pub fn subscribe() -> SubscribeModeConfig {
+        SubscribeModeConfig::new()
     }
 
     #[must_use]
-    pub fn sync() -> SyncMode {
-        SyncMode::new()
+    pub fn sync() -> SyncModeConfig {
+        SyncModeConfig::new()
     }
 
     // #[must_use]

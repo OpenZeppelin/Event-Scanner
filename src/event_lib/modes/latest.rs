@@ -8,7 +8,7 @@
 //
 // use crate::event_lib::{
 //     filter::EventFilter,
-//     scanner::{ConnectedEventScanner, EventScannerError, EventScannerMessage},
+//     scanner::{EventScannerError, EventScannerMessage, EventScannerService},
 // };
 //
 // use super::{BaseConfig, BaseConfigBuilder};
@@ -19,7 +19,8 @@
 // }
 //
 // pub struct ConnectedLatestMode<N: Network> {
-//     inner: ConnectedEventScanner<N>,
+//     mode: LatestMode,
+//     inner: EventScannerService<N>,
 // }
 //
 // impl BaseConfigBuilder for LatestMode {
@@ -37,24 +38,30 @@
 //         self,
 //         ws_url: Url,
 //     ) -> TransportResult<ConnectedLatestMode<N>> {
-//         let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-//         Ok(ConnectedLatestMode { inner: Client::from_connected(brs) })
+//         let LatestMode { base, count } = self;
+//         let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+//         let mode = LatestMode { base, count };
+//         Ok(ConnectedLatestMode { mode, inner: EventScannerService::from_connected(brs) })
 //     }
 //
 //     pub async fn connect_ipc<N: Network>(
 //         self,
 //         ipc_path: String,
 //     ) -> TransportResult<ConnectedLatestMode<N>> {
-//         let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-//         Ok(ConnectedLatestMode { inner: Client::from_connected(brs) })
+//         let LatestMode { base, count } = self;
+//         let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+//         let mode = LatestMode { base, count };
+//         Ok(ConnectedLatestMode { mode, inner: EventScannerService::from_connected(brs) })
 //     }
 //
 //     pub fn connect<N: Network>(
 //         self,
 //         provider: RootProvider<N>,
 //     ) -> TransportResult<ConnectedLatestMode<N>> {
-//         let brs = self.base.block_range_scanner.connect_provider::<N>(provider)?;
-//         Ok(ConnectedLatestMode { inner: Client::from_connected(brs) })
+//         let LatestMode { base, count } = self;
+//         let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
+//         let mode = LatestMode { base, count };
+//         Ok(ConnectedLatestMode { mode, inner: EventScannerService::from_connected(brs) })
 //     }
 // }
 //

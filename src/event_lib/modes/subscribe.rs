@@ -6,35 +6,35 @@ use alloy::{
 
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::event_lib::{
-    filter::EventFilter,
-    scanner::{ConnectedEventScanner, EventScannerError, EventScannerMessage},
+use crate::{
+    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
+    event_lib::{
+        filter::EventFilter,
+        scanner::{EventScannerError, EventScannerMessage, EventScannerService},
+    },
 };
 
 use super::{BaseConfig, BaseConfigBuilder};
 
-pub struct SubscribeMode {
+pub struct SubscribeModeConfig {
     base: BaseConfig,
     block_confirmations: u64,
 }
 
-pub struct ConnectedSubscribeMode<N: Network> {
-    inner: ConnectedEventScanner<N>,
-    block_confirmations: Option<u64>,
+pub struct SubscribeModeScanner<N: Network> {
+    mode: SubscribeModeConfig,
+    inner: EventScannerService<N>,
 }
 
-impl BaseConfigBuilder for SubscribeMode {
+impl BaseConfigBuilder for SubscribeModeConfig {
     fn base_mut(&mut self) -> &mut BaseConfig {
         &mut self.base
     }
 }
 
-impl SubscribeMode {
+impl SubscribeModeConfig {
     pub(super) fn new() -> Self {
-        Self {
-            base: BaseConfig::new(),
-            block_confirmations: crate::block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
-        }
+        Self { base: BaseConfig::new(), block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
     }
 
     pub fn block_confirmations(mut self, count: u64) -> Self {
@@ -45,38 +45,35 @@ impl SubscribeMode {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> TransportResult<ConnectedSubscribeMode<N>> {
-        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(ConnectedSubscribeMode {
-            inner: ConnectedEventScanner::from_connected(brs),
-            block_confirmations: Some(self.block_confirmations),
-        })
+    ) -> TransportResult<SubscribeModeScanner<N>> {
+        let SubscribeModeConfig { base, block_confirmations } = self;
+        let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        let mode = SubscribeModeConfig { base, block_confirmations };
+        Ok(SubscribeModeScanner { mode, inner: EventScannerService::from_config(brs) })
     }
 
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
-    ) -> TransportResult<ConnectedSubscribeMode<N>> {
-        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(ConnectedSubscribeMode {
-            inner: ConnectedEventScanner::from_connected(brs),
-            block_confirmations: Some(self.block_confirmations),
-        })
+    ) -> TransportResult<SubscribeModeScanner<N>> {
+        let SubscribeModeConfig { base, block_confirmations } = self;
+        let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        let mode = SubscribeModeConfig { base, block_confirmations };
+        Ok(SubscribeModeScanner { mode, inner: EventScannerService::from_config(brs) })
     }
 
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> TransportResult<ConnectedSubscribeMode<N>> {
-        let brs = self.base.block_range_scanner.connect_provider::<N>(provider)?;
-        Ok(ConnectedSubscribeMode {
-            inner: ConnectedEventScanner::from_connected(brs),
-            block_confirmations: Some(self.block_confirmations),
-        })
+    ) -> TransportResult<SubscribeModeScanner<N>> {
+        let SubscribeModeConfig { base, block_confirmations } = self;
+        let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
+        let mode = SubscribeModeConfig { base, block_confirmations };
+        Ok(SubscribeModeScanner { mode, inner: EventScannerService::from_config(brs) })
     }
 }
 
-impl<N: Network> ConnectedSubscribeMode<N> {
+impl<N: Network> SubscribeModeScanner<N> {
     pub fn create_event_stream(
         &mut self,
         filter: EventFilter,
@@ -85,6 +82,6 @@ impl<N: Network> ConnectedSubscribeMode<N> {
     }
 
     pub async fn stream(self) -> Result<(), EventScannerError> {
-        self.inner.stream_live(self.block_confirmations).await
+        self.inner.stream_live(self.mode.block_confirmations).await
     }
 }

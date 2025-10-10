@@ -71,9 +71,9 @@ impl EventScanner {
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
-    ) -> Result<ConnectedEventScanner<N>, EventScannerError> {
+    ) -> Result<EventScannerService<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
-        Ok(ConnectedEventScanner::from_connected(block_range_scanner))
+        Ok(EventScannerService::from_config(block_range_scanner))
     }
 
     /// Connects to the provider via IPC
@@ -84,9 +84,9 @@ impl EventScanner {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: impl Into<String>,
-    ) -> Result<ConnectedEventScanner<N>, EventScannerError> {
+    ) -> Result<EventScannerService<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path.into()).await?;
-        Ok(ConnectedEventScanner::from_connected(block_range_scanner))
+        Ok(EventScannerService::from_config(block_range_scanner))
     }
 
     /// Connects to an existing provider
@@ -97,19 +97,19 @@ impl EventScanner {
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> Result<ConnectedEventScanner<N>, EventScannerError> {
+    ) -> Result<EventScannerService<N>, EventScannerError> {
         let block_range_scanner = self.block_range_scanner.connect_provider(provider)?;
-        Ok(ConnectedEventScanner::from_connected(block_range_scanner))
+        Ok(EventScannerService::from_config(block_range_scanner))
     }
 }
 
-pub struct ConnectedEventScanner<N: Network> {
+pub struct EventScannerService<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     event_listeners: Vec<EventListener>,
 }
 
-impl<N: Network> ConnectedEventScanner<N> {
-    pub(crate) fn from_connected(block_range_scanner: ConnectedBlockRangeScanner<N>) -> Self {
+impl<N: Network> EventScannerService<N> {
+    pub(crate) fn from_config(block_range_scanner: ConnectedBlockRangeScanner<N>) -> Self {
         Self { block_range_scanner, event_listeners: Vec::new() }
     }
 
@@ -127,10 +127,7 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_live(
-        &self,
-        block_confirmations: Option<u64>,
-    ) -> Result<(), EventScannerError> {
+    pub async fn stream_live(&self, block_confirmations: u64) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_live(block_confirmations).await?;
 
@@ -165,7 +162,7 @@ impl<N: Network> ConnectedEventScanner<N> {
     pub async fn stream_from(
         &self,
         start_height: BlockNumberOrTag,
-        block_confirmations: Option<u64>,
+        block_confirmations: u64,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_from(start_height, block_confirmations).await?;
