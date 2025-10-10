@@ -16,7 +16,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
 
-    let anvil = spawn_anvil(0.1)?;
+    let anvil = spawn_anvil(1.0)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(Arc::new(provider.clone())).await?;
 
@@ -24,7 +24,10 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
         .with_contract_address(*contract.address())
         .with_event(TestCounter::CountIncreased::SIGNATURE);
 
+    provider.anvil_mine(Some(10), None).await?;
+
     let start_height = provider.get_block_number().await?.saturating_sub(5);
+
     let mut scanner = EventScanner::sync()
         .from_block(start_height)
         .block_confirmations(block_confirmations)
@@ -32,8 +35,6 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
         .await?;
 
     let mut stream = scanner.create_event_stream(filter);
-
-    provider.anvil_mine(Some(10), None).await?;
 
     tokio::spawn(async move { scanner.stream().await });
 
