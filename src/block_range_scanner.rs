@@ -432,28 +432,25 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
-        let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError(format!(
-                "Start block {start_height:?} not found"
-            )),
-        )?;
-        let end_block = self.provider.get_block_by_number(end_height).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError(format!(
-                "End block {end_height:?} not found"
-            )),
-        )?;
+        let (start_block, end_block) = tokio::join!(
+            self.provider.get_block_by_number(start_height),
+            self.provider.get_block_by_number(end_height)
+        );
 
-        if end_block.header().number() < start_block.header().number() {
+        let start_block =
+            start_block?.ok_or(BlockRangeScannerError::BlockNotFound(start_height))?;
+        let end_block = end_block?.ok_or(BlockRangeScannerError::BlockNotFound(end_height))?;
+
+        let start_block_num = start_block.header().number();
+        let end_block_num = end_block.header().number();
+
+        if end_block_num < start_block_num {
             return Err(BlockRangeScannerError::HistoricalSyncError(format!(
                 "End block {end_height:?} is lower than start block {start_height:?}"
             )));
         }
 
-        info!(
-            start_block = start_block.header().number(),
-            end_block = end_block.header().number(),
-            "Syncing historical data"
-        );
+        info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
         self.sync_historical_data(start_block, end_block).await?;
 
