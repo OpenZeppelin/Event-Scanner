@@ -226,6 +226,11 @@ impl<N: Network> ConnectedEventScanner<N> {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
                             let logs = Self::get_logs(range, &filter, &log_filter, &provider).await;
+                            if let Ok(logs) = &logs
+                                && logs.is_empty()
+                            {
+                                continue;
+                            }
                             if let Err(send_err) = sender.send(logs.into()).await {
                                 warn!(error = %send_err, "Downstream channel closed, stopping stream");
                                 break;
@@ -269,6 +274,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                         Ok(BlockRangeMessage::Data(range)) => {
                             match Self::get_logs(range, &filter, &log_filter, &provider).await {
                                 Ok(logs) => {
+                                    if logs.is_empty() {
+                                        continue;
+                                    }
                                     // SAFETY: events.len() <= count
                                     let take = count - events.len();
                                     let logs_rev = logs.into_iter().rev().take(take);

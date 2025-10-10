@@ -7,7 +7,7 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
     Status(ScannerStatus),
 }
 
-#[derive(Copy, Debug, Clone)]
+#[derive(Copy, Debug, Clone, PartialEq)]
 pub enum ScannerStatus {
     ChainTipReached,
     ReorgDetected,
