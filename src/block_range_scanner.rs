@@ -852,9 +852,21 @@ impl<N: Network> Service<N> {
             match Self::get_block_subscription(&provider).await {
                 Ok(sub) => {
                     let mut stream = sub.into_stream();
-                    while let Some(h) = stream.next().await {
-                        println!("h {}", h.number());
-                        if live_block_num_sender.send(h.number()).await.is_err() {
+                    let mut last_seen: Option<BlockNumber> = None;
+
+                    while let Some(incoming_block) = stream.next().await {
+                        let incoming_block_num = incoming_block.number();
+                        // Emit only non-increasing heads at/below end_num (reorg signals)
+                        let emit = match last_seen {
+                            Some(prev) => {
+                                incoming_block_num <= prev && incoming_block_num <= end_num
+                            }
+                            None => false,
+                        };
+
+                        last_seen = Some(incoming_block_num);
+
+                        if emit && live_block_num_sender.send(incoming_block_num).await.is_err() {
                             warn!("Downstream channel closed, stopping live header monitor");
                             break;
                         }
@@ -876,21 +888,19 @@ impl<N: Network> Service<N> {
         mut rx: mpsc::Receiver<BlockNumber>,
         end_num: BlockNumber,
     ) {
-        let Ok(mut min_live_block) = rx.try_recv() else {
+        let Ok(first) = rx.try_recv() else {
             return;
         };
 
-        while let Ok(live_block) = rx.try_recv() {
-            if live_block < min_live_block {
-                min_live_block = live_block;
+        // Live monitor forwards only non-increasing heads at/below end_num (reorg signals).
+        // Determine earliest affected block and re-emit [reorg_start..=end_num].
+        let mut reorg_start = first;
+        while let Ok(reorged_blocks) = rx.try_recv() {
+            if reorged_blocks < reorg_start {
+                reorg_start = reorged_blocks;
             }
         }
 
-        if min_live_block >= end_num {
-            return;
-        }
-
-        let reorg_start = min_live_block;
         let max_read = self.config.blocks_read_per_epoch as u64;
 
         self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected)).await;
