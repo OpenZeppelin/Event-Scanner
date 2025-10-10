@@ -40,6 +40,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
+    // historical events
     assert_next_logs!(
         stream,
         &[
@@ -48,7 +49,11 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
+
+    // chain tip reached
     assert_next_status!(stream, ScannerStatus::ChainTipReached);
+
+    // live events
     assert_next_logs!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) },]);
     assert_next_logs!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) },]);
 

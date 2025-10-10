@@ -134,7 +134,7 @@ pub enum BlockRangeScannerError {
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
 
-    #[error("Block {0} not found")]
+    #[error("Block not found, block number: {0}")]
     BlockNotFound(BlockNumberOrTag),
 }
 
@@ -327,7 +327,7 @@ struct Service<N: Network> {
     config: Config,
     provider: RootProvider<N>,
     subscriber: Option<mpsc::Sender<BlockRangeMessage>>,
-    current: BlockHashAndNumber,
+    next_start_block: BlockHashAndNumber,
     websocket_connected: bool,
     processed_count: u64,
     error_count: u64,
@@ -343,7 +343,7 @@ impl<N: Network> Service<N> {
             config,
             provider,
             subscriber: None,
-            current: BlockHashAndNumber::default(),
+            next_start_block: BlockHashAndNumber::default(),
             websocket_connected: false,
             processed_count: 0,
             error_count: 0,
@@ -644,32 +644,47 @@ impl<N: Network> Service<N> {
     ) -> Result<(), BlockRangeScannerError> {
         let mut batch_count = 0;
 
-        self.current = BlockHashAndNumber::from_header::<N>(start.header());
+        self.next_start_block = BlockHashAndNumber::from_header::<N>(start.header());
 
-        while self.current.number < end.header().number() {
+        // must be <= to include the edge case when start == end (i.e. return the single block
+        // range)
+        while self.next_start_block.number <= end.header().number() {
             self.ensure_current_not_reorged().await?;
 
-            let batch_to = self
-                .current
+            let batch_end_block_number = self
+                .next_start_block
                 .number
-                .saturating_add(self.config.blocks_read_per_epoch as u64)
+                .saturating_add(self.config.blocks_read_per_epoch as u64 - 1)
                 .min(end.header().number());
 
-            // safe unwrap since we've checked end block exists
-            let batch_end_block = self
-                .provider
-                .get_block_by_number(batch_to.into())
-                .await?
-                .expect("end of the batch should already be ensured to exist");
-
-            self.send_to_subscriber(BlockRangeMessage::Data(self.current.number..=batch_to)).await;
-
-            self.current = BlockHashAndNumber::from_header::<N>(batch_end_block.header());
+            self.send_to_subscriber(BlockRangeMessage::Data(
+                self.next_start_block.number..=batch_end_block_number,
+            ))
+            .await;
 
             batch_count += 1;
             if batch_count % 10 == 0 {
                 debug!(batch_count = batch_count, "Processed historical batches");
             }
+
+            if batch_end_block_number == end.header().number() {
+                break;
+            }
+
+            let next_start_block_number = (batch_end_block_number + 1).into();
+            let next_start_block =
+                match self.provider.get_block_by_number(next_start_block_number).await {
+                    Ok(block) => {
+                        block.expect("block number is less than 'end', so it should exist")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to get block by number");
+                        let e: BlockRangeScannerError = e.into();
+                        self.send_to_subscriber(BlockRangeMessage::Error(e.clone())).await;
+                        return Err(e);
+                    }
+                };
+            self.next_start_block = BlockHashAndNumber::from_header::<N>(next_start_block.header());
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
@@ -785,7 +800,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn ensure_current_not_reorged(&mut self) -> Result<(), BlockRangeScannerError> {
-        let current_block = self.provider.get_block_by_hash(self.current.hash).await?;
+        let current_block = self.provider.get_block_by_hash(self.next_start_block.hash).await?;
         if current_block.is_some() {
             return Ok(());
         }
@@ -795,7 +810,7 @@ impl<N: Network> Service<N> {
 
     async fn rewind_on_reorg_detected(&mut self) -> Result<(), BlockRangeScannerError> {
         let mut new_current_height =
-            self.current.number.saturating_sub(self.config.reorg_rewind_depth);
+            self.next_start_block.number.saturating_sub(self.config.reorg_rewind_depth);
 
         let head = self.provider.get_block_number().await?;
         if head < new_current_height {
@@ -812,12 +827,12 @@ impl<N: Network> Service<N> {
             )))?;
 
         info!(
-            old_current = self.current.number,
+            old_current = self.next_start_block.number,
             new_current = current.number,
             "Rewind on reorg detected"
         );
 
-        self.current = current;
+        self.next_start_block = current;
 
         Ok(())
     }
@@ -908,18 +923,18 @@ impl BlockRangeScannerClient {
     /// # Errors
     ///
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_historical(
+    pub async fn stream_historical<N: Into<BlockNumberOrTag>>(
         &self,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        start_height: N,
+        end_height: N,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamHistorical {
             sender: blocks_sender,
-            start_height,
-            end_height,
+            start_height: start_height.into(),
+            end_height: end_height.into(),
             response: response_tx,
         };
 
@@ -944,13 +959,16 @@ impl BlockRangeScannerClient {
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_from(
         &self,
-        start_height: BlockNumberOrTag,
+        start_height: impl Into<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command =
-            Command::StreamFrom { sender: blocks_sender, start_height, response: response_tx };
+        let command = Command::StreamFrom {
+            sender: blocks_sender,
+            start_height: start_height.into(),
+            response: response_tx,
+        };
 
         self.command_sender
             .send(command)
@@ -1462,7 +1480,8 @@ mod tests {
         let original_height = 10;
         let original_hash = keccak256(b"original block");
         let original_block = mock_block(original_height, original_hash);
-        service.current = BlockHashAndNumber::from_header::<Ethereum>(original_block.header());
+        service.next_start_block =
+            BlockHashAndNumber::from_header::<Ethereum>(original_block.header());
 
         let expected_rewind_height = original_height - config.reorg_rewind_depth;
         let expected_rewind_hash = keccak256(b"rewound block");
@@ -1478,9 +1497,65 @@ mod tests {
 
         service.ensure_current_not_reorged().await?;
 
-        let current = service.current;
+        let current = service.next_start_block;
         assert_eq!(current.number, expected_rewind_height, "should rewind by reorg_rewind_depth");
         assert_eq!(current.hash, expected_rewind_hash, "should use hash of block at rewind height");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(100), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        // ranges where each batch is of max blocks per epoch size
+        let mut stream = client.stream_historical(0, 19).await?;
+        assert_next!(stream, 0..=4);
+        assert_next!(stream, 5..=9);
+        assert_next!(stream, 10..=14);
+        assert_next!(stream, 15..=19);
+        assert_next!(stream, None);
+
+        // ranges where last batch is smaller than blocks per epoch
+        let mut stream = client.stream_historical(93, 99).await?;
+        assert_next!(stream, 93..=97);
+        assert_next!(stream, 98..=99);
+        assert_next!(stream, None);
+
+        // range where blocks per epoch is larger than the number of blocks in the range
+        let mut stream = client.stream_historical(3, 5).await?;
+        assert_next!(stream, 3..=5);
+        assert_next!(stream, None);
+
+        // single item range
+        let mut stream = client.stream_historical(3, 3).await?;
+        assert_next!(stream, 3..=3);
+        assert_next!(stream, None);
+
+        // range where blocks per epoch is larger than the number of blocks on chain
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(200)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.stream_historical(0, 20).await?;
+        assert_next!(stream, 0..=20);
+        assert_next!(stream, None);
+
+        let mut stream = client.stream_historical(0, 99).await?;
+        assert_next!(stream, 0..=99);
+        assert_next!(stream, None);
 
         Ok(())
     }
