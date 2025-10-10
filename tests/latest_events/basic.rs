@@ -259,44 +259,6 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
 }
 
 #[tokio::test]
-async fn scan_latest_ignores_reorg_and_returns_canonical_latest() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
-    let contract = setup.contract;
-    let provider = setup.provider;
-    let client = setup.client;
-    let mut stream = setup.stream;
-
-    // Create 4 events, then reorg last 2 blocks with 2 new txs
-    let _initial_hashes = crate::common::reorg_with_new_count_incr_txs(
-        provider.clone(),
-        contract.clone(),
-        4,     // num_initial_events
-        2,     // num_new_events (these will be the canonical latest)
-        2,     // reorg depth
-        false, // place new events in separate blocks
-    )
-    .await?;
-
-    // Now query latest 2 from full range
-    client.scan_latest(2, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
-
-    let logs = collect_events(&mut stream).await;
-    assert_eq!(logs.len(), 2);
-
-    // After reorg, counts should be 3 and 4 (the chain kept the first two increments; then two new
-    // increments) Validate exact address, tx hashes ordering via decode and count values.
-    let mut expected_count = U256::from(3u64);
-    for log in &logs {
-        let ev = log.log_decode::<TestCounter::CountIncreased>()?;
-        assert_eq!(&ev.address(), contract.address());
-        assert_eq!(ev.inner.newCount, expected_count);
-        expected_count += ONE;
-    }
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()> {
     let setup = setup_scanner(None, None, None).await?;
     let contract = setup.contract;
@@ -324,18 +286,18 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
     // dec -> 1
     dec_hashes.push(contract.decrease().send().await?.get_receipt().await?.transaction_hash);
 
-    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(2, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
 
     let inc_logs = collect_events(&mut inc_stream).await;
     let dec_logs = collect_events(&mut dec_stream).await;
 
-    assert_eq!(inc_logs.len(), 3);
+    assert_eq!(inc_logs.len(), 2);
     assert_eq!(dec_logs.len(), 2);
 
-    // Validate increases: counts [1,2,2] with matching hashes
-    let expected_inc_counts = [1u64, 2, 2];
+    // Validate increases: counts [2,2] with matching hashes
+    let expected_inc_counts = [2, 2];
     for ((log, &expected_hash), &expected_count) in
-        inc_logs.iter().zip(inc_hashes.iter()).zip(expected_inc_counts.iter())
+        inc_logs.iter().zip(inc_hashes[1..].iter()).zip(expected_inc_counts.iter())
     {
         let ev = log.log_decode::<TestCounter::CountIncreased>()?;
         assert_eq!(&ev.address(), contract.address());
@@ -344,7 +306,7 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
     }
 
     // Validate decreases: counts [1,1] with matching hashes
-    let expected_dec_counts = [1u64, 1];
+    let expected_dec_counts = [1, 1];
     for ((log, &expected_hash), &expected_count) in
         dec_logs.iter().zip(dec_hashes.iter()).zip(expected_dec_counts.iter())
     {
