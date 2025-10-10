@@ -1,11 +1,11 @@
 mod historic;
 mod latest;
-mod subscribe;
+mod live;
 mod sync;
 
 pub use historic::{HistoricModeConfig, HistoricModeScanner};
 // pub use latest::{ConnectedLatestMode, LatestMode};
-pub use subscribe::{SubscribeModeConfig, SubscribeModeScanner};
+pub use live::{LiveModeConfig, LiveModeScanner};
 pub use sync::{SyncModeConfig, SyncModeScanner};
 
 use crate::{block_range_scanner::BlockRangeScanner, event_lib::EventFilter};
@@ -19,8 +19,8 @@ impl EventScanner {
     }
 
     #[must_use]
-    pub fn subscribe() -> SubscribeModeConfig {
-        SubscribeModeConfig::new()
+    pub fn subscribe() -> LiveModeConfig {
+        LiveModeConfig::new()
     }
 
     #[must_use]

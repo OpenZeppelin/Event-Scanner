@@ -4,8 +4,9 @@ pub mod modes;
 pub mod scanner;
 
 pub use filter::EventFilter;
+pub use listener::EventListener;
 pub use modes::{
-    HistoricModeConfig, HistoricModeScanner, SubscribeModeConfig, SubscribeModeScanner,
+    EventScanner, HistoricModeConfig, HistoricModeScanner, LiveModeConfig, LiveModeScanner,
     SyncModeConfig, SyncModeScanner,
 };
 pub use scanner::{EventScannerError, EventScannerMessage, EventScannerService};
