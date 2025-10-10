@@ -45,7 +45,7 @@ where
 {
     pub provider: RootProvider,
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
-    pub client: LiveModeScanner<Ethereum>,
+    pub scanner: LiveModeScanner<Ethereum>,
     pub stream: ReceiverStream<EventScannerMessage>,
     pub anvil: AnvilInstance,
 }
@@ -74,7 +74,7 @@ pub async fn setup_live_scanner(
     let stream = client.create_event_stream(filter);
 
     // return anvil otherwise it doesnt live long enough...
-    Ok(LiveScannerSetup { provider, contract, client, stream, anvil })
+    Ok(LiveScannerSetup { provider, contract, scanner: client, stream, anvil })
 }
 
 #[allow(clippy::missing_errors_doc)]
