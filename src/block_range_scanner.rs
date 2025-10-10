@@ -1559,7 +1559,7 @@ mod tests {
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
         let roerg = async {
-            sleep(Duration::from_millis(100)).await;
+            sleep(Duration::from_secs(1)).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
             let head_now = provider.get_block_number().await.unwrap();
             let reorg_start = end_num - 5;
@@ -1618,8 +1618,6 @@ mod tests {
         let head_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?;
         let end_num = head_block.unwrap().header().number();
 
-        println!("END NUM {end_num}");
-
         let client = BlockRangeScanner::new()
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
@@ -1631,14 +1629,11 @@ mod tests {
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
         let roerg = async {
-            sleep(Duration::from_millis(100)).await;
+            sleep(Duration::from_secs(1)).await;
             let pre_reorg_mine = 20;
             let _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
-            let head_now = provider.get_block_number().await.unwrap();
             // Reorg back to previous head aka our end num
             let depth = pre_reorg_mine + 1;
-            println!("HEAD {head_now}");
-            println!("DEPTH {depth}");
             let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
 
