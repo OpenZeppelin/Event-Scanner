@@ -310,7 +310,7 @@ struct Service<N: Network> {
     config: Config,
     provider: RootProvider<N>,
     subscriber: Option<mpsc::Sender<BlockRangeMessage>>,
-    next_start_block: u64,
+    next_start_block: BlockNumber,
     websocket_connected: bool,
     processed_count: u64,
     error_count: u64,
@@ -553,8 +553,8 @@ impl<N: Network> Service<N> {
 
     async fn sync_historical_data(
         &mut self,
-        start: u64,
-        end: u64,
+        start: BlockNumber,
+        end: BlockNumber,
     ) -> Result<(), BlockRangeScannerError> {
         let mut batch_count = 0;
 
