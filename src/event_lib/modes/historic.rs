@@ -8,8 +8,8 @@ use alloy::{
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::event_lib::{
-    filter::EventFilter,
     EventScannerError,
+    filter::EventFilter,
     scanner::{EventScannerMessage, EventScannerService},
 };
 
@@ -162,4 +162,3 @@ mod tests {
         assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
     }
 }
-

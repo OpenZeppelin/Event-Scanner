@@ -10,8 +10,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
     event_lib::{
-        filter::EventFilter,
         EventScannerError,
+        filter::EventFilter,
         scanner::{EventScannerMessage, EventScannerService},
     },
 };
@@ -268,4 +268,3 @@ mod tests {
         assert!(!config_without_live.switch_to_live);
     }
 }
-
