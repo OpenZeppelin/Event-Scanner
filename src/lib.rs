@@ -6,6 +6,6 @@ pub use types::{ScannerMessage, ScannerStatus};
 
 pub use event_lib::{
     EventFilter, EventListener, EventScanner, EventScannerError, EventScannerMessage,
-    EventScannerService, HistoricModeConfig, HistoricModeScanner, LiveModeConfig,
-    LiveModeScanner, SyncModeConfig, SyncModeScanner,
+    EventScannerService, HistoricEventScanner, HistoricScannerConfig, LiveEventScanner,
+    LiveScannerConfig, SyncEventScanner, SyncScannerConfig,
 };

@@ -10,7 +10,7 @@ use alloy::{
     sol_types::SolEvent,
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage, LiveModeScanner};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage, LiveEventScanner};
 use tokio_stream::wrappers::ReceiverStream;
 // Shared test contract used across integration tests
 sol! {
@@ -45,7 +45,7 @@ where
 {
     pub provider: RootProvider,
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
-    pub scanner: LiveModeScanner<Ethereum>,
+    pub scanner: LiveEventScanner<Ethereum>,
     pub stream: ReceiverStream<EventScannerMessage>,
     pub anvil: AnvilInstance,
 }

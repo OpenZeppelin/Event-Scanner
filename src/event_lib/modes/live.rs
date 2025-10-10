@@ -16,23 +16,23 @@ use crate::{
 
 use super::{BaseConfig, BaseConfigBuilder};
 
-pub struct LiveModeConfig {
+pub struct LiveScannerConfig {
     base: BaseConfig,
     block_confirmations: u64,
 }
 
-pub struct LiveModeScanner<N: Network> {
-    mode: LiveModeConfig,
+pub struct LiveEventScanner<N: Network> {
+    config: LiveScannerConfig,
     inner: EventScannerService<N>,
 }
 
-impl BaseConfigBuilder for LiveModeConfig {
+impl BaseConfigBuilder for LiveScannerConfig {
     fn base_mut(&mut self) -> &mut BaseConfig {
         &mut self.base
     }
 }
 
-impl LiveModeConfig {
+impl LiveScannerConfig {
     pub(super) fn new() -> Self {
         Self { base: BaseConfig::new(), block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
     }
@@ -48,11 +48,11 @@ impl LiveModeConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<LiveModeScanner<N>> {
-        let LiveModeConfig { base, block_confirmations } = self;
+    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<LiveEventScanner<N>> {
+        let LiveScannerConfig { base, block_confirmations } = self;
         let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        let mode = LiveModeConfig { base, block_confirmations };
-        Ok(LiveModeScanner { mode, inner: EventScannerService::from_config(brs) })
+        let config = LiveScannerConfig { base, block_confirmations };
+        Ok(LiveEventScanner { config, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to the provider via IPC
@@ -63,11 +63,11 @@ impl LiveModeConfig {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
-    ) -> TransportResult<LiveModeScanner<N>> {
-        let LiveModeConfig { base, block_confirmations } = self;
+    ) -> TransportResult<LiveEventScanner<N>> {
+        let LiveScannerConfig { base, block_confirmations } = self;
         let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        let mode = LiveModeConfig { base, block_confirmations };
-        Ok(LiveModeScanner { mode, inner: EventScannerService::from_config(brs) })
+        let config = LiveScannerConfig { base, block_confirmations };
+        Ok(LiveEventScanner { config, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to an existing provider
@@ -78,15 +78,15 @@ impl LiveModeConfig {
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> TransportResult<LiveModeScanner<N>> {
-        let LiveModeConfig { base, block_confirmations } = self;
+    ) -> TransportResult<LiveEventScanner<N>> {
+        let LiveScannerConfig { base, block_confirmations } = self;
         let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
-        let mode = LiveModeConfig { base, block_confirmations };
-        Ok(LiveModeScanner { mode, inner: EventScannerService::from_config(brs) })
+        let config = LiveScannerConfig { base, block_confirmations };
+        Ok(LiveEventScanner { config, inner: EventScannerService::from_config(brs) })
     }
 }
 
-impl<N: Network> LiveModeScanner<N> {
+impl<N: Network> LiveEventScanner<N> {
     pub fn create_event_stream(
         &mut self,
         filter: EventFilter,
@@ -100,6 +100,6 @@ impl<N: Network> LiveModeScanner<N> {
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream(self) -> Result<(), EventScannerError> {
-        self.inner.stream_live(self.mode.block_confirmations).await
+        self.inner.stream_live(self.config.block_confirmations).await
     }
 }

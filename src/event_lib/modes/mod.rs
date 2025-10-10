@@ -3,10 +3,10 @@ mod latest;
 mod live;
 mod sync;
 
-pub use historic::{HistoricModeConfig, HistoricModeScanner};
-// pub use latest::{ConnectedLatestMode, LatestMode};
-pub use live::{LiveModeConfig, LiveModeScanner};
-pub use sync::{SyncModeConfig, SyncModeScanner};
+pub use historic::{HistoricEventScanner, HistoricScannerConfig};
+pub use latest::{LatestEventScanner, LatestScannerConfig};
+pub use live::{LiveEventScanner, LiveScannerConfig};
+pub use sync::{SyncEventScanner, SyncScannerConfig};
 
 use crate::block_range_scanner::BlockRangeScanner;
 
@@ -14,24 +14,24 @@ pub struct EventScanner;
 
 impl EventScanner {
     #[must_use]
-    pub fn historic() -> HistoricModeConfig {
-        HistoricModeConfig::new()
+    pub fn historic() -> HistoricScannerConfig {
+        HistoricScannerConfig::new()
     }
 
     #[must_use]
-    pub fn live() -> LiveModeConfig {
-        LiveModeConfig::new()
+    pub fn live() -> LiveScannerConfig {
+        LiveScannerConfig::new()
     }
 
     #[must_use]
-    pub fn sync() -> SyncModeConfig {
-        SyncModeConfig::new()
+    pub fn sync() -> SyncScannerConfig {
+        SyncScannerConfig::new()
     }
 
-    // #[must_use]
-    // pub fn latest() -> LatestMode {
-    //     LatestMode::new()
-    // }
+    #[must_use]
+    pub fn latest() -> LatestScannerConfig {
+        LatestScannerConfig::new()
+    }
 }
 
 #[derive(Clone)]

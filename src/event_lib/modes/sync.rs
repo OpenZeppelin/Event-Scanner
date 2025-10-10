@@ -17,24 +17,26 @@ use crate::{
 
 use super::{BaseConfig, BaseConfigBuilder};
 
-pub struct SyncModeConfig {
+pub struct SyncScannerConfig {
     base: BaseConfig,
+    // Defaults to Earliest
     from_block: BlockNumberOrTag,
+    // Defaults to 0
     block_confirmations: u64,
 }
 
-pub struct SyncModeScanner<N: Network> {
-    mode: SyncModeConfig,
+pub struct SyncEventScanner<N: Network> {
+    config: SyncScannerConfig,
     inner: EventScannerService<N>,
 }
 
-impl BaseConfigBuilder for SyncModeConfig {
+impl BaseConfigBuilder for SyncScannerConfig {
     fn base_mut(&mut self) -> &mut BaseConfig {
         &mut self.base
     }
 }
 
-impl SyncModeConfig {
+impl SyncScannerConfig {
     pub(super) fn new() -> Self {
         Self {
             base: BaseConfig::new(),
@@ -60,11 +62,11 @@ impl SyncModeConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<SyncModeScanner<N>> {
-        let SyncModeConfig { base, from_block, block_confirmations } = self;
+    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
+        let SyncScannerConfig { base, from_block, block_confirmations } = self;
         let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        let mode = SyncModeConfig { base, from_block, block_confirmations };
-        Ok(SyncModeScanner { mode, inner: EventScannerService::from_config(brs) })
+        let config = SyncScannerConfig { base, from_block, block_confirmations };
+        Ok(SyncEventScanner { config, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to the provider via IPC
@@ -75,11 +77,11 @@ impl SyncModeConfig {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
-    ) -> TransportResult<SyncModeScanner<N>> {
-        let SyncModeConfig { base, from_block, block_confirmations } = self;
+    ) -> TransportResult<SyncEventScanner<N>> {
+        let SyncScannerConfig { base, from_block, block_confirmations } = self;
         let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        let mode = SyncModeConfig { base, from_block, block_confirmations };
-        Ok(SyncModeScanner { mode, inner: EventScannerService::from_config(brs) })
+        let config = SyncScannerConfig { base, from_block, block_confirmations };
+        Ok(SyncEventScanner { config, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to an existing provider
@@ -90,15 +92,15 @@ impl SyncModeConfig {
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> TransportResult<SyncModeScanner<N>> {
-        let SyncModeConfig { base, from_block, block_confirmations } = self;
+    ) -> TransportResult<SyncEventScanner<N>> {
+        let SyncScannerConfig { base, from_block, block_confirmations } = self;
         let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
-        let mode = SyncModeConfig { base, from_block, block_confirmations };
-        Ok(SyncModeScanner { mode, inner: EventScannerService::from_config(brs) })
+        let config = SyncScannerConfig { base, from_block, block_confirmations };
+        Ok(SyncEventScanner { config, inner: EventScannerService::from_config(brs) })
     }
 }
 
-impl<N: Network> SyncModeScanner<N> {
+impl<N: Network> SyncEventScanner<N> {
     pub fn create_event_stream(
         &mut self,
         filter: EventFilter,
@@ -112,6 +114,6 @@ impl<N: Network> SyncModeScanner<N> {
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream(self) -> Result<(), EventScannerError> {
-        self.inner.stream_from(self.mode.from_block, self.mode.block_confirmations).await
+        self.inner.stream_from(self.config.from_block, self.config.block_confirmations).await
     }
 }
