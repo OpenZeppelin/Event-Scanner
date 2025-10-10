@@ -20,7 +20,6 @@
 //!     // Configuration
 //!     let block_range_scanner = BlockRangeScanner::new()
 //!         .with_blocks_read_per_epoch(1000)
-//!         .with_reorg_rewind_depth(5)
 //!         .with_block_confirmations(5)
 //!         .connect_ws::<Ethereum>(Url::parse("ws://localhost:8546").unwrap())
 //!         .await?;
@@ -96,8 +95,6 @@ pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 // const BACK_OFF_MAX_RETRIES: u64 = 5;
 
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
-
-pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 0;
 
 // // State sync aware retry settings
 // const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -186,18 +183,11 @@ pub enum Command {
 #[derive(Clone)]
 struct Config {
     blocks_read_per_epoch: usize,
-    #[allow(dead_code, reason = "Will be removed")]
-    reorg_rewind_depth: u64,
-    #[allow(
-        dead_code,
-        reason = "Will be used in reorg mechanism: https://github.com/OpenZeppelin/Event-Scanner/issues/5"
-    )]
     block_confirmations: u64,
 }
 
 pub struct BlockRangeScanner {
     blocks_read_per_epoch: usize,
-    reorg_rewind_depth: u64,
     block_confirmations: u64,
 }
 
@@ -212,7 +202,6 @@ impl BlockRangeScanner {
     pub fn new() -> Self {
         Self {
             blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
-            reorg_rewind_depth: DEFAULT_REORG_REWIND_DEPTH,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
         }
     }
@@ -220,12 +209,6 @@ impl BlockRangeScanner {
     #[must_use]
     pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
         self.blocks_read_per_epoch = blocks_read_per_epoch;
-        self
-    }
-
-    #[must_use]
-    pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
-        self.reorg_rewind_depth = reorg_rewind_depth;
         self
     }
 
@@ -275,7 +258,6 @@ impl BlockRangeScanner {
             provider,
             config: Config {
                 blocks_read_per_epoch: self.blocks_read_per_epoch,
-                reorg_rewind_depth: self.reorg_rewind_depth,
                 block_confirmations: self.block_confirmations,
             },
         })
@@ -1064,7 +1046,7 @@ mod tests {
     }
 
     fn test_config() -> Config {
-        Config { blocks_read_per_epoch: 5, reorg_rewind_depth: 5, block_confirmations: 0 }
+        Config { blocks_read_per_epoch: 5, block_confirmations: 0 }
     }
 
     fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
@@ -1076,19 +1058,16 @@ mod tests {
         let scanner = BlockRangeScanner::new();
 
         assert_eq!(scanner.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
-        assert_eq!(scanner.reorg_rewind_depth, DEFAULT_REORG_REWIND_DEPTH);
         assert_eq!(scanner.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
     #[test]
     fn builder_methods_update_configuration() {
         let blocks_read_per_epoch = 42;
-        let reorg_rewind_depth = 12;
         let block_confirmations = 7;
 
         let scanner = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(blocks_read_per_epoch)
-            .with_reorg_rewind_depth(reorg_rewind_depth)
             .with_block_confirmations(block_confirmations);
 
         assert_eq!(scanner.blocks_read_per_epoch, blocks_read_per_epoch);
