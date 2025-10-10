@@ -1075,7 +1075,7 @@ mod tests {
         }
     }
 
-    macro_rules! assert_next_range {
+    macro_rules! assert_next {
         ($recv:expr, None) => {
             let next = $recv.next_range().await;
             assert!(next.is_none());
@@ -1668,8 +1668,8 @@ mod tests {
         service.stream_rewind(100..=150).await;
         service.handle_unsubscribe();
 
-        assert_next_range!(rx, 100..=150);
-        assert_next_range!(rx, None);
+        assert_next!(rx, 100..=150);
+        assert_next!(rx, None);
 
         Ok(())
     }
@@ -1691,10 +1691,10 @@ mod tests {
         service.stream_rewind(0..=14).await;
         service.handle_unsubscribe();
 
-        assert_next_range!(rx, 10..=14);
-        assert_next_range!(rx, 5..=9);
-        assert_next_range!(rx, 0..=4);
-        assert_next_range!(rx, None);
+        assert_next!(rx, 10..=14);
+        assert_next!(rx, 5..=9);
+        assert_next!(rx, 0..=4);
+        assert_next!(rx, None);
 
         Ok(())
     }
@@ -1715,10 +1715,10 @@ mod tests {
         service.stream_rewind(3..=12).await;
         service.handle_unsubscribe();
 
-        assert_next_range!(rx, 9..=12);
-        assert_next_range!(rx, 5..=8);
-        assert_next_range!(rx, 3..=4);
-        assert_next_range!(rx, None);
+        assert_next!(rx, 9..=12);
+        assert_next!(rx, 5..=8);
+        assert_next!(rx, 3..=4);
+        assert_next!(rx, None);
 
         Ok(())
     }
@@ -1738,8 +1738,8 @@ mod tests {
         service.stream_rewind(7..=7).await;
         service.handle_unsubscribe();
 
-        assert_next_range!(rx, 7..=7);
-        assert_next_range!(rx, None);
+        assert_next!(rx, 7..=7);
+        assert_next!(rx, None);
 
         Ok(())
     }
@@ -1760,11 +1760,11 @@ mod tests {
         service.stream_rewind(5..=8).await;
         service.handle_unsubscribe();
 
-        assert_next_range!(rx, 8..=8);
-        assert_next_range!(rx, 7..=7);
-        assert_next_range!(rx, 6..=6);
-        assert_next_range!(rx, 5..=5);
-        assert_next_range!(rx, None);
+        assert_next!(rx, 8..=8);
+        assert_next!(rx, 7..=7);
+        assert_next!(rx, 6..=6);
+        assert_next!(rx, 5..=5);
+        assert_next!(rx, None);
 
         Ok(())
     }
@@ -1787,10 +1787,10 @@ mod tests {
             .rewind::<BlockNumberOrTag>(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
             .await?;
 
-        assert_next_range!(stream, 14..=20);
-        assert_next_range!(stream, 7..=13);
-        assert_next_range!(stream, 0..=6);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 14..=20);
+        assert_next!(stream, 7..=13);
+        assert_next!(stream, 0..=6);
+        assert_next!(stream, None);
 
         Ok(())
     }
@@ -1811,17 +1811,17 @@ mod tests {
 
         let mut stream = client.rewind(15, 3).await?;
 
-        assert_next_range!(stream, 11..=15);
-        assert_next_range!(stream, 6..=10);
-        assert_next_range!(stream, 3..=5);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 11..=15);
+        assert_next!(stream, 6..=10);
+        assert_next!(stream, 3..=5);
+        assert_next!(stream, None);
 
         let mut stream = client.rewind(3, 15).await?;
 
-        assert_next_range!(stream, 11..=15);
-        assert_next_range!(stream, 6..=10);
-        assert_next_range!(stream, 3..=5);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 11..=15);
+        assert_next!(stream, 6..=10);
+        assert_next!(stream, 3..=5);
+        assert_next!(stream, None);
 
         Ok(())
     }
