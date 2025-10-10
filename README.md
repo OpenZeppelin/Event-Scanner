@@ -58,8 +58,8 @@ event-scanner = "0.2.1-alpha"
 Create an event stream for the given event filters registered with the `EventScanner`:
 
 ```rust
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{EventFilter, event_scanner::EventScanner, block_range_scanner::Error};
+use alloy::{network::Ethereum, sol_types::SolEvent};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
 use tokio_stream::StreamExt;
 
 use crate::MyContract;
@@ -67,8 +67,11 @@ use crate::MyContract;
 async fn run_scanner(
     ws_url: alloy::transports::http::reqwest::Url,
     contract: alloy::primitives::Address,
-) -> Result<(), Error> {
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Configure scanner with custom batch size (optional)
+    let mut client = EventScanner::live()
+        .max_reads(500)  // Process up to 500 blocks per batch
+        .connect_ws::<Ethereum>(ws_url).await?;
 
     let filter = EventFilter::new()
         .with_contract_address(contract)
@@ -76,9 +79,8 @@ async fn run_scanner(
 
     let mut stream = client.create_event_stream(filter);
 
-    tokio::spawn(async move {
-        client.start_scanner(BlockNumberOrTag::Earliest, Some(BlockNumberOrTag::Latest)).await
-    });
+    // Start the scanner
+    tokio::spawn(async move { client.stream().await });
 
     while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
         println!("Fetched logs: {logs:?}");
@@ -94,13 +96,45 @@ async fn run_scanner(
 
 ### Building a Scanner
 
-`EventScanner` supports:
+`EventScanner` provides mode-specific constructors and a builder pattern to configure settings before connecting:
 
-- `with_blocks_read_per_epoch` - how many blocks are read at a time in a single batch (taken into consideration when fetching historical blocks)
-- `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected (NOTE ⚠️: still WIP)
-- `with_block_confirmations` - how many confirmations to wait for before considering a block final (NOTE ⚠️: still WIP)
+```rust
+// Live streaming mode
+let scanner = EventScanner::live()
+    .max_reads(500)  // Optional: set max blocks per read (default: 1000)
+    .connect_ws::<Ethereum>(ws_url).await?;
 
-Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-Modes).
+// Historical scanning mode
+let scanner = EventScanner::historic()
+    .max_reads(500)
+    .connect_ws::<Ethereum>(ws_url).await?;
+
+// Sync mode (historical + live)
+let scanner = EventScanner::sync()
+    .max_reads(500)
+    .connect_ws::<Ethereum>(ws_url).await?;
+
+// Latest mode (recent blocks only)
+let scanner = EventScanner::latest()
+    .max_reads(500)
+    .connect_ws::<Ethereum>(ws_url).await?;
+```
+
+**Available Modes:**
+- `EventScanner::live()` – Streams new blocks as they arrive
+- `EventScanner::historic()` – Processes historical block ranges
+- `EventScanner::sync()` – Processes historical data then transitions to live streaming
+- `EventScanner::latest()` – Processes a specific number of events then optionally switches to live scanning mode
+
+**Global Configuration Options:**
+- `max_reads(usize)` – Sets the maximum number of blocks to process per read operation. This prevents RPC provider errors from overly large block range queries.
+- Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or `connect_provider(provider)`.
+
+**Mode-specific APIs:**
+- Live: `client.stream()` – Start streaming new blocks
+- Historical: `client.stream()` – Process historical range (configured during setup)
+- Sync: `client.stream()` – Process historical then transition to live
+- Latest: `client.stream()` – Process a set number of events
 
 ### Defining Event Filters
 
@@ -137,20 +171,25 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 
 ### Scanning Modes
 
-- **Live mode** – `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only.
-- **Historical mode** – `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range.
-- **Historical → Live** – `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks.
+- **Live mode** – `EventScanner::live()` creates a scanner that subscribes to new blocks as they arrive.
+- **Historical mode** – `EventScanner::historic()` creates a scanner for processing historical block ranges.
+- **Sync mode** – `EventScanner::sync()` creates a scanner that processes historical data then automatically transitions to live streaming.
+- **Latest mode** – `EventScanner::latest()` creates a scanner that processes a set number of events.
 
-For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
+**Configuration Tips:**
+- Set `max_reads` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks)
+- For live mode, if the WebSocket subscription lags significantly (e.g., >2000 blocks), ranges are automatically capped to prevent RPC errors
+- Each mode has its own configuration options for start block, end block, confirmations, etc. where it makes sense
+- The modes come with sensible defaults for example not specify a start block for historic mode automatically sets the start block to the earliest one
 
-See the integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
+See integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
 
 ---
 
 ## Examples
 
-- `examples/simple_counter` – minimal live-mode scanner
-- `examples/historical_scanning` – demonstrates replaying from genesis (block 0) before continuing streaming latest blocks
+- `examples/simple_counter` – minimal live-mode scanner using `EventScanner::live()`
+- `examples/historical_scanning` – demonstrates replaying historical data using `EventScanner::historic()`
 
 Run an example with:
 
