@@ -40,16 +40,23 @@ impl HistoricModeConfig {
         }
     }
 
+    #[must_use]
     pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.from_block = block.into();
         self
     }
 
+    #[must_use]
     pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.to_block = block.into();
         self
     }
 
+    /// Connects to the provider via WebSocket
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(
         self,
         ws_url: Url,
@@ -60,6 +67,11 @@ impl HistoricModeConfig {
         Ok(HistoricModeScanner { config: mode, inner: EventScannerService::from_config(brs) })
     }
 
+    /// Connects to the provider via IPC
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
@@ -70,6 +82,11 @@ impl HistoricModeConfig {
         Ok(HistoricModeScanner { config: mode, inner: EventScannerService::from_config(brs) })
     }
 
+    /// Connects to an existing provider
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
@@ -89,6 +106,11 @@ impl<N: Network> HistoricModeScanner<N> {
         self.inner.create_event_stream(filter)
     }
 
+    /// Calls stream historical
+    ///
+    /// # Errors
+    ///
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream(self) -> Result<(), EventScannerError> {
         self.inner.stream_historical(self.config.from_block, self.config.to_block).await
     }

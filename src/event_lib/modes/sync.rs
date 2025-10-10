@@ -82,6 +82,11 @@ impl SyncModeConfig {
         Ok(SyncModeScanner { mode, inner: EventScannerService::from_config(brs) })
     }
 
+    /// Connects to an existing provider
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
     pub fn connect_provider<N: Network>(
         self,
         provider: RootProvider<N>,
@@ -101,6 +106,11 @@ impl<N: Network> SyncModeScanner<N> {
         self.inner.create_event_stream(filter)
     }
 
+    /// Calls stream from
+    ///
+    /// # Errors
+    ///
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream(self) -> Result<(), EventScannerError> {
         self.inner.stream_from(self.mode.from_block, self.mode.block_confirmations).await
     }

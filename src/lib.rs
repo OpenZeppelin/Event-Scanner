@@ -3,5 +3,6 @@ pub mod event_lib;
 pub mod types;
 
 pub use event_lib::{
-    EventFilter, EventScanner, EventScannerMessage, HistoricModeConfig, SubscribeMode, SyncMode,
+    EventFilter, EventScanner, EventScannerMessage, HistoricModeConfig, SubscribeModeConfig,
+    SyncModeConfig,
 };
