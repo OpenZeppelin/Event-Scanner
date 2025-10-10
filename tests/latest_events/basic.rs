@@ -247,7 +247,7 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
 
     client.scan_latest(2).await?;
 
-    let expected = &inc_log_meta[1..];
+    let expected = &inc_log_meta;
     assert_next_logs!(inc_stream, expected);
 
     let expected = &dec_log_meta;
