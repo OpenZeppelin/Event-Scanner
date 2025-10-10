@@ -582,21 +582,10 @@ impl<N: Network> Service<N> {
                 break;
             }
 
-            let next_start_block_number = (batch_end_block_number + 1).into();
-            let next_start_block =
-                match self.provider.get_block_by_number(next_start_block_number).await {
-                    Ok(block) => {
-                        block.expect("block number is less than 'end', so it should exist")
-                    }
-                    Err(e) => {
-                        error!(error = %e, "Failed to get block by number");
-                        let e: BlockRangeScannerError = e.into();
-                        self.send_to_subscriber(BlockRangeMessage::Error(e.clone())).await;
-                        return Err(e);
-                    }
-                };
+            // Next block number always exists as we checked end block previously
+            let next_start_block_number = batch_end_block_number.saturating_add(1);
 
-            self.next_start_block = next_start_block.header().number();
+            self.next_start_block = next_start_block_number;
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
