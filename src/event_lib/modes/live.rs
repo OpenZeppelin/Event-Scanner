@@ -18,6 +18,7 @@ use super::{BaseConfig, BaseConfigBuilder};
 
 pub struct LiveScannerConfig {
     base: BaseConfig,
+    // Defaults to 0
     block_confirmations: u64,
 }
 
@@ -103,3 +104,40 @@ impl<N: Network> LiveEventScanner<N> {
         self.inner.stream_live(self.config.block_confirmations).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_live_scanner_config_defaults() {
+        let config = LiveScannerConfig::new();
+
+        assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn test_live_scanner_builder_pattern() {
+        let config = LiveScannerConfig::new().block_confirmations(10).max_reads(50);
+
+        assert_eq!(config.block_confirmations, 10);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+    }
+
+    #[test]
+    fn test_live_scanner_builder_pattern_chaining() {
+        let config = LiveScannerConfig::new().max_reads(25).block_confirmations(5);
+
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert_eq!(config.block_confirmations, 5);
+    }
+
+    #[test]
+    fn test_live_scanner_builder_with_zero_confirmations() {
+        let config = LiveScannerConfig::new().block_confirmations(0).max_reads(100);
+
+        assert_eq!(config.block_confirmations, 0);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 100);
+    }
+}
+

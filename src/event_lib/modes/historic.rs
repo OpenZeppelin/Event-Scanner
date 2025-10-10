@@ -117,3 +117,48 @@ impl<N: Network> HistoricEventScanner<N> {
         self.inner.stream_historical(self.config.from_block, self.config.to_block).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_historic_scanner_config_defaults() {
+        let config = HistoricScannerConfig::new();
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
+    }
+
+    #[test]
+    fn test_historic_scanner_builder_pattern() {
+        let config = HistoricScannerConfig::new().from_block(100u64).to_block(200u64).max_reads(50);
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+    }
+
+    #[test]
+    fn test_historic_scanner_builder_pattern_chaining() {
+        let config = HistoricScannerConfig::new()
+            .max_reads(25)
+            .from_block(BlockNumberOrTag::Number(50))
+            .to_block(BlockNumberOrTag::Number(150));
+
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Number(150)));
+    }
+
+    #[test]
+    fn test_historic_scanner_builder_with_different_block_types() {
+        let config = HistoricScannerConfig::new()
+            .from_block(BlockNumberOrTag::Earliest)
+            .to_block(BlockNumberOrTag::Latest);
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
+    }
+}
+

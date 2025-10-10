@@ -117,3 +117,59 @@ impl<N: Network> SyncEventScanner<N> {
         self.inner.stream_from(self.config.from_block, self.config.block_confirmations).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_scanner_config_defaults() {
+        let config = SyncScannerConfig::new();
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
+        assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn test_sync_scanner_builder_pattern() {
+        let config = SyncScannerConfig::new().from_block(100).block_confirmations(10).max_reads(50);
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
+        assert_eq!(config.block_confirmations, 10);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+    }
+
+    #[test]
+    fn test_sync_scanner_builder_pattern_chaining() {
+        let config = SyncScannerConfig::new()
+            .max_reads(25)
+            .block_confirmations(5)
+            .from_block(BlockNumberOrTag::Number(50));
+
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert_eq!(config.block_confirmations, 5);
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
+    }
+
+    #[test]
+    fn test_sync_scanner_builder_with_different_block_types() {
+        let config = SyncScannerConfig::new()
+            .from_block(BlockNumberOrTag::Earliest)
+            .block_confirmations(20)
+            .max_reads(100);
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
+        assert_eq!(config.block_confirmations, 20);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 100);
+    }
+
+    #[test]
+    fn test_sync_scanner_builder_with_zero_confirmations() {
+        let config = SyncScannerConfig::new().from_block(0).block_confirmations(0).max_reads(75);
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(0)));
+        assert_eq!(config.block_confirmations, 0);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 75);
+    }
+}
+

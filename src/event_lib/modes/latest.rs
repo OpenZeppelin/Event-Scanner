@@ -191,3 +191,80 @@ impl<N: Network> LatestEventScanner<N> {
         unimplemented!()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_latest_scanner_config_defaults() {
+        let config = LatestScannerConfig::new();
+
+        assert_eq!(config.count, 1);
+        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
+        assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert!(!config.switch_to_live);
+    }
+
+    #[test]
+    fn test_latest_scanner_builder_pattern() {
+        let config = LatestScannerConfig::new()
+            .count(5)
+            .from_block(100)
+            .to_block(200)
+            .block_confirmations(10)
+            .then_live()
+            .max_reads(50);
+
+        assert_eq!(config.count, 5);
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
+        assert_eq!(config.block_confirmations, 10);
+        assert!(config.switch_to_live);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+    }
+
+    #[test]
+    fn test_latest_scanner_builder_pattern_chaining() {
+        let config = LatestScannerConfig::new()
+            .max_reads(25)
+            .block_confirmations(5)
+            .count(3)
+            .from_block(BlockNumberOrTag::Number(50))
+            .to_block(BlockNumberOrTag::Number(150))
+            .then_live();
+
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert_eq!(config.block_confirmations, 5);
+        assert_eq!(config.count, 3);
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Number(150)));
+        assert!(config.switch_to_live);
+    }
+
+    #[test]
+    fn test_latest_scanner_builder_with_different_block_types() {
+        let config = LatestScannerConfig::new()
+            .from_block(BlockNumberOrTag::Earliest)
+            .to_block(BlockNumberOrTag::Latest)
+            .count(10)
+            .block_confirmations(20);
+
+        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
+        assert_eq!(config.count, 10);
+        assert_eq!(config.block_confirmations, 20);
+        assert!(!config.switch_to_live);
+    }
+
+    #[test]
+    fn test_latest_scanner_then_live_method() {
+        let config = LatestScannerConfig::new().then_live();
+        assert!(config.switch_to_live);
+
+        let config_without_live = LatestScannerConfig::new();
+        assert!(!config_without_live.switch_to_live);
+    }
+}
+
