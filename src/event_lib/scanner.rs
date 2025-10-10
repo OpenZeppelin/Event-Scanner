@@ -1,6 +1,7 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::ops::RangeInclusive;
 
 use crate::{
+    EventScannerError,
     block_range_scanner::{
         BlockRangeMessage, BlockRangeScannerError, ConnectedBlockRangeScanner,
         MAX_BUFFERED_MESSAGES,
@@ -13,9 +14,7 @@ use alloy::{
     network::Network,
     providers::{Provider, RootProvider},
     rpc::types::{Filter, Log},
-    transports::{RpcError, TransportErrorKind},
 };
-use thiserror::Error;
 use tokio::sync::{
     broadcast::{self, Sender, error::RecvError},
     mpsc,
@@ -24,20 +23,6 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info};
 
 pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
-
-#[derive(Error, Debug, Clone)]
-pub enum EventScannerError {
-    #[error("Block range scanner error: {0}")]
-    BlockRangeScanner(#[from] BlockRangeScannerError),
-    #[error("Provider error: {0}")]
-    Provider(Arc<RpcError<TransportErrorKind>>),
-}
-
-impl From<RpcError<TransportErrorKind>> for EventScannerError {
-    fn from(e: RpcError<TransportErrorKind>) -> Self {
-        EventScannerError::Provider(Arc::new(e))
-    }
-}
 
 pub struct EventScannerService<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,

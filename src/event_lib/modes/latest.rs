@@ -11,7 +11,8 @@ use crate::{
     block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
     event_lib::{
         filter::EventFilter,
-        scanner::{EventScannerError, EventScannerMessage, EventScannerService},
+        EventScannerError,
+        scanner::{EventScannerMessage, EventScannerService},
     },
 };
 
