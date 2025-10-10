@@ -468,26 +468,26 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
-        // Step 1:
-        // Fetches the starting block and end block for historical sync
-        let start_block = self.provider.get_block_by_number(start_height).await?.ok_or(
-            BlockRangeScannerError::HistoricalSyncError(format!(
-                "Start block {start_height:?} not found"
-            )),
-        )?;
-
-        let latest_block =
-            self.provider.get_block_by_number(BlockNumberOrTag::Latest).await?.ok_or(
-                BlockRangeScannerError::HistoricalSyncError("Latest block not found".to_string()),
-            )?;
-
         let block_confirmations = self.config.block_confirmations;
+        // Step 1:
+        // Fetches the starting block and end block for historical sync in parallel
+        let (start_block, latest_block) = tokio::join!(
+            self.provider.get_block_by_number(start_height),
+            self.provider.get_block_by_number(BlockNumberOrTag::Latest)
+        );
+
+        let start_block =
+            start_block?.ok_or(BlockRangeScannerError::BlockNotFound(start_height))?;
+        let latest_block =
+            latest_block?.ok_or(BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?;
+
         let confirmed_tip_num = latest_block.header().number().saturating_sub(block_confirmations);
+        let start_block_num = start_block.header().number();
 
         // If start is beyond confirmed tip, skip historical and go straight to live
-        if start_block.header().number() > confirmed_tip_num {
+        if start_block_num > confirmed_tip_num {
             info!(
-                start_block = start_block.header().number(),
+                start_block = start_block_num,
                 confirmed_tip = confirmed_tip_num,
                 "Start block is beyond confirmed tip, starting live stream"
             );
@@ -497,9 +497,8 @@ impl<N: Network> Service<N> {
             };
 
             let provider = self.provider.clone();
-            let expected_next = start_block.header().number();
             tokio::spawn(async move {
-                Self::stream_live_blocks(expected_next, provider, sender, block_confirmations)
+                Self::stream_live_blocks(start_block_num, provider, sender, block_confirmations)
                     .await;
             });
 
@@ -513,7 +512,7 @@ impl<N: Network> Service<N> {
         )?;
 
         info!(
-            start_block = start_block.header().number(),
+            start_block = start_block_num,
             end_block = end_block.header().number(),
             "Syncing historical data"
         );
