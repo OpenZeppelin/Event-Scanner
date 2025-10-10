@@ -7,7 +7,7 @@ use alloy::{network::Ethereum, sol_types::SolEvent};
 use event_scanner::{EventFilter, EventScanner, EventScannerMessage, ScannerStatus};
 use tokio::{
     sync::Mutex,
-    time::{Duration, sleep, timeout},
+    time::{Duration, timeout},
 };
 use tokio_stream::StreamExt;
 
@@ -43,8 +43,6 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     let mut stream = client.create_event_stream(filter).take(historical_events + live_events);
 
     tokio::spawn(async move { client.stream().await });
-
-    sleep(Duration::from_millis(200)).await;
 
     for _ in 0..live_events {
         contract.increase().send().await?.watch().await?;
