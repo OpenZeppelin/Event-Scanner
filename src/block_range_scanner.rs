@@ -472,15 +472,13 @@ impl<N: Network> Service<N> {
         };
 
         let end_num = end_block.header().number();
-        println!("spawning monitor..");
-        let monitor = self.spawn_live_header_monitor_if_needed(end_num, subscriber).await?;
-        println!("monitor spawned!");
+        let monitor = self.spawn_reorg_monitor_if_needed(end_num, subscriber).await?;
 
         match self.stream_historical_blocks(start_block, end_block.clone()).await {
             Ok(()) => {
                 // Post-sync: stop header collection and evaluate correction range
                 if let Some((handle, rx)) = monitor {
-                    self.drain_header_monitor_and_emit_correction(rx, end_num).await;
+                    self.drain_reorg_monitor_and_emit_correction(rx, end_num).await;
                     handle.abort();
                 }
             }
@@ -614,7 +612,6 @@ impl<N: Network> Service<N> {
 
         self.next_start_block = BlockHashAndNumber::from_header::<N>(start.header());
 
-        println!("lock");
         #[cfg(test)]
         lock_historical_for_testing().await;
 
@@ -820,7 +817,7 @@ impl<N: Network> Service<N> {
         Ok(ws_stream)
     }
 
-    async fn spawn_live_header_monitor_if_needed(
+    async fn spawn_reorg_monitor_if_needed(
         &self,
         end_num: BlockNumber,
         subscriber: mpsc::Sender<BlockRangeMessage>,
@@ -883,7 +880,7 @@ impl<N: Network> Service<N> {
         Ok(Option::Some((live_subscription_task, live_block_num_receiver)))
     }
 
-    async fn drain_header_monitor_and_emit_correction(
+    async fn drain_reorg_monitor_and_emit_correction(
         &mut self,
         mut rx: mpsc::Receiver<BlockNumber>,
         end_num: BlockNumber,
@@ -1086,7 +1083,11 @@ impl BlockRangeScannerClient {
 mod tests {
 
     use std::time::Duration;
-    use tokio::{join, sync::mpsc::Receiver, time::timeout};
+    use tokio::{
+        join,
+        sync::mpsc::Receiver,
+        time::{sleep, timeout},
+    };
 
     use alloy::{
         network::Ethereum,
@@ -1534,6 +1535,156 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(120), Option::None).await?;
+
+        let finalized_block = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
+        let finalized_num = finalized_block.unwrap().header().number();
+
+        let end_num = finalized_num + 10;
+        let head_before = provider.get_block_number().await?;
+        assert!(end_num <= head_before);
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+
+        let fut_stream = client
+            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
+
+        let roerg = async {
+            sleep(Duration::from_millis(100)).await;
+            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+            let head_now = provider.get_block_number().await.unwrap();
+            let reorg_start = end_num - 5;
+            let depth = head_now - reorg_start + 1;
+            let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+
+            drop(lock);
+        };
+
+        let (res_stream, ()) = join!(fut_stream, roerg);
+
+        let mut stream = res_stream.unwrap();
+
+        let mut data_ranges = Vec::new();
+        let mut reorg = false;
+        while let Some(msg) = stream.next().await {
+            match msg {
+                BlockRangeMessage::Data(range) => data_ranges.push(range),
+                BlockRangeMessage::Status(status) => {
+                    if matches!(status, ScannerStatus::ReorgDetected) {
+                        reorg = true;
+                    }
+                }
+                BlockRangeMessage::Error(_) => {
+                    panic!("error");
+                }
+            }
+        }
+
+        assert!(reorg, "no reorg detected");
+
+        let reorg_start = end_num - 5;
+        let last_range = data_ranges.last().expect("should have at least one range");
+        assert_eq!(
+            *last_range.start(),
+            reorg_start,
+            "expected last range to start at {reorg_start}, got: {last_range:?}"
+        );
+        assert_eq!(
+            *last_range.end(),
+            end_num,
+            "expected last range to end at {end_num}, got: {last_range:?}"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(120), Option::None).await?;
+
+        let head_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?;
+        let end_num = head_block.unwrap().header().number();
+
+        println!("END NUM {end_num}");
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+
+        let fut_stream = client
+            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
+
+        let roerg = async {
+            sleep(Duration::from_millis(100)).await;
+            let pre_reorg_mine = 20;
+            let _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
+            let head_now = provider.get_block_number().await.unwrap();
+            // Reorg back to previous head aka our end num
+            let depth = pre_reorg_mine + 1;
+            println!("HEAD {head_now}");
+            println!("DEPTH {depth}");
+            let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+
+            drop(lock);
+        };
+
+        let (res_stream, ()) = join!(fut_stream, roerg);
+
+        let mut stream = res_stream.unwrap();
+
+        let mut data_ranges = Vec::new();
+        let mut reorg = false;
+        while let Some(msg) = stream.next().await {
+            match msg {
+                BlockRangeMessage::Data(range) => data_ranges.push(range),
+                BlockRangeMessage::Status(status) => {
+                    if matches!(status, ScannerStatus::ReorgDetected) {
+                        reorg = true;
+                    }
+                }
+                BlockRangeMessage::Error(_) => {
+                    panic!("error");
+                }
+            }
+        }
+
+        assert!(reorg, "no reorg detected");
+
+        // reorg of 1 so last range should be end num
+        let reorg_start = end_num;
+        let last_range = data_ranges.last().expect("should have at least one range");
+        assert_eq!(
+            *last_range.start(),
+            reorg_start,
+            "expected last range to start at {reorg_start}, got: {last_range:?}"
+        );
+        assert_eq!(
+            *last_range.end(),
+            end_num,
+            "expected last range to end at {end_num}, got: {last_range:?}"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
@@ -1752,78 +1903,6 @@ mod tests {
             }
             other => panic!("unexpected message: {other:?}"),
         }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
-        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
-
-        provider.anvil_mine(Option::Some(120), Option::None).await?;
-
-        let finalized_block = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
-        let finalized_num = finalized_block.unwrap().header().number();
-
-        let end_num = finalized_num + 10;
-        let head_before = provider.get_block_number().await?;
-        assert!(end_num <= head_before);
-
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
-
-        let fut = client
-            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
-
-        let roerg = async {
-            let head_now = provider.get_block_number().await.unwrap();
-            let reorg_start = end_num - 5;
-            let depth = head_now - reorg_start + 1;
-            let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
-            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
-
-            drop(lock);
-        };
-
-        let (res_stream, ()) = join!(fut, roerg);
-
-        let mut stream = res_stream.unwrap();
-
-        let mut data_ranges = Vec::new();
-        let mut reorg = false;
-        while let Some(msg) = stream.next().await {
-            match msg {
-                BlockRangeMessage::Data(range) => data_ranges.push(range),
-                BlockRangeMessage::Status(status) => {
-                    if matches!(status, ScannerStatus::ReorgDetected) {
-                        reorg = true;
-                    }
-                }
-                BlockRangeMessage::Error(_) => {
-                    panic!("error");
-                }
-            }
-        }
-
-        assert!(reorg, "no reorg detected");
-
-        let reorg_start = end_num - 5;
-        let last_range = data_ranges.last().expect("should have at least one range");
-        assert_eq!(
-            *last_range.start(),
-            reorg_start,
-            "expected last range to start at {reorg_start}, got: {last_range:?}"
-        );
-        assert_eq!(
-            *last_range.end(),
-            end_num,
-            "expected last range to end at {end_num}, got: {last_range:?}"
-        );
 
         Ok(())
     }
