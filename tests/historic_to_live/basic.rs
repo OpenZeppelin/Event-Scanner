@@ -1,9 +1,10 @@
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::U256, sol_types::SolEvent};
-use event_scanner::types::ScannerStatus;
-use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner, types::ScannerStatus};
 
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use crate::{assert_next_logs, assert_next_status};
+use crate::{
+    assert_next_logs, assert_next_status,
+    common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
+};
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {

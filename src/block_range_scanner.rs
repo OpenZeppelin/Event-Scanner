@@ -88,7 +88,7 @@ use alloy::{
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-pub const DEFAULT_BLOCKS_READ_PER_EPOCH: u32 = 1000;
+pub const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 // const BACK_OFF_MAX_RETRIES: u64 = 5;
@@ -201,7 +201,7 @@ impl BlockHashAndNumber {
 
 #[derive(Clone)]
 struct Config {
-    blocks_read_per_epoch: u32,
+    blocks_read_per_epoch: usize,
     reorg_rewind_depth: u64,
     #[allow(
         dead_code,
@@ -211,7 +211,7 @@ struct Config {
 }
 
 pub struct BlockRangeScanner {
-    blocks_read_per_epoch: u32,
+    blocks_read_per_epoch: usize,
     reorg_rewind_depth: u64,
     block_confirmations: u64,
 }
@@ -233,7 +233,7 @@ impl BlockRangeScanner {
     }
 
     #[must_use]
-    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: u32) -> Self {
+    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
         self.blocks_read_per_epoch = blocks_read_per_epoch;
         self
     }
@@ -620,8 +620,7 @@ impl<N: Network> Service<N> {
 
         // we're iterating in reverse
         let stream_end = *block_range.start();
-        // SAFETY: u32 can always be cast as usize
-        let range_iter = block_range.rev().step_by(blocks_read_per_epoch as usize);
+        let range_iter = block_range.rev().step_by(blocks_read_per_epoch);
 
         for batch_end in range_iter {
             let batch_start =

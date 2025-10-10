@@ -21,25 +21,23 @@ async fn collect_events(
     loop {
         match stream.next().await {
             Some(EventScannerMessage::Data(logs)) => return logs,
-            Some(EventScannerMessage::Error(_)) => continue,
-            Some(EventScannerMessage::Status(_)) => continue,
             None => return vec![],
+            _ => {}
         }
     }
 }
 
 fn assert_ordering(
-    logs: Vec<Log>,
+    logs: &[Log],
     expected_first_count: u64,
-    expected_hashes: Vec<FixedBytes<32>>,
+    expected_hashes: &[FixedBytes<32>],
     expected_address: &Address,
 ) {
     let mut expected_count = U256::from(expected_first_count);
     for (log, &expected_hash) in logs.iter().zip(expected_hashes.iter()) {
-        let event = log.log_decode::<TestCounter::CountIncreased>().expect(
-            format!("expected sig: 'TestCounter::CountIncreased', got: {:?}", log.topic0())
-                .as_str(),
-        );
+        let event = log.log_decode::<TestCounter::CountIncreased>().unwrap_or_else(|_| {
+            panic!("expected sig: 'TestCounter::CountIncreased', got: {:?}", log.topic0())
+        });
         assert_eq!(&event.address(), expected_address);
         assert_eq!(event.transaction_hash.unwrap(), expected_hash);
         assert_eq!(expected_count, event.inner.newCount);
@@ -70,9 +68,9 @@ async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Resul
 
     // Verify exact events (address, signature, tx hashes)
     let expected_first_count = 4;
-    let expected_hashes = tx_hashes[3..8].to_vec();
+    let expected_hashes = &tx_hashes[3..8];
 
-    assert_ordering(logs, expected_first_count, expected_hashes, contract.address());
+    assert_ordering(&logs, expected_first_count, expected_hashes, contract.address());
 
     Ok(())
 }
@@ -100,7 +98,7 @@ async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<
     // Verify exact events
     let expected_first_count = 1;
 
-    assert_ordering(logs, expected_first_count, tx_hashes, contract.address());
+    assert_ordering(&logs, expected_first_count, &tx_hashes, contract.address());
 
     Ok(())
 }
@@ -155,10 +153,10 @@ async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
     // Expect last 4 emitted events exactly (the 2 empty blocks contain no events)
     assert_eq!(logs.len(), 2);
 
-    let expected_hashes = tx_hashes[4..6].to_vec(); // counts 5..6
+    let expected_hashes = &tx_hashes[4..6]; // counts 5..6
     let expected_first_count = 5;
 
-    assert_ordering(logs, expected_first_count, expected_hashes, contract.address());
+    assert_ordering(&logs, expected_first_count, expected_hashes, contract.address());
 
     Ok(())
 }
@@ -193,9 +191,9 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
     // since logs are equal, asserting for one, asserts for both
     assert_eq!(5, logs1.len());
 
-    let expected_hashes = tx_hashes[2..7].to_vec();
+    let expected_hashes = &tx_hashes[2..7];
     let expected_first_count = 3;
-    assert_ordering(logs1, expected_first_count, expected_hashes, contract.address());
+    assert_ordering(&logs1, expected_first_count, expected_hashes, contract.address());
 
     Ok(())
 }
@@ -243,7 +241,7 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
 
     // Validate increases: expect counts 3,4,5 and the corresponding tx hashes from inc_hashes[2..5]
     let expected_hashes_inc = inc_hashes[2..5].to_vec();
-    assert_ordering(logs_inc, 3, expected_hashes_inc, contract.address());
+    assert_ordering(&logs_inc, 3, &expected_hashes_inc, contract.address());
 
     // Validate decreases: expect counts 4,3 (after two decreases)
     let mut expected_count_dec = U256::from(4);
@@ -397,7 +395,7 @@ async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 
     assert_eq!(logs.len(), 3);
     // Expect counts 1,2,3 and hashes in order
-    assert_ordering(logs, 1, hashes, contract.address());
+    assert_ordering(&logs, 1, &hashes, contract.address());
 
     Ok(())
 }

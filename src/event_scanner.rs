@@ -86,7 +86,7 @@ impl EventScanner {
 
     /// Configures how many blocks are read per epoch during a historical sync.
     #[must_use]
-    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: u32) -> Self {
+    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
         self.block_range_scanner =
             self.block_range_scanner.with_blocks_read_per_epoch(blocks_read_per_epoch);
         self
@@ -190,6 +190,11 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
+    /// Scans the latest blocks and returns the specified number of events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to start
     pub async fn scan_latest(
         self,
         count: usize,
@@ -226,8 +231,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
                             let logs = Self::get_logs(range, &filter, &log_filter, &provider).await;
-                            if let Ok(logs) = &logs
-                                && logs.is_empty()
+                            if let Ok(logs) = &logs &&
+                                logs.is_empty()
                             {
                                 continue;
                             }
@@ -268,7 +273,7 @@ impl<N: Network> ConnectedEventScanner<N> {
             let mut sub = range_tx.subscribe();
 
             tokio::spawn(async move {
-                let mut events = Vec::with_capacity(count as usize);
+                let mut events = Vec::with_capacity(count);
                 loop {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
