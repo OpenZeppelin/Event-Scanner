@@ -396,9 +396,8 @@ impl<N: Network> Service<N> {
     }
 
     async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
-        let Some(sender) = self.subscriber.clone() else {
-            return Err(BlockRangeScannerError::ServiceShutdown);
-        };
+        let sender =
+            self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
         let block_confirmations = self.config.block_confirmations;
         let provider = self.provider.clone();
@@ -421,17 +420,19 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
-        let (start_block, end_block) = tokio::join!(
+        let (start_block, end_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height)
-        );
+        )?;
 
-        let start_block_num = start_block?
-            .ok_or(BlockRangeScannerError::BlockNotFound(start_height))?
+        let start_block_num = start_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
             .header()
             .number();
-        let end_block_num =
-            end_block?.ok_or(BlockRangeScannerError::BlockNotFound(end_height))?.header().number();
+        let end_block_num = end_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(end_height))?
+            .header()
+            .number();
 
         if end_block_num < start_block_num {
             return Err(BlockRangeScannerError::HistoricalSyncError(format!(
@@ -457,17 +458,17 @@ impl<N: Network> Service<N> {
         let block_confirmations = self.config.block_confirmations;
         // Step 1:
         // Fetches the starting block and end block for historical sync in parallel
-        let (start_block, latest_block) = tokio::join!(
+        let (start_block, latest_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(BlockNumberOrTag::Latest)
-        );
+        )?;
 
-        let start_block_num = start_block?
-            .ok_or(BlockRangeScannerError::BlockNotFound(start_height))?
+        let start_block_num = start_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
             .header()
             .number();
-        let latest_block = latest_block?
-            .ok_or(BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
+        let latest_block = latest_block
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
             .header()
             .number();
 
@@ -481,9 +482,8 @@ impl<N: Network> Service<N> {
                 "Start block is beyond confirmed tip, starting live stream"
             );
 
-            let Some(sender) = self.subscriber.clone() else {
-                return Err(BlockRangeScannerError::ServiceShutdown);
-            };
+            let sender =
+                self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
             let provider = self.provider.clone();
             tokio::spawn(async move {
@@ -533,9 +533,9 @@ impl<N: Network> Service<N> {
 
         self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
 
-        let Some(sender) = self.subscriber.clone() else {
-            return Err(BlockRangeScannerError::ServiceShutdown);
-        };
+        let sender =
+            self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
+
         // Step 5:
         // Spawn the buffer processor task
         // This will:
