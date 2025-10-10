@@ -400,12 +400,23 @@ impl<N: Network> Client<N> {
         self.event_scanner.start(start_height, end_height).await
     }
 
-    /// Scans the latest `count` blocks in a given block range.
+    /// Scans the latest `count` events.
     ///
     /// # Errors
     ///
     /// Returns an error if the scanner fails to scan
-    pub async fn scan_latest(
+    pub async fn scan_latest(self, count: usize) -> Result<(), EventScannerError> {
+        self.event_scanner
+            .scan_latest(count, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
+            .await
+    }
+
+    /// Scans the latest `count` events in a given block range.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to scan
+    pub async fn scan_latest_in_range(
         self,
         count: usize,
         start_height: BlockNumberOrTag,

@@ -60,7 +60,7 @@ async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Resul
     }
 
     // Ask for the latest 5
-    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(5).await?;
 
     let logs = collect_events(&mut stream).await;
 
@@ -89,7 +89,7 @@ async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<
         tx_hashes.push(receipt.transaction_hash);
     }
 
-    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(5).await?;
 
     let logs = collect_events(&mut stream).await;
 
@@ -109,7 +109,7 @@ async fn scan_latest_no_events_returns_empty() -> anyhow::Result<()> {
     let client = setup.client;
     let mut stream = setup.stream;
 
-    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(5).await?;
 
     let logs = collect_events(&mut stream).await;
 
@@ -146,7 +146,7 @@ async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
-    client.scan_latest(10, start, end).await?;
+    client.scan_latest_in_range(10, start, end).await?;
 
     let logs = collect_events(&mut stream).await;
 
@@ -181,7 +181,7 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
         tx_hashes.push(receipt.transaction_hash);
     }
 
-    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(5).await?;
 
     let logs1 = collect_events(&mut stream1).await;
     let logs2 = collect_events(&mut stream2).await;
@@ -230,7 +230,7 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
 
     // Ask for latest 3 across the full range: each filtered listener should receive their own last
     // 3 events
-    client.scan_latest(3, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(3).await?;
 
     let logs_inc = collect_events(&mut stream_inc).await;
     let logs_dec = collect_events(&mut stream_dec).await;
@@ -284,7 +284,7 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
     // dec -> 1
     dec_hashes.push(contract.decrease().send().await?.get_receipt().await?.transaction_hash);
 
-    client.scan_latest(2, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(2).await?;
 
     let inc_logs = collect_events(&mut inc_stream).await;
     let dec_logs = collect_events(&mut dec_stream).await;
@@ -343,7 +343,7 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
     let _ = contract_b.increase().send().await?.get_receipt().await?; // ignored by filter
     a_hashes.push(contract_a.increase().send().await?.get_receipt().await?.transaction_hash);
 
-    client.scan_latest(5, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    client.scan_latest(5).await?;
 
     let logs_a = collect_events(&mut stream_a).await;
     assert_eq!(logs_a.len(), 3);
@@ -390,7 +390,7 @@ async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
-    client.scan_latest(5, start, end).await?;
+    client.scan_latest_in_range(5, start, end).await?;
     let logs = collect_events(&mut stream).await;
 
     assert_eq!(logs.len(), 3);
@@ -423,7 +423,7 @@ async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(mid_block);
     let end = BlockNumberOrTag::from(mid_block);
 
-    client.scan_latest(5, start, end).await?;
+    client.scan_latest_in_range(5, start, end).await?;
     let logs = collect_events(&mut stream).await;
 
     // Expect exactly the middle event only, with count 2
