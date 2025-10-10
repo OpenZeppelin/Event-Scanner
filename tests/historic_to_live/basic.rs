@@ -2,7 +2,7 @@ use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::U256, sol_typ
 use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner, types::ScannerStatus};
 
 use crate::{
-    assert_next_logs, assert_next_status,
+    assert_next_events, assert_next_status,
     common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
 };
 
@@ -41,7 +41,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     }
 
     // historical events
-    assert_next_logs!(
+    assert_next_events!(
         stream,
         &[
             TestCounter::CountIncreased { newCount: U256::from(1) },
@@ -54,8 +54,8 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     assert_next_status!(stream, ScannerStatus::ChainTipReached);
 
     // live events
-    assert_next_logs!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) },]);
-    assert_next_logs!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) },]);
+    assert_next_events!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) },]);
+    assert_next_events!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) },]);
 
     Ok(())
 }
