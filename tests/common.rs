@@ -24,7 +24,9 @@ sol! {
     contract TestCounter {
         uint256 public count;
 
+        #[derive(Debug)]
         event CountIncreased(uint256 newCount);
+        #[derive(Debug)]
         event CountDecreased(uint256 newCount);
 
         function increase() public {

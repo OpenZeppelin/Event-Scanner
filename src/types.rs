@@ -18,3 +18,9 @@ impl<T: Clone, E: Error + Clone> From<ScannerStatus> for ScannerMessage<T, E> {
         ScannerMessage::Status(value)
     }
 }
+
+impl<T: Clone, E: Error + Clone> PartialEq<ScannerStatus> for ScannerMessage<T, E> {
+    fn eq(&self, other: &ScannerStatus) -> bool {
+        if let ScannerMessage::Status(status) = self { status == other } else { false }
+    }
+}

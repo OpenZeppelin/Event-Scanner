@@ -14,6 +14,7 @@ use alloy::{
     network::Network,
     providers::{Provider, RootProvider},
     rpc::types::{Filter, Log},
+    sol_types::SolEvent,
     transports::{RpcError, TransportErrorKind, http::reqwest::Url},
 };
 use thiserror::Error;
@@ -42,6 +43,20 @@ impl From<Result<Vec<Log>, RpcError<TransportErrorKind>>> for EventScannerMessag
 impl From<Vec<Log>> for EventScannerMessage {
     fn from(logs: Vec<Log>) -> Self {
         EventScannerMessage::Data(logs)
+    }
+}
+
+impl<'a, T: SolEvent + 'a, I: IntoIterator<Item = &'a T> + Clone> PartialEq<I>
+    for EventScannerMessage
+{
+    fn eq(&self, other: &I) -> bool {
+        if let EventScannerMessage::Data(logs) = self {
+            logs.iter()
+                .map(|l| l.data().clone())
+                .eq(other.clone().into_iter().map(|e| e.encode_log_data()))
+        } else {
+            false
+        }
     }
 }
 
@@ -231,8 +246,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
                             let logs = Self::get_logs(range, &filter, &log_filter, &provider).await;
-                            if let Ok(logs) = &logs &&
-                                logs.is_empty()
+                            if let Ok(logs) = &logs
+                                && logs.is_empty()
                             {
                                 continue;
                             }
