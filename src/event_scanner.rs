@@ -46,14 +46,75 @@ impl From<Vec<Log>> for EventScannerMessage {
     }
 }
 
-impl<'a, T: SolEvent + 'a, I: IntoIterator<Item = &'a T> + Clone> PartialEq<I>
-    for EventScannerMessage
-{
-    fn eq(&self, other: &I) -> bool {
+impl<'a, T: SolEvent + 'a> PartialEq<Vec<T>> for EventScannerMessage {
+    fn eq(&self, other: &Vec<T>) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<'a, T: SolEvent + 'a> PartialEq<&Vec<T>> for EventScannerMessage {
+    fn eq(&self, other: &&Vec<T>) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<'a, T: SolEvent + 'a, const N: usize> PartialEq<&[T; N]> for EventScannerMessage {
+    fn eq(&self, other: &&[T; N]) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<'a, T: SolEvent + 'a> PartialEq<&[T]> for EventScannerMessage {
+    fn eq(&self, other: &&[T]) -> bool {
         if let EventScannerMessage::Data(logs) = self {
-            logs.iter()
-                .map(|l| l.data().clone())
-                .eq(other.clone().into_iter().map(|e| e.encode_log_data()))
+            logs.iter().map(|l| l.data().clone()).eq(other.into_iter().map(|e| e.encode_log_data()))
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct LogMetadata<E: SolEvent> {
+    pub event: E,
+    pub address: alloy::primitives::Address,
+    pub tx_hash: alloy::primitives::B256,
+}
+
+impl<'a, E: SolEvent + 'a> PartialEq<Vec<LogMetadata<E>>> for EventScannerMessage {
+    fn eq(&self, other: &Vec<LogMetadata<E>>) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<'a, E: SolEvent + 'a> PartialEq<&Vec<LogMetadata<E>>> for EventScannerMessage {
+    fn eq(&self, other: &&Vec<LogMetadata<E>>) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<'a, E: SolEvent + 'a, const N: usize> PartialEq<&[LogMetadata<E>; N]> for EventScannerMessage {
+    fn eq(&self, other: &&[LogMetadata<E>; N]) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<'a, E: SolEvent + 'a> PartialEq<&[LogMetadata<E>]> for EventScannerMessage {
+    fn eq(&self, other: &&[LogMetadata<E>]) -> bool {
+        if let EventScannerMessage::Data(logs) = self {
+            let log_data = logs
+                .iter()
+                .map(|l| {
+                    let address = l.address();
+                    let tx_hash = l.transaction_hash.unwrap();
+                    (l.inner.data.clone(), address, tx_hash)
+                })
+                .collect::<Vec<_>>();
+            let expected = other
+                .into_iter()
+                .map(|e| (e.event.encode_log_data(), e.address, e.tx_hash))
+                .collect::<Vec<_>>();
+            log_data == expected
         } else {
             false
         }
