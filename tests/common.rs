@@ -16,6 +16,7 @@ use event_scanner::{
     event_scanner::{Client, EventScanner, EventScannerMessage},
 };
 use tokio_stream::wrappers::ReceiverStream;
+
 // Shared test contract used across integration tests
 sol! {
     #[allow(missing_docs)]
@@ -23,7 +24,9 @@ sol! {
     contract TestCounter {
         uint256 public count;
 
+        #[derive(Debug)]
         event CountIncreased(uint256 newCount);
+        #[derive(Debug)]
         event CountDecreased(uint256 newCount);
 
         function increase() public {
@@ -60,7 +63,7 @@ pub async fn setup_scanner(
     filter: Option<EventFilter>,
     confirmations: Option<u64>,
 ) -> anyhow::Result<TestSetup<impl Provider<Ethereum> + Clone>> {
-    let anvil = spawn_anvil(block_interval.unwrap_or(0.1))?;
+    let anvil = spawn_anvil(block_interval)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(Arc::new(provider.clone())).await?;
 
@@ -83,7 +86,7 @@ pub async fn setup_scanner(
 
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::missing_panics_doc)]
-pub async fn reorg_with_new_txs<P>(
+pub async fn reorg_with_new_count_incr_txs<P>(
     provider: RootProvider,
     contract: TestCounter::TestCounterInstance<Arc<P>>,
     num_initial_events: u64,
@@ -150,8 +153,12 @@ where
 }
 
 #[allow(clippy::missing_errors_doc)]
-pub fn spawn_anvil(block_time_secs: f64) -> anyhow::Result<AnvilInstance> {
-    Ok(Anvil::new().block_time_f64(block_time_secs).try_spawn()?)
+pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
+    let mut anvil = Anvil::new();
+    if let Some(block_time) = block_time {
+        anvil = anvil.block_time_f64(block_time);
+    }
+    Ok(anvil.try_spawn()?)
 }
 
 #[allow(clippy::missing_errors_doc)]

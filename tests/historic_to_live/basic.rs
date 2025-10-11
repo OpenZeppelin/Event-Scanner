@@ -1,25 +1,14 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::U256, sol_types::SolEvent};
+use event_scanner::{event_filter::EventFilter, event_scanner::EventScanner, types::ScannerStatus};
 
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{
-    event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
-    types::ScannerStatus,
+use crate::{
+    assert_next,
+    common::{TestCounter, build_provider, deploy_counter, spawn_anvil},
 };
-use tokio::{
-    sync::Mutex,
-    time::{Duration, timeout},
-};
-use tokio_stream::StreamExt;
-
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(0.1)?;
+    let anvil = spawn_anvil(Some(0.1))?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
     let contract_address = *contract.address();
@@ -41,7 +30,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
 
     let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.create_event_stream(filter).take(historical_events + live_events);
+    let mut stream = client.create_event_stream(filter);
 
     tokio::spawn(async move {
         client.start_scanner(BlockNumberOrTag::Number(first_historical_block), None).await
@@ -51,41 +40,22 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let event_count_clone = Arc::clone(&event_count);
+    // historical events
+    assert_next!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+        ]
+    );
 
-    let chain_tip_reached = Arc::new(Mutex::new(false));
-    let chain_tip_reached_clone = chain_tip_reached.clone();
+    // chain tip reached
+    assert_next!(stream, ScannerStatus::ChainTipReached);
 
-    let event_counting = async move {
-        let mut expected_new_count = 1;
-        while let Some(message) = stream.next().await {
-            match message {
-                EventScannerMessage::Data(logs) => {
-                    event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-                    for log in logs {
-                        let TestCounter::CountIncreased { newCount } =
-                            log.log_decode().unwrap().inner.data;
-                        assert_eq!(newCount, expected_new_count);
-                        expected_new_count += 1;
-                    }
-                }
-                EventScannerMessage::Status(status) => {
-                    if matches!(status, ScannerStatus::ChainTipReached) {
-                        *chain_tip_reached_clone.lock().await = true;
-                    }
-                }
-                EventScannerMessage::Error(e) => {
-                    panic!("Error Reached {e}");
-                }
-            }
-        }
-    };
-
-    _ = timeout(Duration::from_secs(1), event_counting).await;
-
-    assert_eq!(event_count.load(Ordering::SeqCst), historical_events + live_events);
-    assert!(*chain_tip_reached.lock().await);
+    // live events
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) },]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) },]);
 
     Ok(())
 }
