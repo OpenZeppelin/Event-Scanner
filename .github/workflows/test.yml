@@ -34,7 +34,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1.4.0
+        uses: foundry-rs/foundry-toolchain@50d5a8956f2e319df19e6b57539d7e2acb9f8c1e # v1.5.0
 
       - name: Cache cargo-nextest binary
         id: cache-cargo-nextest
@@ -45,7 +45,7 @@ jobs:
 
       - name: Install cargo-nextest
         if: steps.cache-cargo-nextest.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@522492a8c115f1b6d4d318581f09638e9442547b # v2.62.21
+        uses: taiki-e/install-action@e7ef886cf8f69c25ecef6bbc2858a42e273496ec # v2.62.28
         with:
           tool: cargo-nextest
 
