@@ -46,28 +46,28 @@ impl From<Vec<Log>> for EventScannerMessage {
     }
 }
 
-impl<'a, T: SolEvent + 'a> PartialEq<Vec<T>> for EventScannerMessage {
-    fn eq(&self, other: &Vec<T>) -> bool {
+impl<E: SolEvent> PartialEq<Vec<E>> for EventScannerMessage {
+    fn eq(&self, other: &Vec<E>) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<'a, T: SolEvent + 'a> PartialEq<&Vec<T>> for EventScannerMessage {
-    fn eq(&self, other: &&Vec<T>) -> bool {
+impl<E: SolEvent> PartialEq<&Vec<E>> for EventScannerMessage {
+    fn eq(&self, other: &&Vec<E>) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<'a, T: SolEvent + 'a, const N: usize> PartialEq<&[T; N]> for EventScannerMessage {
-    fn eq(&self, other: &&[T; N]) -> bool {
+impl<E: SolEvent, const N: usize> PartialEq<&[E; N]> for EventScannerMessage {
+    fn eq(&self, other: &&[E; N]) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<'a, T: SolEvent + 'a> PartialEq<&[T]> for EventScannerMessage {
-    fn eq(&self, other: &&[T]) -> bool {
+impl<E: SolEvent> PartialEq<&[E]> for EventScannerMessage {
+    fn eq(&self, other: &&[E]) -> bool {
         if let EventScannerMessage::Data(logs) = self {
-            logs.iter().map(|l| l.data().clone()).eq(other.into_iter().map(|e| e.encode_log_data()))
+            logs.iter().map(|l| l.data().clone()).eq(other.iter().map(SolEvent::encode_log_data))
         } else {
             false
         }
@@ -81,25 +81,25 @@ pub struct LogMetadata<E: SolEvent> {
     pub tx_hash: alloy::primitives::B256,
 }
 
-impl<'a, E: SolEvent + 'a> PartialEq<Vec<LogMetadata<E>>> for EventScannerMessage {
+impl<E: SolEvent> PartialEq<Vec<LogMetadata<E>>> for EventScannerMessage {
     fn eq(&self, other: &Vec<LogMetadata<E>>) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<'a, E: SolEvent + 'a> PartialEq<&Vec<LogMetadata<E>>> for EventScannerMessage {
+impl<E: SolEvent> PartialEq<&Vec<LogMetadata<E>>> for EventScannerMessage {
     fn eq(&self, other: &&Vec<LogMetadata<E>>) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<'a, E: SolEvent + 'a, const N: usize> PartialEq<&[LogMetadata<E>; N]> for EventScannerMessage {
+impl<E: SolEvent, const N: usize> PartialEq<&[LogMetadata<E>; N]> for EventScannerMessage {
     fn eq(&self, other: &&[LogMetadata<E>; N]) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<'a, E: SolEvent + 'a> PartialEq<&[LogMetadata<E>]> for EventScannerMessage {
+impl<E: SolEvent> PartialEq<&[LogMetadata<E>]> for EventScannerMessage {
     fn eq(&self, other: &&[LogMetadata<E>]) -> bool {
         if let EventScannerMessage::Data(logs) = self {
             let log_data = logs
@@ -111,7 +111,7 @@ impl<'a, E: SolEvent + 'a> PartialEq<&[LogMetadata<E>]> for EventScannerMessage 
                 })
                 .collect::<Vec<_>>();
             let expected = other
-                .into_iter()
+                .iter()
                 .map(|e| (e.event.encode_log_data(), e.address, e.tx_hash))
                 .collect::<Vec<_>>();
             log_data == expected
