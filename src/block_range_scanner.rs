@@ -66,6 +66,8 @@
 
 use std::{ops::RangeInclusive, sync::Arc};
 
+// BUG: using cfg test doesnt work...?
+#[allow(unused_imports)]
 use std::sync::LazyLock;
 
 use tokio::sync::{mpsc, oneshot};
