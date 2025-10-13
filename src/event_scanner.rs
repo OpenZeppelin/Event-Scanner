@@ -307,8 +307,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
                             let logs = Self::get_logs(range, &filter, &log_filter, &provider).await;
-                            if let Ok(logs) = &logs
-                                && logs.is_empty()
+                            if let Ok(logs) = &logs &&
+                                logs.is_empty()
                             {
                                 continue;
                             }

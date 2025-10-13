@@ -95,7 +95,8 @@ pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 
-// Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block is considered final)
+// Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
+// is considered final)
 pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
 
 // // State sync aware retry settings
@@ -643,7 +644,8 @@ impl<N: Network> Service<N> {
                 debug!(batch_count = batch_count, "Processed rewind batches");
             }
 
-            // check early if end of stream achieved to avoid subtraction overflow when `stream_end == 0`
+            // check early if end of stream achieved to avoid subtraction overflow when `stream_end
+            // == 0`
             if batch_to == stream_end {
                 break;
             }
