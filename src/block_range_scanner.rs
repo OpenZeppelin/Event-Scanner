@@ -66,7 +66,7 @@
 
 use std::{ops::RangeInclusive, sync::Arc};
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
@@ -290,14 +290,13 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     }
 }
 
-#[allow(dead_code)]
-static TEST_HIST_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+#[cfg(test)]
+static TEST_HIST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
-#[allow(dead_code)]
-#[allow(clippy::unused_async)]
+#[cfg(test)]
 async fn lock_historical_for_testing() {
-    let lock = TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
-    let _guard = lock.lock().await;
+    let _guard = TEST_HIST_LOCK.lock().await;
 }
 
 struct Service<N: Network> {
@@ -1414,7 +1413,7 @@ mod tests {
             .await?
             .run()?;
 
-        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+        let lock = super::TEST_HIST_LOCK.lock().await;
 
         let fut_stream = client
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
@@ -1484,7 +1483,7 @@ mod tests {
             .await?
             .run()?;
 
-        let lock = super::TEST_HIST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+        let lock = super::TEST_HIST_LOCK.lock().await;
 
         let fut_stream = client
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
