@@ -2,15 +2,14 @@ use std::sync::Arc;
 
 use alloy::{
     eips::BlockNumberOrTag,
-    network::Ethereum,
     primitives::{FixedBytes, U256},
-    providers::{Provider, RootProvider, ext::AnvilApi},
+    providers::{Provider, ext::AnvilApi},
     sol_types::SolEvent,
 };
 
 use crate::{
     assert_next,
-    common::{TestCounter, build_provider, deploy_counter, setup_scanner, spawn_anvil},
+    common::{TestCounter, deploy_counter, setup_scanner},
 };
 use event_scanner::{event_filter::EventFilter, event_scanner::LogMetadata};
 
@@ -84,8 +83,6 @@ async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<
 
     client.scan_latest(5).await?;
 
-    let expected = &expected;
-
     assert_next!(stream, expected);
     assert_next!(stream, None);
 
@@ -101,6 +98,7 @@ async fn scan_latest_no_events_returns_empty() -> anyhow::Result<()> {
     client.scan_latest(5).await?;
 
     let expected: &[LogMetadata<TestCounter::CountIncreased>] = &[];
+
     assert_next!(stream, expected);
     assert_next!(stream, None);
 
@@ -109,18 +107,11 @@ async fn scan_latest_no_events_returns_empty() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
-    // Manual setup to control range precisely
-    let anvil = spawn_anvil(None)?; // per-tx mining
-    let provider: RootProvider = build_provider(&anvil).await?;
-    let contract = deploy_counter(Arc::new(provider.clone())).await?;
-
-    // Build custom filter (only our contract, any event)
-    let filter = EventFilter::new().with_contract_address(*contract.address());
-
-    let mut client = event_scanner::event_scanner::EventScanner::new()
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
-    let mut stream = client.create_event_stream(filter);
+    let setup = setup_scanner(None, None, None).await?;
+    let provider = setup.provider;
+    let contract = setup.contract;
+    let client = setup.client;
+    let mut stream = setup.stream;
 
     // Mine 6 events, one per tx (auto-mined), then manually mint 2 empty blocks to widen range
     _ = increase!(contract);
@@ -128,7 +119,9 @@ async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
     _ = increase!(contract);
     _ = increase!(contract);
 
-    let expected = &[increase!(contract), increase!(contract)];
+    let mut expected = vec![];
+    expected.push(increase!(contract));
+    expected.push(increase!(contract));
 
     // manual empty block minting
     provider.anvil_mine(Some(2), None).await?;
@@ -203,7 +196,11 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
     // Produce 5 increases, then 2 decreases
     _ = increase!(contract);
     _ = increase!(contract);
-    let inc_log_meta = vec![increase!(contract), increase!(contract), increase!(contract)];
+
+    let mut inc_log_meta = vec![];
+    inc_log_meta.push(increase!(contract));
+    inc_log_meta.push(increase!(contract));
+    inc_log_meta.push(increase!(contract));
 
     let mut dec_log_meta = vec![];
     dec_log_meta.push(decrease!(contract));
@@ -269,8 +266,10 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
 #[tokio::test]
 async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
     // Manual setup to deploy two contracts
-    let anvil = spawn_anvil(None)?;
-    let provider: RootProvider = build_provider(&anvil).await?;
+    let setup = setup_scanner(None, None, None).await?;
+    let provider = setup.provider;
+    let mut client = setup.client;
+
     let contract_a = deploy_counter(Arc::new(provider.clone())).await?;
     let contract_b = deploy_counter(Arc::new(provider.clone())).await?;
 
@@ -279,13 +278,10 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
         .with_contract_address(*contract_a.address())
         .with_event(TestCounter::CountIncreased::SIGNATURE);
 
-    let mut client = event_scanner::event_scanner::EventScanner::new()
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
     let mut stream_a = client.create_event_stream(filter_a);
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
-    let mut a_log_meta: Vec<LogMetadata<TestCounter::CountIncreased>> = Vec::new();
+    let mut a_log_meta = Vec::new();
     a_log_meta.push(increase!(contract_a));
     let _ = contract_b.increase().send().await?.get_receipt().await?; // ignored by filter
     a_log_meta.push(increase!(contract_a));
@@ -303,18 +299,11 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
 #[tokio::test]
 async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     // Manual setup to mine empty blocks
-    let anvil = spawn_anvil(None)?;
-    let provider: RootProvider = build_provider(&anvil).await?;
-    let contract = deploy_counter(Arc::new(provider.clone())).await?;
-
-    let filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
-
-    let mut client = event_scanner::event_scanner::EventScanner::new()
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
-    let mut stream = client.create_event_stream(filter);
+    let setup = setup_scanner(None, None, None).await?;
+    let provider = setup.provider;
+    let contract = setup.contract;
+    let client = setup.client;
+    let mut stream = setup.stream;
 
     // Emit 2 events
     let mut log_meta = vec![];
