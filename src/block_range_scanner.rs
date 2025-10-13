@@ -762,20 +762,14 @@ impl<N: Network> Service<N> {
             match Self::get_block_subscription(&provider).await {
                 Ok(sub) => {
                     let mut stream = sub.into_stream();
-                    let mut last_seen: Option<BlockNumber> = None;
-
+                    let Some(mut last_seen) = stream.next().await.map(|x| x.number()) else {
+                        return;
+                    };
                     while let Some(incoming_block) = stream.next().await {
                         let incoming_block_num = incoming_block.number();
                         // Emit only non-increasing heads at/below end_num (reorg signals)
-                        let emit = match last_seen {
-                            Some(prev) => {
-                                incoming_block_num <= prev && incoming_block_num <= end_num
-                            }
-                            None => false,
-                        };
-
-                        last_seen = Some(incoming_block_num);
-
+                        let emit = incoming_block_num <= last_seen && incoming_block_num <= end_num;
+                        last_seen = incoming_block_num;
                         if emit && live_block_num_sender.send(incoming_block_num).await.is_err() {
                             warn!("Downstream channel closed, stopping live header monitor");
                             break;
