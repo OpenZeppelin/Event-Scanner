@@ -1,0 +1,143 @@
+use alloy::{
+    network::Network,
+    providers::RootProvider,
+    transports::{TransportResult, http::reqwest::Url},
+};
+
+use tokio_stream::wrappers::ReceiverStream;
+
+use crate::{
+    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
+    event_lib::{
+        EventScannerError,
+        filter::EventFilter,
+        scanner::{EventScannerMessage, EventScannerService},
+    },
+};
+
+use super::{BaseConfig, BaseConfigBuilder};
+
+pub struct LiveScannerConfig {
+    base: BaseConfig,
+    // Defaults to 0
+    block_confirmations: u64,
+}
+
+pub struct LiveEventScanner<N: Network> {
+    config: LiveScannerConfig,
+    inner: EventScannerService<N>,
+}
+
+impl BaseConfigBuilder for LiveScannerConfig {
+    fn base_mut(&mut self) -> &mut BaseConfig {
+        &mut self.base
+    }
+}
+
+impl LiveScannerConfig {
+    pub(super) fn new() -> Self {
+        Self { base: BaseConfig::new(), block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
+    }
+
+    #[must_use]
+    pub fn block_confirmations(mut self, count: u64) -> Self {
+        self.block_confirmations = count;
+        self
+    }
+
+    /// Connects to the provider via WebSocket
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<LiveEventScanner<N>> {
+        let LiveScannerConfig { base, block_confirmations } = self;
+        let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        let config = LiveScannerConfig { base, block_confirmations };
+        Ok(LiveEventScanner { config, inner: EventScannerService::from_config(brs) })
+    }
+
+    /// Connects to the provider via IPC
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    pub async fn connect_ipc<N: Network>(
+        self,
+        ipc_path: String,
+    ) -> TransportResult<LiveEventScanner<N>> {
+        let LiveScannerConfig { base, block_confirmations } = self;
+        let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        let config = LiveScannerConfig { base, block_confirmations };
+        Ok(LiveEventScanner { config, inner: EventScannerService::from_config(brs) })
+    }
+
+    /// Connects to an existing provider
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    pub fn connect<N: Network>(
+        self,
+        provider: RootProvider<N>,
+    ) -> TransportResult<LiveEventScanner<N>> {
+        let LiveScannerConfig { base, block_confirmations } = self;
+        let brs = base.block_range_scanner.connect::<N>(provider)?;
+        let config = LiveScannerConfig { base, block_confirmations };
+        Ok(LiveEventScanner { config, inner: EventScannerService::from_config(brs) })
+    }
+}
+
+impl<N: Network> LiveEventScanner<N> {
+    pub fn create_event_stream(
+        &mut self,
+        filter: EventFilter,
+    ) -> ReceiverStream<EventScannerMessage> {
+        self.inner.create_event_stream(filter)
+    }
+
+    /// Calls stream live
+    ///
+    /// # Errors
+    ///
+    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    pub async fn start(self) -> Result<(), EventScannerError> {
+        self.inner.stream_live(self.config.block_confirmations).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_live_scanner_config_defaults() {
+        let config = LiveScannerConfig::new();
+
+        assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn test_live_scanner_builder_pattern() {
+        let config = LiveScannerConfig::new().block_confirmations(10).block_read_limit(50);
+
+        assert_eq!(config.block_confirmations, 10);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+    }
+
+    #[test]
+    fn test_live_scanner_builder_pattern_chaining() {
+        let config = LiveScannerConfig::new().block_read_limit(25).block_confirmations(5);
+
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert_eq!(config.block_confirmations, 5);
+    }
+
+    #[test]
+    fn test_live_scanner_builder_with_zero_confirmations() {
+        let config = LiveScannerConfig::new().block_confirmations(0).block_read_limit(100);
+
+        assert_eq!(config.block_confirmations, 0);
+        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 100);
+    }
+}

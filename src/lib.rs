@@ -1,7 +1,11 @@
 pub mod block_range_scanner;
-pub mod event_filter;
-pub mod event_listener;
-pub mod event_scanner;
+pub mod event_lib;
 pub mod types;
 
-pub use event_filter::EventFilter;
+pub use types::{ScannerMessage, ScannerStatus};
+
+pub use event_lib::{
+    EventFilter, EventListener, EventScanner, EventScannerError, EventScannerMessage,
+    EventScannerService, HistoricEventScanner, HistoricScannerConfig, LiveEventScanner,
+    LiveScannerConfig, SyncEventScanner, SyncScannerConfig,
+};

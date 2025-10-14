@@ -6,11 +6,8 @@ use std::{
     time::Duration,
 };
 
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{
-    event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
-};
+use alloy::{network::Ethereum, sol_types::SolEvent};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
@@ -27,11 +24,11 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         .with_event(TestCounter::CountIncreased::SIGNATURE);
     let expected_event_count = 100;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.create_event_stream(filter).take(expected_event_count);
+    let mut stream = scanner.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;

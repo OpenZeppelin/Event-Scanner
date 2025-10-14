@@ -10,11 +10,7 @@ use alloy::{
     sol_types::SolEvent,
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
-use event_scanner::{
-    EventFilter,
-    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
-    event_scanner::{Client, EventScanner, EventScannerMessage},
-};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage, LiveEventScanner};
 use tokio_stream::wrappers::ReceiverStream;
 // Shared test contract used across integration tests
 sol! {
@@ -43,23 +39,23 @@ sol! {
     }
 }
 
-pub struct TestSetup<P>
+pub struct LiveScannerSetup<P>
 where
     P: Provider<Ethereum> + Clone,
 {
     pub provider: RootProvider,
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
-    pub client: Client<Ethereum>,
+    pub scanner: LiveEventScanner<Ethereum>,
     pub stream: ReceiverStream<EventScannerMessage>,
     pub anvil: AnvilInstance,
 }
 
 #[allow(clippy::missing_errors_doc)]
-pub async fn setup_scanner(
+pub async fn setup_live_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
-    confirmations: Option<u64>,
-) -> anyhow::Result<TestSetup<impl Provider<Ethereum> + Clone>> {
+    confirmations: u64,
+) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
     let anvil = spawn_anvil(block_interval.unwrap_or(0.1))?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(Arc::new(provider.clone())).await?;
@@ -70,15 +66,15 @@ pub async fn setup_scanner(
 
     let filter = filter.unwrap_or(default_filter);
 
-    let mut client = EventScanner::new()
-        .with_block_confirmations(confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS))
+    let mut scanner = EventScanner::live()
+        .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
 
-    let stream = client.create_event_stream(filter);
+    let stream = scanner.create_event_stream(filter);
 
     // return anvil otherwise it doesnt live long enough...
-    Ok(TestSetup { provider, contract, client, stream, anvil })
+    Ok(LiveScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
 #[allow(clippy::missing_errors_doc)]

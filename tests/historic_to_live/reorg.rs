@@ -1,30 +1,42 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{
-    eips::BlockNumberOrTag,
+    network::Ethereum,
     providers::{Provider, ext::AnvilApi},
+    sol_types::SolEvent,
 };
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage, ScannerStatus};
 use tokio::{sync::Mutex, time::timeout};
 use tokio_stream::StreamExt;
 
-use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
-
-use crate::common::{TestSetup, reorg_with_new_txs, setup_scanner};
+use crate::common::{TestCounter, build_provider, deploy_counter, reorg_with_new_txs, spawn_anvil};
 
 #[tokio::test]
 async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
-    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(1.0), Option::None, Option::Some(block_confirmations)).await?;
+
+    let anvil = spawn_anvil(1.0)?;
+    let provider = build_provider(&anvil).await?;
+    let contract = deploy_counter(Arc::new(provider.clone())).await?;
+
+    let filter = EventFilter::new()
+        .with_contract_address(*contract.address())
+        .with_event(TestCounter::CountIncreased::SIGNATURE);
 
     provider.anvil_mine(Some(10), None).await?;
 
     let start_height = provider.get_block_number().await?.saturating_sub(5);
 
-    tokio::spawn(async move {
-        client.start_scanner(BlockNumberOrTag::Number(start_height), None).await
-    });
+    let mut scanner = EventScanner::sync()
+        .from_block(start_height)
+        .block_confirmations(block_confirmations)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+
+    let mut stream = scanner.create_event_stream(filter);
+
+    tokio::spawn(async move { scanner.start().await });
 
     //  perform a shallow reorg on the live tail
     let num_initial_events = 4u64;
