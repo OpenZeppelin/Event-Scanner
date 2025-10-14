@@ -252,7 +252,7 @@ impl<N: Network> ConnectedEventScanner<N> {
             client.stream_from(start_height).await?
         };
 
-        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
+        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
         self.spawn_log_consumers(&range_tx);
 
@@ -280,7 +280,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         let client = self.block_range_scanner.run()?;
         let mut stream = client.rewind(start_height, end_height).await?;
 
-        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(1024);
+        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
         self.spawn_latest_log_consumers(&range_tx, count);
 
