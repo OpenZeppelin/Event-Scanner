@@ -64,7 +64,7 @@
 //! }
 //! ```
 
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
 
 // BUG: using cfg test doesnt work...?
 #[allow(unused_imports)]
@@ -429,11 +429,10 @@ impl<N: Network> Service<N> {
             .header()
             .number();
 
-        if end_block_num < start_block_num {
-            return Err(BlockRangeScannerError::HistoricalSyncError(format!(
-                "End block {end_height:?} is lower than start block {start_height:?}"
-            )));
-        }
+        let (start_block_num, end_block_num) = match start_block_num.cmp(&end_block_num) {
+            Ordering::Greater => (end_block_num, start_block_num),
+            _ => (start_block_num, end_block_num),
+        };
 
         info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
@@ -738,7 +737,6 @@ impl<N: Network> Service<N> {
         Option<(tokio::task::JoinHandle<()>, mpsc::Receiver<BlockNumber>)>,
         BlockRangeScannerError,
     > {
-        // Try to fetch the finalized tip; if unavailable, skip monitoring
         let finalized_block =
             match self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await {
                 Ok(opt) => opt,
@@ -749,6 +747,7 @@ impl<N: Network> Service<N> {
                 }
             };
 
+        // SAFETY: there will always be at least one finalized block - the genesis block `0`
         let finalized_num = finalized_block.unwrap().header().number();
         if end_num <= finalized_num {
             return Ok(None);
@@ -1586,6 +1585,28 @@ mod tests {
 
         let mut stream = client.stream_historical(0, 99).await?;
         assert_next_range!(stream, 0..=99);
+        assert_next_range!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn historic_mode_normalises_start_and_end_block() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        provider.anvil_mine(Option::Some(11), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.stream_historical(10, 0).await?;
+        assert_next_range!(stream, 0..=4);
+        assert_next_range!(stream, 5..=9);
+        assert_next_range!(stream, 10..=10);
         assert_next_range!(stream, None);
 
         Ok(())
