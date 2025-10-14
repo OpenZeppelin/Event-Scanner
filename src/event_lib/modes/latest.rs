@@ -216,7 +216,7 @@ mod tests {
             .to_block(200)
             .block_confirmations(10)
             .then_live()
-            .max_reads(50);
+            .block_read_limit(50);
 
         assert_eq!(config.count, 5);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn test_latest_scanner_builder_pattern_chaining() {
         let config = LatestScannerConfig::new()
-            .max_reads(25)
+            .block_read_limit(25)
             .block_confirmations(5)
             .count(3)
             .from_block(BlockNumberOrTag::Number(50))

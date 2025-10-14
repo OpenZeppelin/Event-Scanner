@@ -70,7 +70,7 @@ async fn run_scanner(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Configure scanner with custom batch size (optional)
     let mut scanner = EventScanner::live()
-        .max_reads(500)  // Process up to 500 blocks per batch
+        .block_read_limit(500)  // Process up to 500 blocks per batch
         .connect_ws::<Ethereum>(ws_url).await?;
 
     let filter = EventFilter::new()
@@ -101,22 +101,22 @@ async fn run_scanner(
 ```rust
 // Live streaming mode
 let scanner = EventScanner::live()
-    .max_reads(500)  // Optional: set max blocks per read (default: 1000)
+    .block_read_limit(500)  // Optional: set max blocks per read (default: 1000)
     .connect_ws::<Ethereum>(ws_url).await?;
 
 // Historical scanning mode
 let scanner = EventScanner::historic()
-    .max_reads(500)
+    .block_read_limit(500)
     .connect_ws::<Ethereum>(ws_url).await?;
 
 // Sync mode (historical + live)
 let scanner = EventScanner::sync()
-    .max_reads(500)
+    .block_read_limit(500)
     .connect_ws::<Ethereum>(ws_url).await?;
 
 // Latest mode (recent blocks only)
 let scanner = EventScanner::latest()
-    .max_reads(500)
+    .block_read_limit(500)
     .connect_ws::<Ethereum>(ws_url).await?;
 ```
 
@@ -127,7 +127,7 @@ let scanner = EventScanner::latest()
 - `EventScanner::latest()` – Processes a specific number of events then optionally switches to live scanning mode
 
 **Global Configuration Options:**
-- `max_reads(usize)` – Sets the maximum number of blocks to process per read operation. This prevents RPC provider errors from overly large block range queries.
+- `block_read_limit(usize)` – Sets the maximum number of blocks to process per read operation. This prevents RPC provider errors from overly large block range queries.
 - Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or `connect_provider(provider)`.
 
 **Mode-specific APIs:**
@@ -177,7 +177,7 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 - **Latest mode** – `EventScanner::latest()` creates a scanner that processes a set number of events.
 
 **Configuration Tips:**
-- Set `max_reads` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks)
+- Set `block_read_limit` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks)
 - For live mode, if the WebSocket subscription lags significantly (e.g., >2000 blocks), ranges are automatically capped to prevent RPC errors
 - Each mode has its own configuration options for start block, end block, confirmations, etc. where it makes sense
 - The modes come with sensible defaults for example not specify a start block for historic mode automatically sets the start block to the earliest one
