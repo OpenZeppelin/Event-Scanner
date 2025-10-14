@@ -188,7 +188,7 @@ impl<N: Network> LatestEventScanner<N> {
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     #[allow(clippy::unused_async)]
-    pub async fn stream(self) -> Result<(), EventScannerError> {
+    pub async fn start(self) -> Result<(), EventScannerError> {
         unimplemented!()
     }
 }

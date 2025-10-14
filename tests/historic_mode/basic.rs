@@ -42,7 +42,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         .await?;
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.stream().await });
+    tokio::spawn(async move { client.run().await });
 
     let event_count = Arc::new(AtomicUsize::new(0));
     let event_count_clone = Arc::clone(&event_count);

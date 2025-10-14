@@ -27,7 +27,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
 
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.stream().await });
+    tokio::spawn(async move { client.start().await });
 
     // Generate both increase and decrease events
     for _ in 0..expected_event_count {
@@ -67,7 +67,7 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
 
     let mut stream = client.create_event_stream(filter).take(expected_event_count);
 
-    tokio::spawn(async move { client.stream().await });
+    tokio::spawn(async move { client.start().await });
 
     // Generate events from our contract
     for _ in 0..expected_event_count {
@@ -112,7 +112,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
         client.create_event_stream(specific_filter).take(expected_specific_count);
     let mut all_stream = client.create_event_stream(all_events_filter).take(expected_all_count);
 
-    tokio::spawn(async move { client.stream().await });
+    tokio::spawn(async move { client.start().await });
 
     // First increase the counter to have some balance
     for _ in 0..expected_all_count {

@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = client.create_event_stream(increase_filter);
 
     let task_1 = tokio::spawn(async move {
-        client.stream().await.expect("failed to start scanner");
+        client.start().await.expect("failed to start scanner");
     });
 
     let task_2 = tokio::spawn(async move {

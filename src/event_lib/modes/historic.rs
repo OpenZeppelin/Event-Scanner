@@ -114,7 +114,7 @@ impl<N: Network> HistoricEventScanner<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream(self) -> Result<(), EventScannerError> {
+    pub async fn run(self) -> Result<(), EventScannerError> {
         self.inner.stream_historical(self.config.from_block, self.config.to_block).await
     }
 }

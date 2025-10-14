@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = client.create_event_stream(increase_filter);
 
     sleep(Duration::from_secs(10)).await;
-    client.stream().await.expect("failed to start scanner");
+    client.run().await.expect("failed to start scanner");
 
     while let Some(message) = stream.next().await {
         match message {

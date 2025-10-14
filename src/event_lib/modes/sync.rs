@@ -114,7 +114,7 @@ impl<N: Network> SyncEventScanner<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream(self) -> Result<(), EventScannerError> {
+    pub async fn start(self) -> Result<(), EventScannerError> {
         self.inner.stream_from(self.config.from_block, self.config.block_confirmations).await
     }
 }

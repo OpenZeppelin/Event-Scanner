@@ -130,11 +130,8 @@ let scanner = EventScanner::latest()
 - `block_read_limit(usize)` – Sets the maximum number of blocks to process per read operation. This prevents RPC provider errors from overly large block range queries.
 - Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or `connect(provider)`.
 
-**Mode-specific APIs:**
-- Live: `client.stream()` – Start streaming new blocks
-- Historical: `client.stream()` – Process historical range (configured during setup)
-- Sync: `client.stream()` – Process historical then transition to live
-- Latest: `client.stream()` – Process a set number of events
+**Starting the Scanner:**
+Invoking `scanner.start()` starts the scanner in the specified mode.
 
 ### Defining Event Filters
 
