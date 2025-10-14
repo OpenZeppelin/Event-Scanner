@@ -602,13 +602,12 @@ impl<N: Network> Service<N> {
         let end_block = end_block?.ok_or(BlockRangeScannerError::BlockNotFound(end_height))?;
 
         // normalize block range
-        let (start_block, end_block) =
-            match start_block.header().number().cmp(&end_block.header().number()) {
-                Ordering::Greater => (end_block, start_block),
-                _ => (start_block, end_block),
-            };
+        let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
+            Ordering::Greater => (start_block, end_block),
+            _ => (end_block, start_block),
+        };
 
-        self.stream_rewind(start_block, end_block).await?;
+        self.stream_rewind(from, to).await?;
 
         _ = self.subscriber.take();
 
@@ -624,18 +623,16 @@ impl<N: Network> Service<N> {
         let blocks_read_per_epoch = self.config.blocks_read_per_epoch;
 
         // for checking whether reorg occurred
-        let mut to_hash = to.header().hash();
+        let mut tip_hash = from.header().hash();
 
         let from = from.header().number();
         let to = to.header().number();
-        let stream_end = from;
 
         // we're iterating in reverse
-        let mut batch_from = to;
+        let mut batch_from = from;
 
-        while batch_from >= stream_end {
-            let batch_to =
-                batch_from.saturating_sub(blocks_read_per_epoch as u64 - 1).max(stream_end);
+        while batch_from >= to {
+            let batch_to = batch_from.saturating_sub(blocks_read_per_epoch as u64 - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
             self.send_to_subscriber(BlockRangeMessage::Data(batch_to..=batch_from)).await;
@@ -645,27 +642,29 @@ impl<N: Network> Service<N> {
                 debug!(batch_count = batch_count, "Processed rewind batches");
             }
 
-            // check early if end of stream achieved to avoid subtraction overflow when `stream_end
+            // check early if end of stream achieved to avoid subtraction overflow when `to
             // == 0`
-            if batch_to == stream_end {
+            if batch_to == to {
                 break;
             }
 
-            if self.reorg_detected(to_hash).await? {
-                info!(block_number = %to, hash = %to_hash, "Reorg detected");
+            if self.reorg_detected(tip_hash).await? {
+                info!(block_number = %from, hash = %tip_hash, "Reorg detected");
                 self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
                     .await;
                 // restart rewind
-                batch_from = to;
+                batch_from = from;
                 // store the updated end block hash
-                to_hash = self
+                tip_hash = self
                     .provider
-                    .get_block_by_number(to.into())
+                    .get_block_by_number(from.into())
                     .await?
                     .expect("Chain should have the same height post-reorg")
                     .header()
                     .hash();
             } else {
+                // SAFETY: `batch_to` is always greater than `to`, so `batch_to - 1` is always
+                // a valid unsigned integer
                 batch_from = batch_to - 1;
             }
         }
