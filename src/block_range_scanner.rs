@@ -1414,7 +1414,7 @@ mod tests {
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
         let roerg = async {
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_secs(2)).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
             let head_now = provider.get_block_number().await.unwrap();
             let reorg_start = end_num - 5;
@@ -1484,7 +1484,7 @@ mod tests {
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
         let roerg = async {
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_secs(2)).await;
             let pre_reorg_mine = 20;
             let _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
             // Reorg back to previous head aka our end num
