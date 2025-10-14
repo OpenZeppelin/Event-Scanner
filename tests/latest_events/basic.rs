@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use alloy::{
-    eips::BlockNumberOrTag,
-    primitives::{FixedBytes, U256},
+    eips::{BlockId, BlockNumberOrTag},
+    primitives::U256,
     providers::{Provider, ext::AnvilApi},
     sol_types::SolEvent,
 };
@@ -335,28 +335,20 @@ async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
     let client = setup.client;
     let mut stream = setup.stream;
 
-    // Each tx auto-mines a block: we will target the middle block specifically
-    let mut receipt_blocks: Vec<(FixedBytes<32>, u64)> = Vec::new();
-    for _ in 0..3u8 {
-        let r = contract.increase().send().await?.get_receipt().await?;
-        // fetch the mined block number from provider to be exact
-        let tx = provider.get_transaction_by_hash(r.transaction_hash).await?.unwrap();
-        let block_num = tx.block_number.unwrap();
-        receipt_blocks.push((r.transaction_hash, block_num));
-    }
+    _ = increase!(contract);
+    let expected = &[increase!(contract)];
+    _ = increase!(contract);
 
-    // Pick the middle tx's block number
-    let (_mid_hash, mid_block) = receipt_blocks[1];
-    let start = BlockNumberOrTag::from(mid_block);
-    let end = BlockNumberOrTag::from(mid_block);
+    // Pick the expected tx's block number as the block range
+    let expected_tx_hash = expected[0].tx_hash;
+    let start = provider
+        .get_block_number_by_id(BlockId::Hash(expected_tx_hash.into()))
+        .await?
+        .map(BlockNumberOrTag::from)
+        .unwrap();
+    let end = start;
 
     client.scan_latest_in_range(5, start, end).await?;
-
-    let expected = &[LogMetadata {
-        event: TestCounter::CountIncreased { newCount: U256::from(2) },
-        address: *contract.address(),
-        tx_hash: receipt_blocks[1].0,
-    }];
 
     assert_next!(stream, expected);
     assert_next!(stream, None);
