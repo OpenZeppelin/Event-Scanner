@@ -183,6 +183,12 @@ impl EventScanner {
     }
 }
 
+#[derive(Copy, Clone)]
+enum ConsumerMode {
+    Stream,
+    CollectLatest { count: usize },
+}
+
 pub struct ConnectedEventScanner<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     event_listeners: Vec<EventListener>,
@@ -210,7 +216,7 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-        self.spawn_log_consumers(&range_tx);
+        self.spawn_log_consumers(&range_tx, ConsumerMode::Stream);
 
         while let Some(message) = stream.next().await {
             if let Err(err) = range_tx.send(message) {
@@ -238,7 +244,7 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-        self.spawn_latest_log_consumers(&range_tx, count);
+        self.spawn_log_consumers(&range_tx, ConsumerMode::CollectLatest { count });
 
         while let Some(message) = stream.next().await {
             if let Err(err) = range_tx.send(message) {
@@ -250,81 +256,53 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
-    fn spawn_log_consumers(&self, range_tx: &Sender<BlockRangeMessage>) {
+    fn spawn_log_consumers(&self, range_tx: &Sender<BlockRangeMessage>, mode: ConsumerMode) {
         for listener in &self.event_listeners {
             let provider = self.block_range_scanner.provider().clone();
             let filter = listener.filter.clone();
-            let log_filter = Filter::from(&filter);
+            let base_filter = Filter::from(&filter);
             let sender = listener.sender.clone();
             let mut sub = range_tx.subscribe();
 
             tokio::spawn(async move {
+                // Only used for CollectLatest
+                let mut collected: Vec<Log> = match mode {
+                    ConsumerMode::CollectLatest { count } => Vec::with_capacity(count),
+                    ConsumerMode::Stream => Vec::new(),
+                };
+
                 loop {
                     match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
-                            let logs = Self::get_logs(range, &filter, &log_filter, &provider).await;
-                            if let Ok(logs) = &logs &&
-                                logs.is_empty()
-                            {
-                                continue;
-                            }
-                            if let Err(send_err) = sender.send(logs.into()).await {
-                                warn!(error = %send_err, "Downstream channel closed, stopping stream");
-                                break;
-                            }
-                        }
-                        Ok(BlockRangeMessage::Error(e)) => {
-                            if let Err(err) = sender.send(ScannerMessage::Error(e.into())).await {
-                                warn!(error = %err, "Downstream channel closed, skipping error propagation and stopping stream.");
-                                break;
-                            }
-                        }
-                        Ok(BlockRangeMessage::Status(status)) => {
-                            if let Err(err) = sender.send(ScannerMessage::Status(status)).await {
-                                warn!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping stream.");
-                                break;
-                            }
-                        }
-                        Err(RecvError::Closed) => {
-                            warn!("No block ranges to receive, stopping stream.");
-                            break;
-                        }
-                        Err(RecvError::Lagged(_)) => {}
-                    }
-                }
-            });
-        }
-    }
-
-    fn spawn_latest_log_consumers(&self, range_tx: &Sender<BlockRangeMessage>, count: usize) {
-        for listener in &self.event_listeners {
-            let provider = self.block_range_scanner.provider().clone();
-            let filter = listener.filter.clone();
-            let log_filter = Filter::from(&filter);
-            let sender = listener.sender.clone();
-            let mut sub = range_tx.subscribe();
-
-            tokio::spawn(async move {
-                let mut events = Vec::with_capacity(count);
-                loop {
-                    match sub.recv().await {
-                        Ok(BlockRangeMessage::Data(range)) => {
-                            match Self::get_logs(range, &filter, &log_filter, &provider).await {
+                            match Self::get_logs(range, &filter, &base_filter, &provider).await {
                                 Ok(logs) => {
                                     if logs.is_empty() {
                                         continue;
                                     }
-                                    // SAFETY: events.len() <= count
-                                    let take = count - events.len();
-                                    let logs_rev = logs.into_iter().rev().take(take);
-                                    events.extend(logs_rev);
-                                    if events.len() == count {
-                                        break;
+
+                                    match mode {
+                                        ConsumerMode::Stream => {
+                                            if let Err(e) = sender.send(logs.into()).await {
+                                                warn!(error = %e, "Downstream channel closed, stopping stream");
+                                                break;
+                                            }
+                                        }
+                                        ConsumerMode::CollectLatest { count } => {
+                                            let take = count.saturating_sub(collected.len());
+                                            if take == 0 {
+                                                break;
+                                            }
+                                            // take latest within this range
+                                            collected.extend(logs.into_iter().rev().take(take));
+                                            if collected.len() == count {
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
                                 Err(e) => {
                                     if let Err(send_err) = sender.send(e.into()).await {
-                                        error!(error = %send_err, "Downstream channel closed, skip log result propagation and stopping stream");
+                                        error!(error = %send_err, "Downstream channel closed, stopping stream");
                                         break;
                                     }
                                 }
@@ -332,13 +310,13 @@ impl<N: Network> ConnectedEventScanner<N> {
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
                             if let Err(err) = sender.send(e.into()).await {
-                                warn!(error = %err, "Downstream channel closed, skipping error propagation and stopping streaming.");
+                                warn!(error = %err, "Downstream channel closed, stopping stream");
                                 break;
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
                             if let Err(err) = sender.send(status.into()).await {
-                                warn!(error = %err, "Downstream channel closed, skipping sending info to receiver stream and stopping streaming.");
+                                warn!(error = %err, "Downstream channel closed, stopping stream");
                                 break;
                             }
                         }
@@ -350,13 +328,13 @@ impl<N: Network> ConnectedEventScanner<N> {
                     }
                 }
 
-                info!(event_count = events.len(), "Collected events");
-
-                // we collected events in reverse, so put them in correct order before streaming
-                events.reverse();
-
-                if let Err(e) = sender.send(events.into()).await {
-                    warn!(error = %e, "Downstream channel closed, skipping sending info to receiver stream.");
+                if let ConsumerMode::CollectLatest { .. } = mode {
+                    if !collected.is_empty() {
+                        collected.reverse(); // restore chronological order
+                    }
+                    if let Err(e) = sender.send(collected.into()).await {
+                        warn!(error = %e, "Downstream channel closed, skipping final send");
+                    }
                 }
             });
         }
