@@ -614,6 +614,13 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
+    /// Streams blocks in reverse order from `from` to `to`.
+    ///
+    /// The `from` block is assumed to be greater than or equal to the `to` block.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stream fails
     async fn stream_rewind(
         &mut self,
         from: N::BlockResponse,
@@ -650,8 +657,10 @@ impl<N: Network> Service<N> {
 
             if self.reorg_detected(tip_hash).await? {
                 info!(block_number = %from, hash = %tip_hash, "Reorg detected");
+
                 self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
                     .await;
+
                 // restart rewind
                 batch_from = from;
                 // store the updated end block hash
