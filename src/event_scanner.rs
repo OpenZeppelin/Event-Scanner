@@ -282,8 +282,7 @@ impl<N: Network> ConnectedEventScanner<N> {
 
                                     match mode {
                                         ConsumerMode::Stream => {
-                                            if let Err(e) = sender.send(logs.into()).await {
-                                                warn!(error = %e, "Downstream channel closed, stopping stream");
+                                            if !Self::try_send(&sender, logs).await {
                                                 break;
                                             }
                                         }
@@ -301,22 +300,19 @@ impl<N: Network> ConnectedEventScanner<N> {
                                     }
                                 }
                                 Err(e) => {
-                                    if let Err(send_err) = sender.send(e.into()).await {
-                                        error!(error = %send_err, "Downstream channel closed, stopping stream");
+                                    if !Self::try_send(&sender, e).await {
                                         break;
                                     }
                                 }
                             }
                         }
                         Ok(BlockRangeMessage::Error(e)) => {
-                            if let Err(err) = sender.send(e.into()).await {
-                                warn!(error = %err, "Downstream channel closed, stopping stream");
+                            if !Self::try_send(&sender, e).await {
                                 break;
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
-                            if let Err(err) = sender.send(status.into()).await {
-                                warn!(error = %err, "Downstream channel closed, stopping stream");
+                            if !Self::try_send(&sender, status).await {
                                 break;
                             }
                         }
@@ -332,9 +328,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                     if !collected.is_empty() {
                         collected.reverse(); // restore chronological order
                     }
-                    if let Err(e) = sender.send(collected.into()).await {
-                        warn!(error = %e, "Downstream channel closed, skipping final send");
-                    }
+
+                    _ = Self::try_send(&sender, collected).await;
                 }
             });
         }
@@ -374,6 +369,17 @@ impl<N: Network> ConnectedEventScanner<N> {
                 Err(e)
             }
         }
+    }
+
+    async fn try_send<T: Into<EventScannerMessage>>(
+        sender: &tokio::sync::mpsc::Sender<EventScannerMessage>,
+        msg: T,
+    ) -> bool {
+        if let Err(err) = sender.send(msg.into()).await {
+            warn!(error = %err, "Downstream channel closed, stopping stream");
+            return false;
+        }
+        true
     }
 
     fn add_event_listener(&mut self, event_listener: EventListener) {
