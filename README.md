@@ -170,6 +170,6 @@ Integration tests cover live, historical, and hybrid flows:
 (We recommend using [nextest](https://crates.io/crates/cargo-nextest) to run the tests)
 
 ```bash
-cargo nextest run
+cargo nextest run --features test-utils
 ```
 
