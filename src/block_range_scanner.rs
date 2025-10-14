@@ -1424,6 +1424,8 @@ mod tests {
             let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
 
+            sleep(Duration::from_secs(2)).await;
+
             drop(lock);
         };
 
@@ -1494,6 +1496,7 @@ mod tests {
             let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
 
+            sleep(Duration::from_secs(2)).await;
             drop(lock);
         };
 
