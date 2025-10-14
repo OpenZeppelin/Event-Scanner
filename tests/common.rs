@@ -74,7 +74,7 @@ pub async fn setup_live_scanner(
     let stream = scanner.create_event_stream(filter);
 
     // return anvil otherwise it doesnt live long enough...
-    Ok(LiveScannerSetup { provider, contract, scanner: scanner, stream, anvil })
+    Ok(LiveScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
 #[allow(clippy::missing_errors_doc)]
