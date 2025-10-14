@@ -77,12 +77,12 @@ impl LiveScannerConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect_provider<N: Network>(
+    pub fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<LiveEventScanner<N>> {
         let LiveScannerConfig { base, block_confirmations } = self;
-        let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
+        let brs = base.block_range_scanner.connect::<N>(provider)?;
         let config = LiveScannerConfig { base, block_confirmations };
         Ok(LiveEventScanner { config, inner: EventScannerService::from_config(brs) })
     }

@@ -149,7 +149,7 @@ impl LatestScannerConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect_provider<N: Network>(
+    pub fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<LatestEventScanner<N>> {
@@ -161,7 +161,7 @@ impl LatestScannerConfig {
             block_confirmations,
             switch_to_live,
         } = self;
-        let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
+        let brs = base.block_range_scanner.connect::<N>(provider)?;
         let config = LatestScannerConfig {
             base,
             count,

@@ -191,7 +191,7 @@ impl BlockRangeScanner {
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let provider =
             RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
-        self.connect_provider(provider)
+        self.connect(provider)
     }
 
     /// Connects to the provider via IPC
@@ -204,7 +204,7 @@ impl BlockRangeScanner {
         ipc_path: String,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-        self.connect_provider(provider)
+        self.connect(provider)
     }
 
     /// Connects to an existing provider
@@ -212,7 +212,7 @@ impl BlockRangeScanner {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect_provider<N: Network>(
+    pub fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {

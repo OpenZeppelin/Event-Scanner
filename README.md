@@ -128,7 +128,7 @@ let scanner = EventScanner::latest()
 
 **Global Configuration Options:**
 - `block_read_limit(usize)` – Sets the maximum number of blocks to process per read operation. This prevents RPC provider errors from overly large block range queries.
-- Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or `connect_provider(provider)`.
+- Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or `connect(provider)`.
 
 **Mode-specific APIs:**
 - Live: `client.stream()` – Start streaming new blocks

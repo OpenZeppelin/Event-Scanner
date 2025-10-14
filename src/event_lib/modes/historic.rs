@@ -90,12 +90,12 @@ impl HistoricScannerConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect_provider<N: Network>(
+    pub fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<HistoricEventScanner<N>> {
         let HistoricScannerConfig { base, from_block, to_block } = self;
-        let brs = base.block_range_scanner.connect_provider::<N>(provider)?;
+        let brs = base.block_range_scanner.connect::<N>(provider)?;
         let config = HistoricScannerConfig { base, from_block, to_block };
         Ok(HistoricEventScanner { config, inner: EventScannerService::from_config(brs) })
     }
