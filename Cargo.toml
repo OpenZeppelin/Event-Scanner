@@ -63,3 +63,6 @@ tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+test-utils = []
