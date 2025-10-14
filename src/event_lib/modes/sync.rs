@@ -133,7 +133,8 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_pattern() {
-        let config = SyncScannerConfig::new().from_block(100).block_confirmations(10).block_read_limit(50);
+        let config =
+            SyncScannerConfig::new().from_block(100).block_confirmations(10).block_read_limit(50);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert_eq!(config.block_confirmations, 10);
@@ -166,7 +167,8 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_with_zero_confirmations() {
-        let config = SyncScannerConfig::new().from_block(0).block_confirmations(0).block_read_limit(75);
+        let config =
+            SyncScannerConfig::new().from_block(0).block_confirmations(0).block_read_limit(75);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(0)));
         assert_eq!(config.block_confirmations, 0);
