@@ -69,7 +69,7 @@ async fn run_scanner(
     contract: alloy::primitives::Address,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Configure scanner with custom batch size (optional)
-    let mut client = EventScanner::live()
+    let mut scanner = EventScanner::live()
         .max_reads(500)  // Process up to 500 blocks per batch
         .connect_ws::<Ethereum>(ws_url).await?;
 
@@ -77,10 +77,10 @@ async fn run_scanner(
         .with_contract_address(contract)
         .with_event(MyContract::SomeEvent::SIGNATURE);
 
-    let mut stream = client.create_event_stream(filter);
+    let mut stream = scanner.create_event_stream(filter);
 
     // Start the scanner
-    tokio::spawn(async move { client.stream().await });
+    tokio::spawn(async move { scanner.stream().await });
 
     while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
         println!("Fetched logs: {logs:?}");
