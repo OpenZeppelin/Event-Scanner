@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use alloy::{
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockNumberOrTag,
     primitives::U256,
     providers::{Provider, ext::AnvilApi},
     sol_types::SolEvent,
@@ -342,7 +342,7 @@ async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
     // Pick the expected tx's block number as the block range
     let expected_tx_hash = expected[0].tx_hash;
     let start = provider
-        .get_block_number_by_id(BlockId::Hash(expected_tx_hash.into()))
+        .get_block_number_by_id(expected_tx_hash.into())
         .await?
         .map(BlockNumberOrTag::from)
         .unwrap();
