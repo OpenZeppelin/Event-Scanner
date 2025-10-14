@@ -1422,9 +1422,8 @@ mod tests {
             let reorg_start = end_num - 5;
             let depth = head_now - reorg_start + 1;
             let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+            sleep(Duration::from_secs(4)).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
-
-            sleep(Duration::from_secs(2)).await;
 
             drop(lock);
         };
@@ -1494,9 +1493,9 @@ mod tests {
             // Reorg back to previous head aka our end num
             let depth = pre_reorg_mine + 1;
             let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+            sleep(Duration::from_secs(4)).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
 
-            sleep(Duration::from_secs(2)).await;
             drop(lock);
         };
 
