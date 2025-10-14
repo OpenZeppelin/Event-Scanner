@@ -342,8 +342,9 @@ async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
     // Pick the expected tx's block number as the block range
     let expected_tx_hash = expected[0].tx_hash;
     let start = provider
-        .get_block_number_by_id(expected_tx_hash.into())
+        .get_transaction_by_hash(expected_tx_hash)
         .await?
+        .map(|t| t.block_number.unwrap())
         .map(BlockNumberOrTag::from)
         .unwrap();
     let end = start;
