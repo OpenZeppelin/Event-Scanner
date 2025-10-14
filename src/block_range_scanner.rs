@@ -67,7 +67,10 @@
 
 use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    join,
+    sync::{mpsc, oneshot},
+};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::types::{ScannerMessage, ScannerStatus};
@@ -589,16 +592,14 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
-        let start_block = self
-            .provider
-            .get_block_by_number(start_height)
-            .await?
-            .ok_or(BlockRangeScannerError::BlockNotFound(start_height))?;
-        let end_block = self
-            .provider
-            .get_block_by_number(end_height)
-            .await?
-            .ok_or(BlockRangeScannerError::BlockNotFound(end_height))?;
+        let (start_block, end_block) = join!(
+            self.provider.get_block_by_number(start_height),
+            self.provider.get_block_by_number(end_height),
+        );
+
+        let start_block =
+            start_block?.ok_or(BlockRangeScannerError::BlockNotFound(start_height))?;
+        let end_block = end_block?.ok_or(BlockRangeScannerError::BlockNotFound(end_height))?;
 
         // normalize block range
         let (start_block, end_block) =
