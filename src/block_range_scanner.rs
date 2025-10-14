@@ -992,6 +992,7 @@ mod tests {
     use tokio::{
         join,
         sync::mpsc::Receiver,
+        task::yield_now,
         time::{sleep, timeout},
     };
 
@@ -1413,7 +1414,8 @@ mod tests {
         let fut_stream = client
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
-        let roerg = async {
+        let reorg_task = async {
+            yield_now().await;
             sleep(Duration::from_secs(2)).await;
             let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
             let head_now = provider.get_block_number().await.unwrap();
@@ -1425,8 +1427,7 @@ mod tests {
             drop(lock);
         };
 
-        let (res_stream, ()) = join!(fut_stream, roerg);
-
+        let (res_stream, ()) = join!(fut_stream, reorg_task);
         let mut stream = res_stream.unwrap();
 
         let mut data_ranges = Vec::new();
@@ -1483,7 +1484,8 @@ mod tests {
         let fut_stream = client
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
 
-        let roerg = async {
+        let reorg_task = async {
+            yield_now().await;
             sleep(Duration::from_secs(2)).await;
             let pre_reorg_mine = 20;
             let _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
@@ -1495,8 +1497,7 @@ mod tests {
             drop(lock);
         };
 
-        let (res_stream, ()) = join!(fut_stream, roerg);
-
+        let (res_stream, ()) = join!(fut_stream, reorg_task);
         let mut stream = res_stream.unwrap();
 
         let mut data_ranges = Vec::new();
