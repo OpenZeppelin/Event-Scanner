@@ -36,7 +36,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
 
     let mut stream = scanner.create_event_stream(filter);
 
-    tokio::spawn(async move { scanner.stream().await });
+    tokio::spawn(async move { scanner.start().await });
 
     //  perform a shallow reorg on the live tail
     let num_initial_events = 4u64;

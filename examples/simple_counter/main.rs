@@ -52,12 +52,12 @@ async fn main() -> anyhow::Result<()> {
         .with_contract_address(*contract_address)
         .with_event(Counter::CountIncreased::SIGNATURE);
 
-    let mut client = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.create_event_stream(increase_filter);
+    let mut stream = scanner.create_event_stream(increase_filter);
 
     let task_1 = tokio::spawn(async move {
-        client.start().await.expect("failed to start scanner");
+        scanner.start().await.expect("failed to start scanner");
     });
 
     let task_2 = tokio::spawn(async move {

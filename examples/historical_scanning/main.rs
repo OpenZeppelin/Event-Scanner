@@ -54,13 +54,13 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let mut client =
+    let mut scanner =
         EventScanner::historic().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.create_event_stream(increase_filter);
+    let mut stream = scanner.create_event_stream(increase_filter);
 
     sleep(Duration::from_secs(10)).await;
-    client.run().await.expect("failed to start scanner");
+    scanner.run().await.expect("failed to start scanner");
 
     while let Some(message) = stream.next().await {
         match message {

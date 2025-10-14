@@ -66,15 +66,15 @@ pub async fn setup_live_scanner(
 
     let filter = filter.unwrap_or(default_filter);
 
-    let mut client = EventScanner::live()
+    let mut scanner = EventScanner::live()
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
 
-    let stream = client.create_event_stream(filter);
+    let stream = scanner.create_event_stream(filter);
 
     // return anvil otherwise it doesnt live long enough...
-    Ok(LiveScannerSetup { provider, contract, scanner: client, stream, anvil })
+    Ok(LiveScannerSetup { provider, contract, scanner: scanner, stream, anvil })
 }
 
 #[allow(clippy::missing_errors_doc)]

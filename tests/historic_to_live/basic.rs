@@ -35,14 +35,14 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         .with_contract_address(contract_address)
         .with_event(TestCounter::CountIncreased::SIGNATURE);
 
-    let mut client = EventScanner::sync()
+    let mut scanner = EventScanner::sync()
         .from_block(first_historical_block)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    let mut stream = client.create_event_stream(filter).take(historical_events + live_events);
+    let mut stream = scanner.create_event_stream(filter).take(historical_events + live_events);
 
-    tokio::spawn(async move { client.stream().await });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..live_events {
         contract.increase().send().await?.watch().await?;
