@@ -11,6 +11,7 @@
 Event Scanner is a Rust library for streaming EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters; the scanner takes care of fetching historical ranges, bridging into live streaming mode, all whilst delivering the events as streams of data.
 
 ---
+ 
 
 ## Table of Contents
 
@@ -22,6 +23,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
   - [Scanning Latest Events](#scanning-latest-events)
+  - [Reorg behavior](#reorg-behavior)
   - [Working with Callbacks](#working-with-callbacks)
 - [Examples](#examples)
 - [Testing](#testing)
@@ -193,6 +195,26 @@ Notes:
 
 - Ensure you create streams via `create_event_stream()` before calling `scan_latest*` so listeners are registered.
 <!-- TODO: uncomment once implemented - The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`. -->
+
+---
+
+
+### Reorg behavior
+
+The scanner includes simple reorg handling across modes:
+
+- **Historical**: While syncing ranges, the scanner verifies continuity. If a reorg is detected, it rewinds by `with_reorg_rewind_depth` blocks and resumes forward syncing.
+- **Historical → Live**: After historical catch-up to a confirmed tip, live streaming starts from the cutoff. Any buffered blocks ≤ cutoff are discarded, and only new confirmed blocks are forwarded.
+- **Live**: On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window based on `with_block_confirmations`, re-sending the corrected confirmed range.
+
+Configuration knobs:
+
+- `with_reorg_rewind_depth(depth: u64)` — how far to rewind when a reorg is detected during historical/rewind flows.
+- `with_block_confirmations(n: u64)` — how many confirmations to wait before treating a block as confirmed during live streaming and when transitioning from historical to live.
+
+Notes on `scan_latest`:
+
+- `scan_latest` and `scan_latest_in_range` perform a reverse-ordered rewind over the requested range and periodically check the tip. On reorg, they emit `ScannerStatus::ReorgDetected`, reset to the updated tip, and continue until completion. Final delivery to listeners is in chronological order.
 
 ---
 

@@ -197,9 +197,27 @@ pub struct ConnectedEventScanner<N: Network> {
 impl<N: Network> ConnectedEventScanner<N> {
     /// Starts the scanner
     ///
+    /// Selects live, historical, or historical→live mode based on `start_height`/`end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - Start block (tag or number).
+    /// * `end_height` - Optional end block (tag or number). If `Some`, a historical scan is
+    ///   performed over the inclusive range; if `None`, the scanner either streams live or performs
+    ///   historical→live depending on `start_height`.
+    ///
+    /// # Reorg behavior
+    ///
+    /// * Historical: verifies chain continuity and if a reorg is detected, rewinds to the
+    ///   appropriate post-reorg block, then continues forward.
+    /// * Live: on reorg, emits [`ScannerStatus::ReorgDetected`] and adjusts the next block range
+    ///   using `with_block_confirmations` to re-emit the confirmed portion.
+    ///
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn start<T: Into<BlockNumberOrTag>>(
         &self,
         start_height: T,
@@ -239,12 +257,20 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// # Arguments
     ///
     /// * `count` - Maximum number of events to return per listener.
-    /// * `start_height` - Inclusive start block (tag or number) used for rewind.
-    /// * `end_height` - Inclusive end block (tag or number) used for rewind.
+    /// * `start_height` - Inclusive start block (tag or number).
+    /// * `end_height` - Inclusive end block (tag or number).
+    ///
+    /// # Reorg behavior
+    ///
+    /// Performs a reverse-ordered rewind over the range, periodically checking the tip hash. If a
+    /// reorg is detected, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
+    /// updated tip, and resumes until completion. Final delivery preserves chronological order.
     ///
     /// # Errors
     ///
     /// * Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn scan_latest<T: Into<BlockNumberOrTag>>(
         self,
         count: usize,
@@ -417,9 +443,26 @@ impl<N: Network> Client<N> {
 
     /// Starts the scanner
     ///
+    /// Selects live, historical, or historical→live mode based on `start_height`/`end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - Start block (tag or number).
+    /// * `end_height` - Optional end block (tag or number). If `Some`, a historical scan is
+    ///   performed over the inclusive range; if `None`, the scanner either streams live or performs
+    ///   historical→live depending on `start_height`.
+    ///
+    /// # Reorg behavior
+    ///
+    /// * Historical: verifies continuity and rewinds using `with_reorg_rewind_depth` on reorg.
+    /// * Live: s [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
+    ///   `with_block_confirmations`.
+    ///
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn start_scanner<T: Into<BlockNumberOrTag>>(
         self,
         start_height: T,
@@ -433,6 +476,12 @@ impl<N: Network> Client<N> {
     /// Internally calls `scan_latest_in_range` with `Earliest..=Latest` and emits a single message
     /// per listener with up to `count` logs, ordered oldest→newest.
     ///
+    /// # Reorg behavior
+    ///
+    /// Same as `scan_latest_in_range` over the full chain; reorgs during rewind are detected,
+    /// [`ScannerStatus::ReorgDetected`] is emitted, and the reorg is handled by restarting from
+    /// the updated tip.
+    ///
     /// # Arguments
     ///
     /// * `count` - Maximum number of events to return per listener.
@@ -440,6 +489,8 @@ impl<N: Network> Client<N> {
     /// # Errors
     ///
     /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn scan_latest(self, count: usize) -> Result<(), EventScannerError> {
         self.event_scanner
             .scan_latest(count, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
@@ -454,12 +505,19 @@ impl<N: Network> Client<N> {
     /// # Arguments
     ///
     /// * `count` - Maximum number of events to return per listener.
-    /// * `start_height` - Inclusive start block (tag or number) used for rewind.
-    /// * `end_height` - Inclusive end block (tag or number) used for rewind.
+    /// * `start_height` - Inclusive start block (tag or number).
+    /// * `end_height` - Inclusive end block (tag or number).
+    ///
+    /// # Reorg behavior
+    ///
+    /// Reverse-ordered rewind over the range with periodic tip checks. On reorg, emits
+    /// [`ScannerStatus::ReorgDetected`], resets the rewind start to the updated tip, and resumes.
     ///
     /// # Errors
     ///
     /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn scan_latest_in_range<T: Into<BlockNumberOrTag>>(
         self,
         count: usize,
