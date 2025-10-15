@@ -21,6 +21,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Building a Scanner](#building-a-scanner)
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
+  - [Scanning Latest Events](#scanning-latest-events)
   - [Working with Callbacks](#working-with-callbacks)
 - [Examples](#examples)
 - [Testing](#testing)
@@ -144,6 +145,54 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
 
 See the integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
+
+### Scanning Latest Events
+
+`scan_latest` provides a one-shot rewind that collects the most recent matching events for each registered stream.
+
+- It does not enter live mode; it scans a block range and then returns.
+- Each registered stream receives at most `count` logs in a single message, ordered oldest→newest.
+
+Basic usage (full chain rewind):
+
+```rust
+use alloy::{eips::BlockNumberOrTag, network::Ethereum};
+use event_scanner::{EventFilter, event_scanner::{EventScanner, EventScannerMessage}};
+use tokio_stream::StreamExt;
+
+async fn latest_example(ws_url: alloy::transports::http::reqwest::Url, addr: alloy::primitives::Address) -> eyre::Result<()> {
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
+
+    let filter = EventFilter::new().with_contract_address(addr);
+    let mut stream = client.create_event_stream(filter);
+
+    // Collect the latest 10 events across Earliest..=Latest
+    client.scan_latest(10).await?;
+
+    // Expect a single message with up to 10 logs, then the stream ends
+    while let Some(msg) = stream.next().await {
+        if let EventScannerMessage::Data(logs) = msg {
+            println!("Latest logs: {}", logs.len());
+        }
+    }
+
+    Ok(())
+}
+```
+
+Restricting to a specific block range:
+
+```rust
+// Collect the latest 5 events between blocks [1_000_000, 1_100_000]
+client
+    .scan_latest_in_range(5, BlockNumberOrTag::Number(1_000_000), BlockNumberOrTag::Number(1_100_000))
+    .await?;
+```
+
+Notes:
+
+- Ensure you create streams via `create_event_stream()` before calling `scan_latest*` so listeners are registered.
+<!-- TODO: uncomment once implemented - The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`. -->
 
 ---
 
