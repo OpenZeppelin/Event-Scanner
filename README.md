@@ -35,6 +35,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
 - **Historical replay** – stream events from past block ranges.
 - **Live subscriptions** – stay up to date with latest events via WebSocket or IPC transports.
 - **Hybrid flow** – automatically transition from historical catch-up into streaming mode.
+- **Latest events fetch** – one-shot rewind to collect the most recent matching logs.
 - **Composable filters** – register one or many contract + event signature pairs.
 - **No database** – processing happens in-memory; persistence is left to the host application.
 
@@ -140,9 +141,10 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 
 ### Scanning Modes
 
-- **Live mode** – `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only.
-- **Historical mode** – `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range.
-- **Historical → Live** – `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks.
+- **Live mode** - `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only.
+- **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range.
+- **Historical → Live** - `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks.
+- **Latest Events mode** - `scan_latest(count)` and `scan_latest_in_range(count, start, end)` provide a one-shot rewind that collects the most recent matching events for each registered stream.
 
 For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
 
