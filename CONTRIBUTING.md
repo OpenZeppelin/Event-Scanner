@@ -60,9 +60,9 @@ cargo build --locked --all-targets --all-features
 Run the test suite (we recommend nextest):
 
 ```bash
-cargo nextest run
+cargo nextest run --features test-utils
 # or
-cargo test
+cargo test --features test-utils
 ```
 
 Run examples:
@@ -123,7 +123,7 @@ cargo clippy --all-targets --all-features -- -D warnings -D clippy::pedantic
 typos
 
 # Tests (prefer nextest)
-cargo nextest run
+cargo nextest run --features test-utils
 ```
 
 ---
@@ -160,7 +160,7 @@ Key implementation details, trade-offs, and alternatives considered.
 - [ ] `cargo +nightly fmt --all --check`
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings -D clippy::pedantic`
 - [ ] `typos`
-- [ ] Tests pass (`cargo nextest run`)
+- [ ] Tests pass (`cargo nextest run --features test-utils`)
 - [ ] Docs/README/examples updated (if applicable)
 ```
 

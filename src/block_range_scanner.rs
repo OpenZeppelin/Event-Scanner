@@ -70,15 +70,18 @@ use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
 #[allow(unused_imports)]
 use std::sync::LazyLock;
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    join,
+    sync::{mpsc, oneshot},
+};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::types::{ScannerMessage, ScannerStatus};
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
-    network::{BlockResponse, Network},
-    primitives::BlockNumber,
+    network::{BlockResponse, Network, primitives::HeaderResponse},
+    primitives::{B256, BlockNumber},
     providers::{Provider, RootProvider},
     pubsub::Subscription,
     rpc::client::ClientBuilder,
@@ -178,6 +181,12 @@ pub enum Command {
     StreamFrom {
         sender: mpsc::Sender<BlockRangeMessage>,
         start_height: BlockNumberOrTag,
+        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
+    },
+    Rewind {
+        sender: mpsc::Sender<BlockRangeMessage>,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
     },
     Unsubscribe {
@@ -381,6 +390,13 @@ impl<N: Network> Service<N> {
                 self.subscriber = Some(sender);
                 info!(start_height = ?start_height, "Starting streaming from");
                 let result = self.handle_sync(start_height).await;
+                let _ = response.send(result);
+            }
+            Command::Rewind { sender, start_height, end_height, response } => {
+                self.ensure_no_subscriber()?;
+                self.subscriber = Some(sender);
+                info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
+                let result = self.handle_rewind(start_height, end_height).await;
                 let _ = response.send(result);
             }
             Command::Unsubscribe { response } => {
@@ -598,6 +614,106 @@ impl<N: Network> Service<N> {
 
         info!("Successfully transitioned from historical to live data");
         Ok(())
+    }
+
+    async fn handle_rewind(
+        &mut self,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+    ) -> Result<(), BlockRangeScannerError> {
+        let (start_block, end_block) = join!(
+            self.provider.get_block_by_number(start_height),
+            self.provider.get_block_by_number(end_height),
+        );
+
+        let start_block =
+            start_block?.ok_or(BlockRangeScannerError::BlockNotFound(start_height))?;
+        let end_block = end_block?.ok_or(BlockRangeScannerError::BlockNotFound(end_height))?;
+
+        // normalize block range
+        let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
+            Ordering::Greater => (start_block, end_block),
+            _ => (end_block, start_block),
+        };
+
+        self.stream_rewind(from, to).await?;
+
+        _ = self.subscriber.take();
+
+        Ok(())
+    }
+
+    /// Streams blocks in reverse order from `from` to `to`.
+    ///
+    /// The `from` block is assumed to be greater than or equal to the `to` block.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stream fails
+    async fn stream_rewind(
+        &mut self,
+        from: N::BlockResponse,
+        to: N::BlockResponse,
+    ) -> Result<(), BlockRangeScannerError> {
+        let mut batch_count = 0;
+        let blocks_read_per_epoch = self.config.blocks_read_per_epoch;
+
+        // for checking whether reorg occurred
+        let mut tip_hash = from.header().hash();
+
+        let from = from.header().number();
+        let to = to.header().number();
+
+        // we're iterating in reverse
+        let mut batch_from = from;
+
+        while batch_from >= to {
+            let batch_to = batch_from.saturating_sub(blocks_read_per_epoch as u64 - 1).max(to);
+
+            // stream the range regularly, i.e. from smaller block number to greater
+            self.send_to_subscriber(BlockRangeMessage::Data(batch_to..=batch_from)).await;
+
+            batch_count += 1;
+            if batch_count % 10 == 0 {
+                debug!(batch_count = batch_count, "Processed rewind batches");
+            }
+
+            // check early if end of stream achieved to avoid subtraction overflow when `to
+            // == 0`
+            if batch_to == to {
+                break;
+            }
+
+            if self.reorg_detected(tip_hash).await? {
+                info!(block_number = %from, hash = %tip_hash, "Reorg detected");
+
+                self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
+                    .await;
+
+                // restart rewind
+                batch_from = from;
+                // store the updated end block hash
+                tip_hash = self
+                    .provider
+                    .get_block_by_number(from.into())
+                    .await?
+                    .expect("Chain should have the same height post-reorg")
+                    .header()
+                    .hash();
+            } else {
+                // SAFETY: `batch_to` is always greater than `to`, so `batch_to - 1` is always
+                // a valid unsigned integer
+                batch_from = batch_to - 1;
+            }
+        }
+
+        info!(batch_count = batch_count, "Rewind completed");
+
+        Ok(())
+    }
+
+    async fn reorg_detected(&self, hash_to_check: B256) -> Result<bool, BlockRangeScannerError> {
+        Ok(self.provider.get_block_by_hash(hash_to_check).await?.is_none())
     }
 
     async fn stream_historical_blocks(
@@ -973,6 +1089,41 @@ impl BlockRangeScannerClient {
         Ok(ReceiverStream::new(blocks_receiver))
     }
 
+    /// Streams blocks in reverse order from `start_height` to `end_height`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_height` - The starting block number or tag (defaults to Latest if None).
+    /// * `end_height` - The ending block number or tag (defaults to Earliest if None).
+    ///
+    /// # Errors
+    ///
+    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn rewind<BN: Into<BlockNumberOrTag>>(
+        &self,
+        start_height: BN,
+        end_height: BN,
+    ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
+        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = Command::Rewind {
+            sender: blocks_sender,
+            start_height: start_height.into(),
+            end_height: end_height.into(),
+            response: response_tx,
+        };
+
+        self.command_sender
+            .send(command)
+            .await
+            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+
+        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
+
+        Ok(ReceiverStream::new(blocks_receiver))
+    }
+
     /// Unsubscribes the current subscriber.
     ///
     /// # Errors
@@ -1050,7 +1201,7 @@ mod tests {
         }
     }
 
-    macro_rules! assert_next_range {
+    macro_rules! assert_next {
         ($recv:expr, None) => {
             let next = $recv.next_range().await;
             assert!(next.is_none());
@@ -1578,27 +1729,27 @@ mod tests {
 
         // ranges where each batch is of max blocks per epoch size
         let mut stream = client.stream_historical(0, 19).await?;
-        assert_next_range!(stream, 0..=4);
-        assert_next_range!(stream, 5..=9);
-        assert_next_range!(stream, 10..=14);
-        assert_next_range!(stream, 15..=19);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 0..=4);
+        assert_next!(stream, 5..=9);
+        assert_next!(stream, 10..=14);
+        assert_next!(stream, 15..=19);
+        assert_next!(stream, None);
 
         // ranges where last batch is smaller than blocks per epoch
         let mut stream = client.stream_historical(93, 99).await?;
-        assert_next_range!(stream, 93..=97);
-        assert_next_range!(stream, 98..=99);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 93..=97);
+        assert_next!(stream, 98..=99);
+        assert_next!(stream, None);
 
         // range where blocks per epoch is larger than the number of blocks in the range
         let mut stream = client.stream_historical(3, 5).await?;
-        assert_next_range!(stream, 3..=5);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 3..=5);
+        assert_next!(stream, None);
 
         // single item range
         let mut stream = client.stream_historical(3, 3).await?;
-        assert_next_range!(stream, 3..=3);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 3..=3);
+        assert_next!(stream, None);
 
         // range where blocks per epoch is larger than the number of blocks on chain
         let client = BlockRangeScanner::new()
@@ -1608,12 +1759,12 @@ mod tests {
             .run()?;
 
         let mut stream = client.stream_historical(0, 20).await?;
-        assert_next_range!(stream, 0..=20);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 0..=20);
+        assert_next!(stream, None);
 
         let mut stream = client.stream_historical(0, 99).await?;
-        assert_next_range!(stream, 0..=99);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 0..=99);
+        assert_next!(stream, None);
 
         Ok(())
     }
@@ -1632,10 +1783,10 @@ mod tests {
             .run()?;
 
         let mut stream = client.stream_historical(10, 0).await?;
-        assert_next_range!(stream, 0..=4);
-        assert_next_range!(stream, 5..=9);
-        assert_next_range!(stream, 10..=10);
-        assert_next_range!(stream, None);
+        assert_next!(stream, 0..=4);
+        assert_next!(stream, 5..=9);
+        assert_next!(stream, 10..=10);
+        assert_next!(stream, None);
 
         Ok(())
     }
@@ -1802,6 +1953,206 @@ mod tests {
                 assert_eq!(attempts, 4);
             }
             other => panic!("unexpected message: {other:?}"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_single_batch_when_epoch_larger_than_range() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(150), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(100)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.rewind(100, 150).await?;
+
+        // Range length is 51, epoch is 100 -> single batch [100..=150]
+        assert_next!(stream, 100..=150);
+        assert_next!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_exact_multiple_of_epoch_creates_full_batches_in_reverse() -> anyhow::Result<()>
+    {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(15), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.rewind(0, 14).await?;
+
+        // 0..=14 with epoch 5 -> [10..=14, 5..=9, 0..=4]
+        assert_next!(stream, 10..=14);
+        assert_next!(stream, 5..=9);
+        assert_next!(stream, 0..=4);
+        assert_next!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_with_remainder_trims_first_batch_to_stream_start() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(15), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(4)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.rewind(3, 12).await?;
+
+        // 3..=12 with epoch 4 -> ends: 12,8,4 -> batches: [9..=12, 5..=8, 3..=4]
+        assert_next!(stream, 9..=12);
+        assert_next!(stream, 5..=8);
+        assert_next!(stream, 3..=4);
+        assert_next!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_single_block_range() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(15), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.rewind(7, 7).await?;
+
+        assert_next!(stream, 7..=7);
+        assert_next!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rewind_epoch_of_one_sends_each_block_in_reverse_order() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        provider.anvil_mine(Option::Some(15), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(1)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.rewind(5, 8).await?;
+
+        // 5..=8 with epoch 1 -> [8..=8, 7..=7, 6..=6, 5..=5]
+        assert_next!(stream, 8..=8);
+        assert_next!(stream, 7..=7);
+        assert_next!(stream, 6..=6);
+        assert_next!(stream, 5..=5);
+        assert_next!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn command_rewind_defaults_latest_to_earliest_batches_correctly() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
+        provider.anvil_mine(Option::Some(20), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(7)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client
+            .rewind::<BlockNumberOrTag>(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
+            .await?;
+
+        assert_next!(stream, 14..=20);
+        assert_next!(stream, 7..=13);
+        assert_next!(stream, 0..=6);
+        assert_next!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn command_rewind_handles_start_and_end_in_any_order() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        // Ensure blocks at 3 and 15 exist
+        provider.anvil_mine(Option::Some(16), Option::None).await?;
+
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.rewind(15, 3).await?;
+
+        assert_next!(stream, 11..=15);
+        assert_next!(stream, 6..=10);
+        assert_next!(stream, 3..=5);
+        assert_next!(stream, None);
+
+        let mut stream = client.rewind(3, 15).await?;
+
+        assert_next!(stream, 11..=15);
+        assert_next!(stream, 6..=10);
+        assert_next!(stream, 3..=5);
+        assert_next!(stream, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        // Do not mine up to 999 so start won't exist
+        let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(5)
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let res = client.rewind(0, 999).await;
+
+        match res {
+            Err(BlockRangeScannerError::BlockNotFound(_)) => {}
+            other => panic!("unexpected result: {other:?}"),
         }
 
         Ok(())

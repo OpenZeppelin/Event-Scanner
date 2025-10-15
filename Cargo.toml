@@ -1,5 +1,10 @@
 [workspace]
-members = [".", "examples/historical_scanning", "examples/simple_counter"]
+members = [
+    ".",
+    "examples/historical_scanning",
+    "examples/simple_counter",
+    "examples/latest_events_scanning",
+]
 resolver = "2"
 
 [workspace.package]
@@ -63,3 +68,6 @@ tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+test-utils = []
