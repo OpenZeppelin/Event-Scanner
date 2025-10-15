@@ -2317,6 +2317,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "latest_events_scanning"
+version = "0.2.1-alpha"
+dependencies = [
+ "alloy",
+ "alloy-node-bindings",
+ "anyhow",
+ "event-scanner",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

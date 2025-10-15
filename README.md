@@ -23,8 +23,6 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
   - [Scanning Latest Events](#scanning-latest-events)
-  - [Reorg behavior](#reorg-behavior)
-  - [Working with Callbacks](#working-with-callbacks)
 - [Examples](#examples)
 - [Testing](#testing)
 
@@ -141,10 +139,9 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 
 ### Scanning Modes
 
-- **Live mode** - `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only.
-- **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range.
-- **Historical → Live** - `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks.
-- **Latest Events mode** - `scan_latest(count)` and `scan_latest_in_range(count, start, end)` provide a one-shot rewind that collects the most recent matching events for each registered stream.
+- **Live mode** - `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only. On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window, streaming logs from the corrected confirmed block range.
+- **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range. While syncing ranges, the scanner verifies continuity. If a reorg is detected, it rewinds by `with_reorg_rewind_depth` blocks and resumes forward syncing.
+- **Historical → Live** - `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks. Reorgs are handled as per the particular mode phase the scanner is in (historical or live).
 
 For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
 
@@ -152,12 +149,12 @@ See the integration tests under `tests/live_mode`, `tests/historic_mode`, and `t
 
 ### Scanning Latest Events
 
-`scan_latest` provides a one-shot rewind that collects the most recent matching events for each registered stream.
+`scan_latest` collects the most recent matching events for each registered stream.
 
 - It does not enter live mode; it scans a block range and then returns.
-- Each registered stream receives at most `count` logs in a single message, ordered oldest→newest.
+- Each registered stream receives at most `count` logs in a single message, chronologically ordered.
 
-Basic usage (full chain rewind):
+Basic usage:
 
 ```rust
 use alloy::{eips::BlockNumberOrTag, network::Ethereum};
@@ -193,6 +190,8 @@ client
     .await?;
 ```
 
+The scanner periodically checks the tip to detect reorgs. On reorg, the scanner emits `ScannerStatus::ReorgDetected`, resets to the updated tip, and restarts the scan. Final delivery to log listeners is in chronological order.
+
 Notes:
 
 - Ensure you create streams via `create_event_stream()` before calling `scan_latest*` so listeners are registered.
@@ -200,30 +199,11 @@ Notes:
 
 ---
 
-
-### Reorg behavior
-
-The scanner includes simple reorg handling across modes:
-
-- **Historical**: While syncing ranges, the scanner verifies continuity. If a reorg is detected, it rewinds by `with_reorg_rewind_depth` blocks and resumes forward syncing.
-- **Historical → Live**: After historical catch-up to a confirmed tip, live streaming starts from the cutoff. Any buffered blocks ≤ cutoff are discarded, and only new confirmed blocks are forwarded.
-- **Live**: On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window based on `with_block_confirmations`, re-sending the corrected confirmed range.
-
-Configuration knobs:
-
-- `with_reorg_rewind_depth(depth: u64)` — how far to rewind when a reorg is detected during historical/rewind flows.
-- `with_block_confirmations(n: u64)` — how many confirmations to wait before treating a block as confirmed during live streaming and when transitioning from historical to live.
-
-Notes on `scan_latest`:
-
-- `scan_latest` and `scan_latest_in_range` perform a reverse-ordered rewind over the requested range and periodically check the tip. On reorg, they emit `ScannerStatus::ReorgDetected`, reset to the updated tip, and continue until completion. Final delivery to listeners is in chronological order.
-
----
-
 ## Examples
 
 - `examples/simple_counter` – minimal live-mode scanner
 - `examples/historical_scanning` – demonstrates replaying from genesis (block 0) before continuing streaming latest blocks
+- `examples/latest_events_scanning` – demonstrates scanning the latest events
 
 Run an example with:
 
@@ -239,8 +219,9 @@ Both examples spin up a local `anvil` instance, deploy a demo counter contract, 
 
 ## Testing
 
-Integration tests cover live, historical, and hybrid flows:
 (We recommend using [nextest](https://crates.io/crates/cargo-nextest) to run the tests)
+
+Integration tests cover all modes:
 
 ```bash
 cargo nextest run --features test-utils
