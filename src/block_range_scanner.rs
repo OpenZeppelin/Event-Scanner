@@ -157,6 +157,12 @@ impl From<RpcError<TransportErrorKind>> for BlockRangeScannerError {
     }
 }
 
+impl From<BlockRangeScannerError> for BlockRangeMessage {
+    fn from(error: BlockRangeScannerError) -> Self {
+        BlockRangeMessage::Error(error)
+    }
+}
+
 #[derive(Debug)]
 pub enum Command {
     StreamLive {
@@ -436,34 +442,62 @@ impl<N: Network> Service<N> {
 
         info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
-        let Some(subscriber) = self.subscriber.clone() else {
-            return Err(BlockRangeScannerError::ServiceShutdown);
-        };
-
-        let monitor = self.spawn_reorg_monitor_if_needed(end_block_num, subscriber).await?;
-
-        match self.stream_historical_blocks(start_block_num, end_block_num).await {
-            Ok(()) => {
-                // Post-sync: stop header collection and evaluate correction range
-                if let Some((handle, rx)) = monitor {
-                    self.drain_reorg_monitor_and_emit_correction(rx, end_block_num).await;
-                    handle.abort();
-                }
-            }
-            Err(e) => {
-                // abort live fetching if historical fetching fails
-                if let Some((handle, _)) = monitor {
-                    handle.abort();
-                }
-                return Err(e);
-            }
-        }
+        self.stream_block_range(start_block_num, end_block_num).await?;
 
         _ = self.subscriber.take();
 
         info!("Successfully synced historical data, closing the stream");
 
         Ok(())
+    }
+
+    async fn stream_block_range(
+        &mut self,
+        start_block_num: u64,
+        end_block_num: u64,
+    ) -> Result<(), BlockRangeScannerError> {
+        let Some(subscriber) = self.subscriber.clone() else {
+            return Err(BlockRangeScannerError::ServiceShutdown);
+        };
+
+        // Iterate until no reorg correction is needed anymore.
+        let mut current_start = start_block_num;
+        loop {
+            let monitor =
+                self.spawn_reorg_monitor_if_needed(end_block_num, subscriber.clone()).await?;
+
+            match self.stream_historical_blocks(current_start, end_block_num).await {
+                Ok(()) => {
+                    if let Some((handle, rx)) = monitor {
+                        handle.abort();
+
+                        // Drain the monitor to compute the earliest reorg start, if any.
+                        if let Some(reorg_start) =
+                            Self::drain_reorg_monitor_min_start(rx, end_block_num)
+                        {
+                            // Notify and re-run correction range iteratively instead of
+                            // recursively.
+                            self.send_to_subscriber(BlockRangeMessage::Status(
+                                ScannerStatus::ReorgDetected,
+                            ))
+                            .await;
+
+                            current_start = reorg_start;
+
+                            continue;
+                        }
+                    }
+                    break Ok(());
+                }
+                Err(e) => {
+                    // abort live fetching if historical fetching fails
+                    if let Some((handle, _)) = monitor {
+                        handle.abort();
+                    }
+                    break Err(e);
+                }
+            }
+        }
     }
 
     async fn handle_sync(
@@ -786,34 +820,25 @@ impl<N: Network> Service<N> {
         Ok(Option::Some((live_subscription_task, live_block_num_receiver)))
     }
 
-    async fn drain_reorg_monitor_and_emit_correction(
-        &mut self,
+    // Helper: drain the reorg monitor channel and return the earliest reorg start, if any.
+    fn drain_reorg_monitor_min_start(
         mut rx: mpsc::Receiver<BlockNumber>,
         end_num: BlockNumber,
-    ) {
+    ) -> Option<BlockNumber> {
         let Ok(first) = rx.try_recv() else {
-            return;
+            return None;
         };
 
         // Live monitor forwards only non-increasing heads at/below end_num (reorg signals).
-        // Determine earliest affected block and re-emit [reorg_start..=end_num].
-        let mut reorg_start = first;
-        while let Ok(reorged_blocks) = rx.try_recv() {
-            if reorged_blocks < reorg_start {
-                reorg_start = reorged_blocks;
+        // Determine earliest affected block within [..=end_num].
+        let mut reorg_start = if first <= end_num { first } else { end_num };
+        while let Ok(n) = rx.try_recv() {
+            if n <= end_num && n < reorg_start {
+                reorg_start = n;
             }
         }
 
-        let max_read = self.config.blocks_read_per_epoch as u64;
-
-        self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected)).await;
-
-        let mut current = reorg_start;
-        while current <= end_num {
-            let batch_end = current.saturating_add(max_read - 1).min(end_num);
-            self.send_to_subscriber(BlockRangeMessage::Data(current..=batch_end)).await;
-            current = batch_end + 1;
-        }
+        Some(reorg_start)
     }
 
     async fn send_to_subscriber(&mut self, message: BlockRangeMessage) {
