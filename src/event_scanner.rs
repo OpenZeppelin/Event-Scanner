@@ -200,12 +200,16 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
-    pub async fn start(
+    pub async fn start<T: Into<BlockNumberOrTag>>(
         &self,
-        start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
+        start_height: T,
+        end_height: Option<T>,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
+
+        let start_height = start_height.into();
+        let end_height = end_height.map(Into::into);
+
         let mut stream = if let Some(end_height) = end_height {
             client.stream_historical(start_height, end_height).await?
         } else if matches!(start_height, BlockNumberOrTag::Latest) {
@@ -228,16 +232,24 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
-    /// Scans the latest blocks and returns the specified number of events.
+    /// Scans a block range and collects the latest `count` matching events per registered listener.
+    ///
+    /// Emits a single message per listener with up to `count` logs, ordered oldest→newest.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of events to return per listener.
+    /// * `start_height` - Inclusive start block (tag or number) used for rewind.
+    /// * `end_height` - Inclusive end block (tag or number) used for rewind.
     ///
     /// # Errors
     ///
-    /// Returns an error if the scanner fails to start
-    pub async fn scan_latest(
+    /// * Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
+    pub async fn scan_latest<T: Into<BlockNumberOrTag>>(
         self,
         count: usize,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        start_height: T,
+        end_height: T,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let mut stream = client.rewind(start_height, end_height).await?;
@@ -408,35 +420,51 @@ impl<N: Network> Client<N> {
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
-    pub async fn start_scanner(
+    pub async fn start_scanner<T: Into<BlockNumberOrTag>>(
         self,
-        start_height: BlockNumberOrTag,
-        end_height: Option<BlockNumberOrTag>,
+        start_height: T,
+        end_height: Option<T>,
     ) -> Result<(), EventScannerError> {
-        self.event_scanner.start(start_height, end_height).await
+        self.event_scanner.start(start_height.into(), end_height.map(Into::into)).await
     }
 
-    /// Scans the latest `count` events.
+    /// Scans the chain and collects the latest `count` events per registered listener.
+    ///
+    /// Internally calls `scan_latest_in_range` with `Earliest..=Latest` and emits a single message
+    /// per listener with up to `count` logs, ordered oldest→newest.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of events to return per listener.
     ///
     /// # Errors
     ///
-    /// Returns an error if the scanner fails to scan
+    /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
     pub async fn scan_latest(self, count: usize) -> Result<(), EventScannerError> {
         self.event_scanner
             .scan_latest(count, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
             .await
     }
 
-    /// Scans the latest `count` events in a given block range.
+    /// Scans within the provided block range and collects the latest `count` events per registered
+    /// listener.
+    ///
+    /// Emits a single message per listener with up to `count` logs, ordered oldest→newest.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of events to return per listener.
+    /// * `start_height` - Inclusive start block (tag or number) used for rewind.
+    /// * `end_height` - Inclusive end block (tag or number) used for rewind.
     ///
     /// # Errors
     ///
-    /// Returns an error if the scanner fails to scan
-    pub async fn scan_latest_in_range(
+    /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
+    pub async fn scan_latest_in_range<T: Into<BlockNumberOrTag>>(
         self,
         count: usize,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        start_height: T,
+        end_height: T,
     ) -> Result<(), EventScannerError> {
         self.event_scanner.scan_latest(count, start_height, end_height).await
     }
