@@ -212,6 +212,8 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///   appropriate post-reorg block, then continues forward.
     /// * Live: on reorg, emits [`ScannerStatus::ReorgDetected`] and adjusts the next block range
     ///   using `with_block_confirmations` to re-emit the confirmed portion.
+    /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
+    ///   (historical or live).
     ///
     /// # Errors
     ///
@@ -264,7 +266,7 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///
     /// Performs a reverse-ordered rewind over the range, periodically checking the tip hash. If a
     /// reorg is detected, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
-    /// updated tip, and resumes until completion. Final delivery preserves chronological order.
+    /// updated tip, and resumes until completion. Final log delivery preserves chronological order.
     ///
     /// # Errors
     ///
@@ -455,8 +457,10 @@ impl<N: Network> Client<N> {
     /// # Reorg behavior
     ///
     /// * Historical: verifies continuity and rewinds using `with_reorg_rewind_depth` on reorg.
-    /// * Live: s [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
+    /// * Live: emits [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
     ///   `with_block_confirmations`.
+    /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
+    ///   (historical or live).
     ///
     /// # Errors
     ///
@@ -474,7 +478,7 @@ impl<N: Network> Client<N> {
     /// Scans the chain and collects the latest `count` events per registered listener.
     ///
     /// Internally calls `scan_latest_in_range` with `Earliest..=Latest` and emits a single message
-    /// per listener with up to `count` logs, ordered oldest→newest.
+    /// per listener with up to `count` logs, chronologically ordered.
     ///
     /// # Reorg behavior
     ///
@@ -500,7 +504,7 @@ impl<N: Network> Client<N> {
     /// Scans within the provided block range and collects the latest `count` events per registered
     /// listener.
     ///
-    /// Emits a single message per listener with up to `count` logs, ordered oldest→newest.
+    /// Emits a single message per listener with up to `count` logs, chronologically ordered.
     ///
     /// # Arguments
     ///
