@@ -9,7 +9,7 @@ use tokio_stream::StreamExt;
 
 use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
 
-use crate::common::{TestSetup, reorg_with_new_txs, setup_scanner};
+use crate::common::{TestSetup, reorg_with_new_count_incr_txs, setup_scanner};
 
 #[tokio::test]
 async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Result<()> {
@@ -32,7 +32,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     let reorg_depth = 2u64;
     let same_block = false;
 
-    let all_tx_hashes = reorg_with_new_txs(
+    let all_tx_hashes = reorg_with_new_count_incr_txs(
         provider.clone(),
         contract.clone(),
         num_initial_events,
