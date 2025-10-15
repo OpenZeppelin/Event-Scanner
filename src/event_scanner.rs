@@ -448,9 +448,10 @@ impl<N: Network> Client<N> {
     ///
     /// # Reorg behavior
     ///
-    /// * Historical: verifies continuity and rewinds using `with_reorg_rewind_depth` on reorg.
+    /// * Historical: verifies continuity. If a reorg is detected near the end of the range, emits
+    ///   [`ScannerStatus::ReorgDetected`] and re-runs the affected correction range.
     /// * Live: emits [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
-    ///   `with_block_confirmations`.
+    ///   `with_block_confirmations` (re-emits confirmed portions as needed).
     /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
     ///   (historical or live).
     ///

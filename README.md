@@ -61,7 +61,7 @@ Create an event stream for the given event filters registered with the `EventSca
 
 ```rust
 use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{EventFilter, event_scanner::EventScanner, block_range_scanner::Error};
+use event_scanner::{EventFilter, EventScanner, EventScannerError, EventScannerMessage};
 use tokio_stream::StreamExt;
 
 use crate::MyContract;
@@ -69,7 +69,7 @@ use crate::MyContract;
 async fn run_scanner(
     ws_url: alloy::transports::http::reqwest::Url,
     contract: alloy::primitives::Address,
-) -> Result<(), Error> {
+) -> Result<(), EventScannerError> {
     let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
 
     let filter = EventFilter::new()
@@ -99,10 +99,9 @@ async fn run_scanner(
 `EventScanner` supports:
 
 - `with_blocks_read_per_epoch` - how many blocks are read at a time in a single batch (taken into consideration when fetching historical blocks)
-- `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected (NOTE ⚠️: still WIP)
-- `with_block_confirmations` - how many confirmations to wait for before considering a block final (NOTE ⚠️: still WIP)
+- `with_block_confirmations` - how many confirmations to wait for before considering a block final
 
-Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-Modes).
+Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ### Defining Event Filters
 
@@ -140,7 +139,7 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 ### Scanning Modes
 
 - **Live mode** - `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only. On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window, streaming logs from the corrected confirmed block range.
-- **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range. While syncing ranges, the scanner verifies continuity. If a reorg is detected, it rewinds by `with_reorg_rewind_depth` blocks and resumes forward syncing.
+- **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range. While syncing ranges, the scanner verifies continuity. If a reorg is detected, it rewinds to the appropriate block range and resumes forward syncing.
 - **Historical → Live** - `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks. Reorgs are handled as per the particular mode phase the scanner is in (historical or live).
 
 For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.

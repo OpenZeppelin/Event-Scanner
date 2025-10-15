@@ -11,7 +11,7 @@ use crate::{
     assert_next,
     common::{TestCounter, deploy_counter, setup_scanner},
 };
-use event_scanner::{event_filter::EventFilter, event_scanner::test_utils::LogMetadata};
+use event_scanner::{EventFilter, test_utils::LogMetadata};
 
 macro_rules! increase {
     ($contract: expr) => {{
