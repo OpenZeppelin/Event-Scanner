@@ -7,11 +7,8 @@ use alloy::{
     sol_types::SolEvent,
 };
 
-use crate::{
-    assert_next,
-    common::{TestCounter, deploy_counter, setup_scanner},
-};
-use event_scanner::{EventFilter, test_utils::LogMetadata};
+use crate::common::{TestCounter, deploy_counter, setup_scanner};
+use event_scanner::{EventFilter, assert_next, test_utils::LogMetadata};
 
 macro_rules! increase {
     ($contract: expr) => {{

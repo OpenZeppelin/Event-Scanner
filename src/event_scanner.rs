@@ -25,9 +25,6 @@ use tokio::sync::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils;
-
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
 }
