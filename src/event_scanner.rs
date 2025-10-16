@@ -7,12 +7,13 @@ use crate::{
     },
     event_filter::EventFilter,
     event_listener::EventListener,
+    safe_provider::{SafeProvider, SafeProviderError},
     types::ScannerMessage,
 };
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
-    providers::{Provider, RootProvider},
+    providers::RootProvider,
     rpc::types::{Filter, Log},
     sol_types::SolEvent,
     transports::{RpcError, TransportErrorKind, http::reqwest::Url},
@@ -80,11 +81,19 @@ pub enum EventScannerError {
     BlockRangeScanner(#[from] BlockRangeScannerError),
     #[error("Provider error: {0}")]
     Provider(Arc<RpcError<TransportErrorKind>>),
+    #[error("Safe provider error: {0}")]
+    SafeProvider(Arc<SafeProviderError>),
 }
 
 impl From<RpcError<TransportErrorKind>> for EventScannerError {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
         EventScannerError::Provider(Arc::new(e))
+    }
+}
+
+impl From<SafeProviderError> for EventScannerError {
+    fn from(e: SafeProviderError) -> Self {
+        EventScannerError::SafeProvider(Arc::new(e))
     }
 }
 
@@ -97,6 +106,12 @@ impl From<RpcError<TransportErrorKind>> for EventScannerMessage {
 impl From<BlockRangeScannerError> for EventScannerMessage {
     fn from(e: BlockRangeScannerError) -> Self {
         EventScannerMessage::Error(e.into())
+    }
+}
+
+impl From<EventScannerError> for EventScannerMessage {
+    fn from(e: EventScannerError) -> Self {
+        EventScannerMessage::Error(e)
     }
 }
 
@@ -376,8 +391,8 @@ impl<N: Network> ConnectedEventScanner<N> {
         range: RangeInclusive<u64>,
         event_filter: &EventFilter,
         log_filter: &Filter,
-        provider: &RootProvider<N>,
-    ) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
+        provider: &SafeProvider<N>,
+    ) -> Result<Vec<Log>, EventScannerError> {
         let log_filter = log_filter.clone().from_block(*range.start()).to_block(*range.end());
 
         match provider.get_logs(&log_filter).await {
@@ -403,7 +418,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                     "failed to get logs for block range"
                 );
 
-                Err(e)
+                Err(e.into())
             }
         }
     }
