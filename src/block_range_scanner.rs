@@ -66,10 +66,6 @@
 
 use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
 
-// BUG: using cfg test doesnt work...?
-#[allow(unused_imports)]
-use std::sync::LazyLock;
-
 use tokio::{
     join,
     sync::{mpsc, oneshot},
