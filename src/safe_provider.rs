@@ -37,7 +37,6 @@ use alloy::{
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
 use tokio::time::timeout;
-use tracing::warn;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_RETRIES: usize = 5;
@@ -111,22 +110,38 @@ impl<N: Network> SafeProvider<N> {
         &self,
         number: BlockNumberOrTag,
     ) -> Result<Option<N::BlockResponse>, SafeProviderError> {
-        let timeout_duration = self.timeout;
         let provider = self.provider.clone();
+        self.retry_with_timeout(|| async { provider.get_block_by_number(number).await }).await
+    }
 
-        let operation = || async {
-            let result = timeout(timeout_duration, provider.get_block_by_number(number)).await;
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn get_block_number(&self) -> Result<u64, SafeProviderError> {
+        let provider = self.provider.clone();
+        self.retry_with_timeout(|| async { provider.get_block_number().await }).await
+    }
 
-            match result {
-                Ok(Ok(block)) => Ok(block),
-                Ok(Err(e)) => {
-                    warn!("RPC error fetching block {number}: {e}");
-                    Err(SafeProviderError::from(e))
-                }
-                Err(_) => {
-                    warn!("Timeout fetching block {number} after {timeout_duration:?}");
-                    Err(SafeProviderError::Timeout(timeout_duration))
-                }
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn get_block_by_hash(
+        &self,
+        hash: alloy::primitives::BlockHash,
+    ) -> Result<Option<N::BlockResponse>, SafeProviderError> {
+        let provider = self.provider.clone();
+        self.retry_with_timeout(|| async { provider.get_block_by_hash(hash).await }).await
+    }
+
+    #[allow(clippy::missing_errors_doc)]
+    async fn retry_with_timeout<T, F, Fut>(&self, operation: F) -> Result<T, SafeProviderError>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
+    {
+        let timeout_duration = self.timeout;
+
+        let wrapped_operation = || async {
+            match timeout(timeout_duration, operation()).await {
+                Ok(Ok(result)) => Ok(result),
+                Ok(Err(e)) => Err(SafeProviderError::from(e)),
+                Err(_) => Err(SafeProviderError::Timeout(timeout_duration)),
             }
         };
 
@@ -134,17 +149,7 @@ impl<N: Network> SafeProvider<N> {
             .with_max_times(self.max_retries)
             .with_min_delay(self.retry_interval);
 
-        operation.retry(retry_strategy).sleep(tokio::time::sleep).await
+        wrapped_operation.retry(retry_strategy).sleep(tokio::time::sleep).await
     }
-
-    // pub async fn get_block_number(&self) -> Result<BlockNumber, SafeProviderError> {
-    //     Ok(result)
-    // }
-    //
-    // pub async fn get_block_by_hash(
-    //     &self,
-    //     hash: alloy::primitives::BlockHash,
-    // ) -> Result<Option<N::BlockResponse>, SafeProviderError> {
-    //     Ok(result)
-    // }
 }
+
