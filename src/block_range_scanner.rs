@@ -1621,8 +1621,7 @@ mod tests {
 
         provider.anvil_mine(Option::Some(120), Option::None).await?;
 
-        let latest = provider.get_block_number().await?;
-        let end_num = latest - 10;
+        let end_num = 110;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(30)
@@ -1637,7 +1636,6 @@ mod tests {
             .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num))
             .await?;
 
-        _ = provider.anvil_mine(Option::Some(20), Option::None).await;
         let depth = 15;
         _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
         _ = provider.anvil_mine(Option::Some(20), Option::None).await;
