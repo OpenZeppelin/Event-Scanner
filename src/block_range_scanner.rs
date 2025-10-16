@@ -1615,6 +1615,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "too flaky, un-ignore once a full local node is used: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
     async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
@@ -1655,6 +1656,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "too flaky, un-ignore once a full local node is used: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
     async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
@@ -1727,6 +1729,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "too flaky, un-ignore once a full local node is used: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
     async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
