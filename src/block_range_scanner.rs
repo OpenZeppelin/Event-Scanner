@@ -1729,7 +1729,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "too flaky, un-ignore once a full local node is used: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
     async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
