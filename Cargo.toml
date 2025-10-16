@@ -32,6 +32,7 @@ tokio-stream = "0.1.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 hex = "0.4"
+backon = "1.5.2"
 
 [package]
 name = "event-scanner"
@@ -65,6 +66,7 @@ alloy-node-bindings.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+backon.workspace = true
 
 [lints]
 workspace = true
