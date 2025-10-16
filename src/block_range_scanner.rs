@@ -64,7 +64,7 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
+use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc, time::Duration};
 
 use tokio::{
     join,
@@ -72,7 +72,13 @@ use tokio::{
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::types::{ScannerMessage, ScannerStatus};
+use crate::{
+    safe_provider::{
+        DEFAULT_MAX_RETRIES, DEFAULT_RETRY_INTERVAL, DEFAULT_TIMEOUT, SafeProvider,
+        SafeProviderError,
+    },
+    types::{ScannerMessage, ScannerStatus},
+};
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
@@ -82,7 +88,7 @@ use alloy::{
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
-        RpcError, TransportErrorKind, TransportResult,
+        TransportResult,
         http::reqwest::{self, Url},
         ws::WsConnect,
     },
@@ -100,6 +106,11 @@ pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 // Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
 // is considered final)
 pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
+
+// RPC retry and timeout settings
+pub const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_RPC_MAX_RETRIES: usize = 5;
+pub const DEFAULT_RPC_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 // // State sync aware retry settings
 // const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -138,8 +149,8 @@ pub enum BlockRangeScannerError {
     #[error("Serialization error: {0}")]
     SerializationError(Arc<serde_json::Error>),
 
-    #[error("RPC error: {0}")]
-    RpcError(Arc<RpcError<TransportErrorKind>>),
+    #[error("Safe provider error: {0}")]
+    SafeProviderError(Arc<SafeProviderError>),
 
     #[error("Channel send error")]
     ChannelError,
@@ -175,9 +186,9 @@ impl From<serde_json::Error> for BlockRangeScannerError {
     }
 }
 
-impl From<RpcError<TransportErrorKind>> for BlockRangeScannerError {
-    fn from(error: RpcError<TransportErrorKind>) -> Self {
-        BlockRangeScannerError::RpcError(Arc::new(error))
+impl From<SafeProviderError> for BlockRangeScannerError {
+    fn from(error: SafeProviderError) -> Self {
+        BlockRangeScannerError::SafeProviderError(Arc::new(error))
     }
 }
 
@@ -233,6 +244,9 @@ pub struct BlockRangeScanner {
     blocks_read_per_epoch: usize,
     max_reorg_depth: u64,
     block_confirmations: u64,
+    timeout: Duration,
+    max_retries: usize,
+    retry_interval: Duration,
 }
 
 impl Default for BlockRangeScanner {
@@ -248,6 +262,9 @@ impl BlockRangeScanner {
             blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
             max_reorg_depth: DEFAULT_REORG_REWIND_DEPTH,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            timeout: DEFAULT_TIMEOUT,
+            max_retries: DEFAULT_MAX_RETRIES,
+            retry_interval: DEFAULT_RETRY_INTERVAL,
         }
     }
 
@@ -266,6 +283,24 @@ impl BlockRangeScanner {
     #[must_use]
     pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
         self.block_confirmations = block_confirmations;
+        self
+    }
+
+    #[must_use]
+    pub fn with_timeout(mut self, rpc_timeout: Duration) -> Self {
+        self.timeout = rpc_timeout;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_retries(mut self, rpc_max_retries: usize) -> Self {
+        self.max_retries = rpc_max_retries;
+        self
+    }
+
+    #[must_use]
+    pub fn with_retry_interval(mut self, rpc_retry_interval: Duration) -> Self {
+        self.retry_interval = rpc_retry_interval;
         self
     }
 
@@ -305,8 +340,13 @@ impl BlockRangeScanner {
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
+        let safe_provider = SafeProvider::new(provider)
+            .with_timeout(self.timeout)
+            .with_max_retries(self.max_retries)
+            .with_retry_interval(self.retry_interval);
+
         Ok(ConnectedBlockRangeScanner {
-            provider,
+            provider: safe_provider,
             config: Config {
                 blocks_read_per_epoch: self.blocks_read_per_epoch,
                 reorg_rewind_depth: self.max_reorg_depth,
@@ -317,14 +357,14 @@ impl BlockRangeScanner {
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
-    provider: RootProvider<N>,
+    provider: SafeProvider<N>,
     config: Config,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
-    /// Returns the underlying Provider.
+    /// Returns the `SafeProvider`
     #[must_use]
-    pub fn provider(&self) -> &RootProvider<N> {
+    pub fn provider(&self) -> &SafeProvider<N> {
         &self.provider
     }
 
@@ -344,7 +384,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
 
 struct Service<N: Network> {
     config: Config,
-    provider: RootProvider<N>,
+    provider: SafeProvider<N>,
     subscriber: Option<mpsc::Sender<BlockRangeMessage>>,
     websocket_connected: bool,
     processed_count: u64,
@@ -354,7 +394,7 @@ struct Service<N: Network> {
 }
 
 impl<N: Network> Service<N> {
-    pub fn new(config: Config, provider: RootProvider<N>) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(config: Config, provider: SafeProvider<N>) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
@@ -450,7 +490,13 @@ impl<N: Network> Service<N> {
         let range_start = (latest + 1).saturating_sub(block_confirmations);
 
         tokio::spawn(async move {
-            Self::stream_live_blocks(range_start, provider, sender, block_confirmations).await;
+            Self::stream_live_blocks(
+                range_start,
+                provider.inner().clone(),
+                sender,
+                block_confirmations,
+            )
+            .await;
         });
 
         Ok(())
@@ -534,7 +580,7 @@ impl<N: Network> Service<N> {
             let sender =
                 self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
-            let provider = self.provider.clone();
+            let provider = self.provider.inner().clone();
             tokio::spawn(async move {
                 Self::stream_live_blocks(start_block_num, provider, sender, block_confirmations)
                     .await;
@@ -554,7 +600,7 @@ impl<N: Network> Service<N> {
         let (live_block_buffer_sender, live_block_buffer_receiver) =
             mpsc::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-        let provider = self.provider.clone();
+        let provider = self.provider.inner().clone();
 
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
@@ -1104,8 +1150,12 @@ mod tests {
         Config { blocks_read_per_epoch: 5, reorg_rewind_depth: 5, block_confirmations: 0 }
     }
 
-    fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
-        RootProvider::new(RpcClient::mocked(asserter))
+    fn mocked_provider(asserter: Asserter) -> SafeProvider<Ethereum> {
+        let root_provider = RootProvider::new(RpcClient::mocked(asserter));
+        SafeProvider::new(root_provider)
+            .with_timeout(DEFAULT_RPC_TIMEOUT)
+            .with_max_retries(DEFAULT_RPC_MAX_RETRIES)
+            .with_retry_interval(DEFAULT_RPC_RETRY_INTERVAL)
     }
 
     #[test]
@@ -1970,3 +2020,4 @@ mod tests {
         Ok(())
     }
 }
+
