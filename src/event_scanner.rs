@@ -10,8 +10,9 @@ use crate::{
     types::ScannerMessage,
 };
 use alloy::{
+    consensus::BlockHeader,
     eips::BlockNumberOrTag,
-    network::Network,
+    network::{BlockResponse, Network},
     providers::{Provider, RootProvider},
     rpc::types::{Filter, Log},
     sol_types::SolEvent,
@@ -267,14 +268,14 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///
     /// # Errors
     ///
-    /// * Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
+    /// Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
-    pub async fn scan_latest<T: Into<BlockNumberOrTag>>(
+    pub async fn scan_latest(
         self,
         count: usize,
-        start_height: T,
-        end_height: T,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let mut stream = client.rewind(start_height, end_height).await?;
@@ -289,6 +290,85 @@ impl<N: Network> ConnectedEventScanner<N> {
                 break;
             }
         }
+
+        Ok(())
+    }
+
+    /// Scans the latest `count` matching events per registered listener, then streams live.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of events to return per listener.
+    ///
+    /// # Reorg behavior
+    ///
+    /// - Historical rewind phase: reverse-ordered rewind over `Earliest..=Latest`. On detecting a
+    ///   reorg, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the new tip, and
+    ///   continues until collectors accumulate `count` logs. Final delivery to listeners preserves
+    ///   chronological order.
+    /// - Live streaming phase: starts from `latest + 1` block and respects block confirmations
+    ///   configured via `with_block_confirmations`. On reorg, emits
+    ///   [`ScannerStatus::ReorgDetected`], adjusts the next confirmed window (possibly re-emitting
+    ///   confirmed portions), and continues.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
+    pub async fn scan_latest_then_live(self, count: usize) -> Result<(), EventScannerError> {
+        // Step 0: Setup the client and log consumers
+        let client = self.block_range_scanner.run()?;
+
+        // Step 1: Setup rewind stream to collect the specified number of latest events
+        // The log consumer and the respective tokio tasks they run in will be dropped after the
+        // operation is done.
+        let (rewind_range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
+        self.spawn_log_consumers(&rewind_range_tx, ConsumerMode::CollectLatest { count });
+
+        // Step 2: Setup live stream
+        // The log consumers will keep running in their respective tokio tasks as long as the
+        // scanner is running.
+        let (live_range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
+        self.spawn_log_consumers(&live_range_tx, ConsumerMode::Stream);
+
+        // Step 3: Setup rewind stream to collect the specified number of latest events
+        let mut rewind_stream =
+            client.rewind(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+
+        // Step 4: Setup the live streaming buffer
+        // This channel will accumulate while latest events sync is running.
+        // This stream will start from the next minted block after it gathers enough block
+        // confirmations.
+        let latest_block = self
+            .block_range_scanner
+            .provider()
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .await?
+            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
+            .header()
+            .number();
+
+        let mut live_stream = client.stream_from(latest_block + 1).await?;
+
+        // Step 5: Start streaming
+        tokio::spawn(async move {
+            // Step 5.1: Collect the specified number of latest events
+            while let Some(message) = rewind_stream.next().await {
+                if let Err(err) = rewind_range_tx.send(message) {
+                    warn!(error = %err, "No receivers, stopping broadcast");
+                    return;
+                }
+            }
+
+            // Step 5.2: Start the live stream
+            while let Some(message) = live_stream.next().await {
+                if let Err(err) = live_range_tx.send(message) {
+                    warn!(error = %err, "No receivers, stopping broadcast");
+                    return;
+                }
+            }
+        });
 
         Ok(())
     }
@@ -489,7 +569,7 @@ impl<N: Network> Client<N> {
     ///
     /// # Errors
     ///
-    /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
+    /// Returns `EventScannerError` if the scan fails to start or fetching logs fails.
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn scan_latest(self, count: usize) -> Result<(), EventScannerError> {
@@ -516,7 +596,7 @@ impl<N: Network> Client<N> {
     ///
     /// # Errors
     ///
-    /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
+    /// Returns `EventScannerError` if the scan fails to start or fetching logs fails.
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn scan_latest_in_range<T: Into<BlockNumberOrTag>>(
@@ -525,6 +605,13 @@ impl<N: Network> Client<N> {
         start_height: T,
         end_height: T,
     ) -> Result<(), EventScannerError> {
-        self.event_scanner.scan_latest(count, start_height, end_height).await
+        self.event_scanner.scan_latest(count, start_height.into(), end_height.into()).await
+    }
+
+    pub async fn scan_latest_then_live<T: Into<BlockNumberOrTag>>(
+        self,
+        count: usize,
+    ) -> Result<(), EventScannerError> {
+        self.event_scanner.scan_latest_then_live(count.into()).await
     }
 }
