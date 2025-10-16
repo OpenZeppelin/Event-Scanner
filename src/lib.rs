@@ -13,4 +13,4 @@ pub use block_range_scanner::{
 };
 pub use event_filter::EventFilter;
 pub use event_scanner::{EventScanner, EventScannerError, EventScannerMessage};
-pub use safe_provider::{SafeProvider, SafeProviderError};
+pub use safe_provider::SafeProvider;

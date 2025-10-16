@@ -26,7 +26,7 @@
 //! }
 //! ```
 
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{future::Future, time::Duration};
 
 use alloy::{
     eips::BlockNumberOrTag,
@@ -36,33 +36,14 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
-use thiserror::Error;
-use tokio::time::timeout;
+
+
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_MAX_RETRIES: usize = 5;
 pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
-#[derive(Error, Debug, Clone)]
-pub enum SafeProviderError {
-    #[error("RPC error: {0}")]
-    RpcError(Arc<RpcError<TransportErrorKind>>),
 
-    #[error("Request timeout after {0:?}")]
-    Timeout(Duration),
-
-    #[error("Block not found: {0}")]
-    BlockNotFound(BlockNumberOrTag),
-
-    #[error("All retry attempts exhausted")]
-    RetryExhausted,
-}
-
-impl From<RpcError<TransportErrorKind>> for SafeProviderError {
-    fn from(error: RpcError<TransportErrorKind>) -> Self {
-        SafeProviderError::RpcError(Arc::new(error))
-    }
-}
 
 #[derive(Clone)]
 pub struct SafeProvider<N: Network> {
@@ -110,13 +91,13 @@ impl<N: Network> SafeProvider<N> {
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> Result<Option<N::BlockResponse>, SafeProviderError> {
+    ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
         let provider = self.provider.clone();
         self.retry_with_timeout(|| async { provider.get_block_by_number(number).await }).await
     }
 
     #[allow(clippy::missing_errors_doc)]
-    pub async fn get_block_number(&self) -> Result<u64, SafeProviderError> {
+    pub async fn get_block_number(&self) -> Result<u64, RpcError<TransportErrorKind>> {
         let provider = self.provider.clone();
         self.retry_with_timeout(|| async { provider.get_block_number().await }).await
     }
@@ -125,33 +106,25 @@ impl<N: Network> SafeProvider<N> {
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
-    ) -> Result<Option<N::BlockResponse>, SafeProviderError> {
+    ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
         let provider = self.provider.clone();
         self.retry_with_timeout(|| async { provider.get_block_by_hash(hash).await }).await
     }
 
     #[allow(clippy::missing_errors_doc)]
-    pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, SafeProviderError> {
+    pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
         let provider = self.provider.clone();
         let filter = filter.clone();
         self.retry_with_timeout(|| async { provider.get_logs(&filter).await }).await
     }
 
     #[allow(clippy::missing_errors_doc)]
-    async fn retry_with_timeout<T, F, Fut>(&self, operation: F) -> Result<T, SafeProviderError>
+    async fn retry_with_timeout<T, F, Fut>(&self, operation: F) -> Result<T, RpcError<TransportErrorKind>>
     where
         F: Fn() -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let timeout_duration = self.timeout;
-
-        let wrapped_operation = || async {
-            match timeout(timeout_duration, operation()).await {
-                Ok(Ok(result)) => Ok(result),
-                Ok(Err(e)) => Err(SafeProviderError::from(e)),
-                Err(_) => Err(SafeProviderError::Timeout(timeout_duration)),
-            }
-        };
+        let wrapped_operation = || async { operation().await };
 
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)

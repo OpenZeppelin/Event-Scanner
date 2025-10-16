@@ -73,10 +73,7 @@ use tokio::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
-    safe_provider::{
-        DEFAULT_MAX_RETRIES, DEFAULT_RETRY_INTERVAL, DEFAULT_TIMEOUT, SafeProvider,
-        SafeProviderError,
-    },
+    safe_provider::{DEFAULT_MAX_RETRIES, DEFAULT_RETRY_INTERVAL, DEFAULT_TIMEOUT, SafeProvider},
     types::{ScannerMessage, ScannerStatus},
 };
 use alloy::{
@@ -88,7 +85,7 @@ use alloy::{
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
-        TransportResult,
+        RpcError, TransportErrorKind, TransportResult,
         http::reqwest::{self, Url},
         ws::WsConnect,
     },
@@ -149,8 +146,11 @@ pub enum BlockRangeScannerError {
     #[error("Serialization error: {0}")]
     SerializationError(Arc<serde_json::Error>),
 
-    #[error("Safe provider error: {0}")]
-    SafeProviderError(Arc<SafeProviderError>),
+    #[error("Provider error: {0}")]
+    Provider(Arc<RpcError<TransportErrorKind>>),
+
+    #[error("Block not found, block number: {0}")]
+    BlockNotFound(BlockNumberOrTag),
 
     #[error("Channel send error")]
     ChannelError,
@@ -169,9 +169,6 @@ pub enum BlockRangeScannerError {
 
     #[error("WebSocket connection failed after {0} attempts")]
     WebSocketConnectionFailed(usize),
-
-    #[error("Block not found, block number: {0}")]
-    BlockNotFound(BlockNumberOrTag),
 }
 
 impl From<reqwest::Error> for BlockRangeScannerError {
@@ -186,9 +183,9 @@ impl From<serde_json::Error> for BlockRangeScannerError {
     }
 }
 
-impl From<SafeProviderError> for BlockRangeScannerError {
-    fn from(error: SafeProviderError) -> Self {
-        BlockRangeScannerError::SafeProviderError(Arc::new(error))
+impl From<RpcError<TransportErrorKind>> for BlockRangeScannerError {
+    fn from(error: RpcError<TransportErrorKind>) -> Self {
+        BlockRangeScannerError::Provider(Arc::new(error))
     }
 }
 
@@ -2020,4 +2017,3 @@ mod tests {
         Ok(())
     }
 }
-

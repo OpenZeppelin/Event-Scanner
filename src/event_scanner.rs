@@ -7,7 +7,7 @@ use crate::{
     },
     event_filter::EventFilter,
     event_listener::EventListener,
-    safe_provider::{SafeProvider, SafeProviderError},
+    safe_provider::SafeProvider,
     types::ScannerMessage,
 };
 use alloy::{
@@ -81,8 +81,7 @@ pub enum EventScannerError {
     BlockRangeScanner(#[from] BlockRangeScannerError),
     #[error("Provider error: {0}")]
     Provider(Arc<RpcError<TransportErrorKind>>),
-    #[error("Safe provider error: {0}")]
-    SafeProvider(Arc<SafeProviderError>),
+
 }
 
 impl From<RpcError<TransportErrorKind>> for EventScannerError {
@@ -91,11 +90,6 @@ impl From<RpcError<TransportErrorKind>> for EventScannerError {
     }
 }
 
-impl From<SafeProviderError> for EventScannerError {
-    fn from(e: SafeProviderError) -> Self {
-        EventScannerError::SafeProvider(Arc::new(e))
-    }
-}
 
 impl From<RpcError<TransportErrorKind>> for EventScannerMessage {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
