@@ -1243,11 +1243,7 @@ impl BlockRangeScannerClient {
 mod tests {
 
     use std::time::Duration;
-    use tokio::{
-        join,
-        task::yield_now,
-        time::{sleep, timeout},
-    };
+    use tokio::time::timeout;
 
     use super::*;
     use crate::assert_next;
@@ -1663,67 +1659,35 @@ mod tests {
 
         provider.anvil_mine(Option::Some(120), Option::None).await?;
 
-        let head_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?;
-        let end_num = head_block.unwrap().header().number();
+        let end_num = 120;
 
         let client = BlockRangeScanner::new()
+            .with_blocks_read_per_epoch(30)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
         let lock = super::TEST_HIST_LOCK.lock().await;
 
-        let fut_stream = client
-            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num));
+        let mut stream = client
+            .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num))
+            .await?;
 
-        let reorg_task = async {
-            yield_now().await;
-            sleep(Duration::from_secs(2)).await;
-            let pre_reorg_mine = 20;
-            let _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
-            // Reorg back to previous head aka our end num
-            let depth = pre_reorg_mine + 1;
-            let _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
-            sleep(Duration::from_secs(4)).await;
-            let _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+        let pre_reorg_mine = 20;
+        _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
+        let depth = pre_reorg_mine + 1;
+        _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+        _ = provider.anvil_mine(Option::Some(20), Option::None).await;
 
-            drop(lock);
-        };
+        drop(lock);
 
-        let (res_stream, ()) = join!(fut_stream, reorg_task);
-        let mut stream = res_stream.unwrap();
-
-        let mut data_ranges = Vec::new();
-        let mut reorg = false;
-        while let Some(msg) = stream.next().await {
-            match msg {
-                BlockRangeMessage::Data(range) => data_ranges.push(range),
-                BlockRangeMessage::Status(status) => {
-                    if matches!(status, ScannerStatus::ReorgDetected) {
-                        reorg = true;
-                    }
-                }
-                BlockRangeMessage::Error(_) => {
-                    panic!("error");
-                }
-            }
-        }
-
-        assert!(reorg, "no reorg detected");
-
-        // reorg of 1 so last range should be end num
-        let reorg_start = end_num;
-        let last_range = data_ranges.last().expect("should have at least one range");
-        assert_eq!(
-            *last_range.start(),
-            reorg_start,
-            "expected last range to start at {reorg_start}, got: {last_range:?}"
-        );
-        assert_eq!(
-            *last_range.end(),
-            end_num,
-            "expected last range to end at {end_num}, got: {last_range:?}"
-        );
+        assert_next!(stream, 0..=29);
+        assert_next!(stream, 30..=59);
+        assert_next!(stream, 60..=89);
+        assert_next!(stream, 90..=120);
+        assert_next!(stream, ScannerStatus::ReorgDetected);
+        assert_next!(stream, 120..=120);
+        assert_next!(stream, None);
 
         Ok(())
     }
@@ -2173,3 +2137,4 @@ mod tests {
         Ok(())
     }
 }
+
