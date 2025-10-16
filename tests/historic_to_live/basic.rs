@@ -1,5 +1,7 @@
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{assert_next, event_filter::EventFilter, event_scanner::EventScanner};
+use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::U256, sol_types::SolEvent};
+use event_scanner::{
+    assert_next, event_filter::EventFilter, event_scanner::EventScanner, types::ScannerStatus,
+};
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 
