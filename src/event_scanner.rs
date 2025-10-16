@@ -121,6 +121,14 @@ impl EventScanner {
         self
     }
 
+    /// Sets the depth to rewind when a reorg is detected.
+    #[must_use]
+    pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
+        self.block_range_scanner =
+            self.block_range_scanner.with_reorg_rewind_depth(reorg_rewind_depth);
+        self
+    }
+
     /// Configures how many confirmations are required before processing a block (used for reorgs).
     #[must_use]
     pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
