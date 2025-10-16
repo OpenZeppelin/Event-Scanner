@@ -39,9 +39,9 @@ use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
 use tokio::time::timeout;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_MAX_RETRIES: usize = 5;
-const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_MAX_RETRIES: usize = 5;
+pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Error, Debug, Clone)]
 pub enum SafeProviderError {
