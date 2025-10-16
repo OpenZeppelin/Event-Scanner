@@ -26,12 +26,13 @@
 //! }
 //! ```
 
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
     providers::{Provider, RootProvider},
+    rpc::types::{Filter, Log},
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
@@ -130,6 +131,13 @@ impl<N: Network> SafeProvider<N> {
     }
 
     #[allow(clippy::missing_errors_doc)]
+    pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, SafeProviderError> {
+        let provider = self.provider.clone();
+        let filter = filter.clone();
+        self.retry_with_timeout(|| async { provider.get_logs(&filter).await }).await
+    }
+
+    #[allow(clippy::missing_errors_doc)]
     async fn retry_with_timeout<T, F, Fut>(&self, operation: F) -> Result<T, SafeProviderError>
     where
         F: Fn() -> Fut,
@@ -152,4 +160,3 @@ impl<N: Network> SafeProvider<N> {
         wrapped_operation.retry(retry_strategy).sleep(tokio::time::sleep).await
     }
 }
-
