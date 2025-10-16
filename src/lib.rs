@@ -3,6 +3,8 @@ pub mod event_filter;
 pub mod event_listener;
 pub mod event_scanner;
 pub mod safe_provider;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 pub mod types;
 
 pub use block_range_scanner::{
@@ -12,4 +14,3 @@ pub use block_range_scanner::{
 pub use event_filter::EventFilter;
 pub use event_scanner::{EventScanner, EventScannerError, EventScannerMessage};
 pub use safe_provider::{SafeProvider, SafeProviderError};
-
