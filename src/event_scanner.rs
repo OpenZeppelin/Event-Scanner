@@ -25,9 +25,6 @@ use tokio::sync::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils;
-
 pub struct EventScanner {
     block_range_scanner: BlockRangeScanner,
 }
@@ -456,9 +453,9 @@ impl<N: Network> Client<N> {
     ///
     /// # Reorg behavior
     ///
-    /// * Historical: verifies continuity and rewinds using `with_reorg_rewind_depth` on reorg.
+    /// * Historical: No reorg detection still WIP.
     /// * Live: emits [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
-    ///   `with_block_confirmations`.
+    ///   `with_block_confirmations` (re-emits confirmed portions as needed).
     /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
     ///   (historical or live).
     ///

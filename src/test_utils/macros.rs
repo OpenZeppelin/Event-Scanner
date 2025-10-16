@@ -9,7 +9,7 @@ macro_rules! assert_next {
         if let Some(msg) = message {
             assert_eq!(msg, $expected)
         } else {
-            panic!("Expected EventScannerMessage::Data, got: {message:?}")
+            panic!("Expected {:?}, got: {message:?}", $expected)
         }
     };
 }
