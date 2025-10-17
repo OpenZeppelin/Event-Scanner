@@ -7,7 +7,7 @@ use crate::{
     },
     event_filter::EventFilter,
     event_listener::EventListener,
-    types::ScannerMessage,
+    types::{ScannerMessage, ScannerStatus},
 };
 use alloy::{
     consensus::BlockHeader,
@@ -285,8 +285,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         self.spawn_log_consumers(&range_tx, ConsumerMode::CollectLatest { count });
 
         while let Some(message) = stream.next().await {
-            if let Err(err) = range_tx.send(message) {
-                error!(error = %err, "No receivers, stopping broadcast");
+            if !Self::try_broadcast(&range_tx, message) {
                 break;
             }
         }
@@ -336,7 +335,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         let mut rewind_stream =
             client.rewind(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
 
-        // Step 4: Setup the live streaming buffer
+        // Step 4: Setup the sync streaming buffer
         // This channel will accumulate while latest events sync is running.
         // This stream will start from the next minted block after it gathers enough block
         // confirmations.
@@ -349,22 +348,25 @@ impl<N: Network> ConnectedEventScanner<N> {
             .header()
             .number();
 
-        let mut live_stream = client.stream_from(latest_block + 1).await?;
+        let mut sync_stream = client.stream_from(latest_block + 1).await?;
 
         // Step 5: Start streaming
         tokio::spawn(async move {
             // Step 5.1: Collect the specified number of latest events
             while let Some(message) = rewind_stream.next().await {
-                if let Err(err) = rewind_range_tx.send(message) {
-                    warn!(error = %err, "No receivers, stopping broadcast");
+                if !Self::try_broadcast(&rewind_range_tx, message) {
                     return;
                 }
             }
 
-            // Step 5.2: Start the live stream
-            while let Some(message) = live_stream.next().await {
-                if let Err(err) = live_range_tx.send(message) {
-                    warn!(error = %err, "No receivers, stopping broadcast");
+            // Step 5.2: Notify the client that we're not streaming live
+            if !Self::try_broadcast(&live_range_tx, ScannerStatus::ChainTipReached) {
+                return;
+            }
+
+            // Step 5.3: Start the live stream
+            while let Some(message) = sync_stream.next().await {
+                if !Self::try_broadcast(&live_range_tx, message) {
                     return;
                 }
             }
@@ -489,11 +491,23 @@ impl<N: Network> ConnectedEventScanner<N> {
     }
 
     async fn try_send<T: Into<EventScannerMessage>>(
-        sender: &tokio::sync::mpsc::Sender<EventScannerMessage>,
+        sender: &mpsc::Sender<EventScannerMessage>,
         msg: T,
     ) -> bool {
         if let Err(err) = sender.send(msg.into()).await {
             warn!(error = %err, "Downstream channel closed, stopping stream");
+            return false;
+        }
+        true
+    }
+
+    #[must_use]
+    fn try_broadcast<T: Into<BlockRangeMessage>>(
+        sender: &broadcast::Sender<BlockRangeMessage>,
+        message: T,
+    ) -> bool {
+        if let Err(err) = sender.send(message.into()) {
+            warn!(error = %err, "No receivers, stopping broadcast");
             return false;
         }
         true
