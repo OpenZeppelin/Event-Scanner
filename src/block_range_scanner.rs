@@ -502,8 +502,9 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
     ) -> Result<(), BlockRangeScannerError> {
         let sender =
-            self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
+            self.subscriber.take().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
+        let provider = self.provider.clone();
         let block_confirmations = self.config.block_confirmations;
         let blocks_read_per_epoch = self.config.blocks_read_per_epoch as u64;
 
@@ -533,10 +534,6 @@ impl<N: Network> Service<N> {
                 "Start block is beyond confirmed tip, starting live stream"
             );
 
-            let sender =
-                self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
-
-            let provider = self.provider.clone();
             tokio::spawn(async move {
                 Self::stream_live_blocks(start_block_num, provider, sender, block_confirmations)
                     .await;
@@ -555,8 +552,6 @@ impl<N: Network> Service<N> {
         // This channel will accumulate while historical sync is running
         let (live_block_buffer_sender, live_block_buffer_receiver) =
             mpsc::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
-
-        let provider = self.provider.clone();
 
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
