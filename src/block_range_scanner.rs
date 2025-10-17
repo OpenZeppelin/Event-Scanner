@@ -505,6 +505,8 @@ impl<N: Network> Service<N> {
             self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
         let block_confirmations = self.config.block_confirmations;
+        let blocks_read_per_epoch = self.config.blocks_read_per_epoch as u64;
+
         // Step 1:
         // Fetches the starting block and end block for historical sync in parallel
         let (start_block, latest_block) = tokio::try_join!(
@@ -571,36 +573,40 @@ impl<N: Network> Service<N> {
             .await;
         });
 
-        // Step 4: Perform historical synchronization
-        // This processes blocks from start_block to end_block (cutoff)
-        // If this fails, we need to abort the live streaming task
-        if let Err(e) = Self::stream_historical_blocks(
-            start_block_num,
-            confirmed_tip_num,
-            self.config.blocks_read_per_epoch as u64,
-            &sender,
-        )
-        .await
-        {
-            warn!("aborting live_subscription_task");
-            live_subscription_task.abort();
-            return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
-        }
-
-        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::SwitchingToLive)).await;
-
-        // Step 5:
-        // Spawn the buffer processor task
-        // This will:
-        // 1. Process all buffered blocks, filtering out any ≤ cutoff
-        // 2. Forward blocks > cutoff to the user
-        // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
-        //    stream)
         tokio::spawn(async move {
+            // Step 4: Perform historical synchronization
+            // This processes blocks from start_block to end_block (cutoff)
+            // If this fails, we need to abort the live streaming task
+            if Self::stream_historical_blocks(
+                start_block_num,
+                confirmed_tip_num,
+                blocks_read_per_epoch,
+                &sender,
+            )
+            .await
+            .is_err()
+            {
+                error!("Error during syncing past blocks, stopping stream");
+                live_subscription_task.abort();
+                return;
+            }
+
+            if !Self::try_send(&sender, ScannerStatus::SwitchingToLive).await {
+                return;
+            }
+
+            info!("Successfully transitioned from historical to live data");
+
+            // Step 5:
+            // Spawn the buffer processor task
+            // This will:
+            // 1. Process all buffered blocks, filtering out any ≤ cutoff
+            // 2. Forward blocks > cutoff to the user
+            // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
+            //    stream)
             Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
         });
 
-        info!("Successfully transitioned from historical to live data");
         Ok(())
     }
 
