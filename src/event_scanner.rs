@@ -331,14 +331,8 @@ impl<N: Network> ConnectedEventScanner<N> {
         let (live_range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
         self.spawn_log_consumers(&live_range_tx, ConsumerMode::Stream);
 
-        // Step 3: Setup rewind stream to collect the specified number of latest events
-        let mut rewind_stream =
-            client.rewind(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
-
-        // Step 4: Setup the sync streaming buffer
-        // This channel will accumulate while latest events sync is running.
-        // This stream will start from the next minted block after it gathers enough block
-        // confirmations.
+        // Step 3: Fetch the latest block number.
+        // This is used to determine the starting point for the rewind stream and the live stream.
         let latest_block = self
             .block_range_scanner
             .provider()
@@ -347,6 +341,9 @@ impl<N: Network> ConnectedEventScanner<N> {
             .ok_or_else(|| BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
             .header()
             .number();
+
+        // Step 4: Setup rewind stream to collect the specified number of latest events
+        let mut rewind_stream = client.rewind(BlockNumberOrTag::Earliest, latest_block).await?;
 
         let mut sync_stream = client.stream_from(latest_block + 1).await?;
 
@@ -622,10 +619,7 @@ impl<N: Network> Client<N> {
         self.event_scanner.scan_latest(count, start_height.into(), end_height.into()).await
     }
 
-    pub async fn scan_latest_then_live<T: Into<BlockNumberOrTag>>(
-        self,
-        count: usize,
-    ) -> Result<(), EventScannerError> {
+    pub async fn scan_latest_then_live(self, count: usize) -> Result<(), EventScannerError> {
         self.event_scanner.scan_latest_then_live(count.into()).await
     }
 }

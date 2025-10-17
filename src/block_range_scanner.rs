@@ -960,10 +960,10 @@ impl BlockRangeScannerClient {
     /// # Errors
     ///
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_historical<N: Into<BlockNumberOrTag>>(
+    pub async fn stream_historical(
         &self,
-        start_height: N,
-        end_height: N,
+        start_height: impl Into<BlockNumberOrTag>,
+        end_height: impl Into<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -1027,10 +1027,10 @@ impl BlockRangeScannerClient {
     /// # Errors
     ///
     /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn rewind<BN: Into<BlockNumberOrTag>>(
+    pub async fn rewind(
         &self,
-        start_height: BN,
-        end_height: BN,
+        start_height: impl Into<BlockNumberOrTag>,
+        end_height: impl Into<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -1866,9 +1866,8 @@ mod tests {
             .await?
             .run()?;
 
-        let mut stream = client
-            .rewind::<BlockNumberOrTag>(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
-            .await?;
+        let mut stream =
+            client.rewind(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
 
         assert_next!(stream, 14..=20);
         assert_next!(stream, 7..=13);
