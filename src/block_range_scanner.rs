@@ -587,7 +587,7 @@ impl<N: Network> Service<N> {
             return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
         }
 
-        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
+        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::SwitchingToLive)).await;
 
         // Step 5:
         // Spawn the buffer processor task

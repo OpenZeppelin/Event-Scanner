@@ -50,7 +50,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     );
 
     // chain tip reached
-    assert_next!(stream, ScannerStatus::ChainTipReached);
+    assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // live events
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) },]);

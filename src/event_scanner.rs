@@ -360,7 +360,7 @@ impl<N: Network> ConnectedEventScanner<N> {
             }
 
             // Step 5.2: Notify the client that we're not streaming live
-            if !Self::try_broadcast(&live_range_tx, ScannerStatus::ChainTipReached) {
+            if !Self::try_broadcast(&live_range_tx, ScannerStatus::SwitchingToLive) {
                 return;
             }
 
