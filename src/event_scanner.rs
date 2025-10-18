@@ -19,9 +19,12 @@ use alloy::{
     transports::{RpcError, TransportErrorKind, http::reqwest::Url},
 };
 use thiserror::Error;
-use tokio::sync::{
-    broadcast::{self, Sender, error::RecvError},
-    mpsc,
+use tokio::{
+    sync::{
+        broadcast::{self, Sender, error::RecvError},
+        mpsc,
+    },
+    task::JoinSet,
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
@@ -181,7 +184,7 @@ impl EventScanner {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum ConsumerMode {
     Stream,
     CollectLatest { count: usize },
@@ -316,20 +319,23 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn scan_latest_then_live(self, count: usize) -> Result<(), EventScannerError> {
+        info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
+
         // Step 0: Setup the client and log consumers
         let client = self.block_range_scanner.run()?;
 
         // Step 1: Setup rewind stream to collect the specified number of latest events
         // The log consumer and the respective tokio tasks they run in will be dropped after the
         // operation is done.
-        let (rewind_range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
-        self.spawn_log_consumers(&rewind_range_tx, ConsumerMode::CollectLatest { count });
+        let (rewind_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
+        let rewind_log_consumers =
+            self.spawn_log_consumers(&rewind_tx, ConsumerMode::CollectLatest { count });
 
         // Step 2: Setup live stream
         // The log consumers will keep running in their respective tokio tasks as long as the
         // scanner is running.
-        let (live_range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
-        self.spawn_log_consumers(&live_range_tx, ConsumerMode::Stream);
+        let (live_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
+        let live_consumers = self.spawn_log_consumers(&live_tx, ConsumerMode::Stream);
 
         // Step 3: Fetch the latest block number.
         // This is used to determine the starting point for the rewind stream and the live stream.
@@ -351,36 +357,54 @@ impl<N: Network> ConnectedEventScanner<N> {
         tokio::spawn(async move {
             // Step 5.1: Collect the specified number of latest events
             while let Some(message) = rewind_stream.next().await {
-                if !Self::try_broadcast(&rewind_range_tx, message) {
+                if !Self::try_broadcast(&rewind_tx, message) {
                     return;
                 }
             }
 
+            // Since both rewind and live log consumers are ultimately streaming to the same
+            // channel, we must ensure that all latest events are streamed before
+            // starting the live stream, otherwise the log consumers may send events out
+            // of order
+            rewind_log_consumers.join_all().await;
+
             // Step 5.2: Notify the client that we're not streaming live
-            if !Self::try_broadcast(&live_range_tx, ScannerStatus::SwitchingToLive) {
+            if !Self::try_broadcast(&live_tx, ScannerStatus::SwitchingToLive) {
                 return;
             }
 
             // Step 5.3: Start the live stream
             while let Some(message) = sync_stream.next().await {
-                if !Self::try_broadcast(&live_range_tx, message) {
+                if !Self::try_broadcast(&live_tx, message) {
                     return;
                 }
             }
+
+            // This serves two purposes:
+            // 1. Ensure that all log consumers finish streaming live events before the scanner is
+            //    stopped
+            // 2. If we didn't move the log consumer handles into this tokio task, they would've
+            //    been dropped when the end of `scan_latest_then_live` was reached, which would've
+            //    stopped the live stream before it even begins.
+            live_consumers.join_all().await;
         });
 
         Ok(())
     }
 
-    fn spawn_log_consumers(&self, range_tx: &Sender<BlockRangeMessage>, mode: ConsumerMode) {
-        for listener in &self.event_listeners {
+    fn spawn_log_consumers(
+        &self,
+        range_tx: &Sender<BlockRangeMessage>,
+        mode: ConsumerMode,
+    ) -> JoinSet<()> {
+        self.event_listeners.iter().fold(JoinSet::new(), |mut set, listener| {
             let provider = self.block_range_scanner.provider().clone();
             let filter = listener.filter.clone();
             let base_filter = Filter::from(&filter);
             let sender = listener.sender.clone();
             let mut sub = range_tx.subscribe();
 
-            tokio::spawn(async move {
+            set.spawn(async move {
                 // Only used for CollectLatest
                 let mut collected: Vec<Log> = match mode {
                     ConsumerMode::CollectLatest { count } => Vec::with_capacity(count),
@@ -388,7 +412,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                 };
 
                 loop {
-                    match sub.recv().await {
+                    let next = sub.recv().await;
+
+                    match next {
                         Ok(BlockRangeMessage::Data(range)) => {
                             match Self::get_logs(range, &filter, &base_filter, &provider).await {
                                 Ok(logs) => {
@@ -404,11 +430,13 @@ impl<N: Network> ConnectedEventScanner<N> {
                                         }
                                         ConsumerMode::CollectLatest { count } => {
                                             let take = count.saturating_sub(collected.len());
+                                            // if we have enough logs, break
                                             if take == 0 {
                                                 break;
                                             }
                                             // take latest within this range
                                             collected.extend(logs.into_iter().rev().take(take));
+                                            // if we have enough logs, break
                                             if collected.len() == count {
                                                 break;
                                             }
@@ -428,12 +456,13 @@ impl<N: Network> ConnectedEventScanner<N> {
                             }
                         }
                         Ok(BlockRangeMessage::Status(status)) => {
+                            info!(status = ?status, "Received status message");
                             if !Self::try_send(&sender, status).await {
                                 break;
                             }
                         }
                         Err(RecvError::Closed) => {
-                            info!("No block ranges to receive, dropping receiver.");
+                            warn!("No block ranges to receive, dropping receiver.");
                             break;
                         }
                         Err(RecvError::Lagged(_)) => {}
@@ -448,7 +477,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                     _ = Self::try_send(&sender, collected).await;
                 }
             });
-        }
+
+            set
+        })
     }
 
     async fn get_logs(

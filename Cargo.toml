@@ -31,6 +31,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio-stream = "0.1.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+test-log = { version = "0.2.18", features = ["trace"] }
 hex = "0.4"
 
 [package]
@@ -64,7 +65,10 @@ chrono.workspace = true
 alloy-node-bindings.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
 tracing-subscriber.workspace = true
+test-log.workspace = true
 
 [lints]
 workspace = true
