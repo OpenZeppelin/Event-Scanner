@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::FixedBytes,
+    primitives::{FixedBytes, U256},
     providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
     rpc::types::anvil::{ReorgOptions, TransactionData},
     sol,
@@ -14,12 +14,12 @@ use event_scanner::{
     EventFilter,
     block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
     event_scanner::{Client, EventScanner, EventScannerMessage},
+    test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
 // Shared test contract used across integration tests
 sol! {
-    #[allow(missing_docs)]
     #[sol(rpc, bytecode="608080604052346015576101b0908161001a8239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c90816306661abd1461016157508063a87d942c14610145578063d732d955146100ad5763e8927fbc14610048575f80fd5b346100a9575f3660031901126100a9575f5460018101809111610095576020817f7ca2ca9527391044455246730762df008a6b47bbdb5d37a890ef78394535c040925f55604051908152a1005b634e487b7160e01b5f52601160045260245ffd5b5f80fd5b346100a9575f3660031901126100a9575f548015610100575f198101908111610095576020817f53a71f16f53e57416424d0d18ccbd98504d42a6f98fe47b09772d8f357c620ce925f55604051908152a1005b60405162461bcd60e51b815260206004820152601860248201527f436f756e742063616e6e6f74206265206e6567617469766500000000000000006044820152606490fd5b346100a9575f3660031901126100a95760205f54604051908152f35b346100a9575f3660031901126100a9576020905f548152f3fea2646970667358221220b846b706f79f5ae1fc4a4238319e723a092f47ce4051404186424739164ab02264736f6c634300081e0033")]
     contract TestCounter {
         uint256 public count;
@@ -57,7 +57,6 @@ where
     pub anvil: AnvilInstance,
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn setup_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
@@ -84,8 +83,6 @@ pub async fn setup_scanner(
     Ok(TestSetup { provider, contract, client, stream, anvil })
 }
 
-#[allow(clippy::missing_errors_doc)]
-#[allow(clippy::missing_panics_doc)]
 pub async fn reorg_with_new_count_incr_txs<P>(
     provider: RootProvider,
     contract: TestCounter::TestCounterInstance<Arc<P>>,
@@ -152,7 +149,6 @@ where
     Ok(event_tx_hashes)
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
     let mut anvil = Anvil::new();
     if let Some(block_time) = block_time {
@@ -161,19 +157,29 @@ pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
     Ok(anvil.try_spawn()?)
 }
 
-#[allow(clippy::missing_errors_doc)]
-#[allow(clippy::missing_panics_doc)]
 pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RootProvider> {
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
     let provider = ProviderBuilder::new().wallet(wallet).connect(anvil.endpoint().as_str()).await?;
     Ok(provider.root().to_owned())
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn deploy_counter<P>(provider: P) -> anyhow::Result<TestCounter::TestCounterInstance<P>>
 where
     P: alloy::providers::Provider<Ethereum> + Clone,
 {
     let contract = TestCounter::deploy(provider).await?;
     Ok(contract)
+}
+
+pub async fn increase(
+    contract: &TestCounter::TestCounterInstance<Arc<impl Provider + Clone>>,
+) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>> {
+    let receipt = contract.increase().send().await?.get_receipt().await?;
+    let tx_hash = receipt.transaction_hash;
+    let new_count = receipt.decoded_log::<TestCounter::CountIncreased>().unwrap().data.newCount;
+    Ok(LogMetadata {
+        event: TestCounter::CountIncreased { newCount: U256::from(new_count) },
+        address: *contract.address(),
+        tx_hash,
+    })
 }

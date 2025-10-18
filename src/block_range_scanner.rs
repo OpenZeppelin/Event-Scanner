@@ -512,10 +512,13 @@ impl<N: Network> Service<N> {
             self.provider.get_block_by_number(BlockNumberOrTag::Latest)
         )?;
 
-        let start_block_num = start_block
-            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
-            .header()
-            .number();
+        let start_block_num = match start_height {
+            BlockNumberOrTag::Number(num) => num,
+            block_tag @ _ => start_block
+                .ok_or_else(|| BlockRangeScannerError::BlockNotFound(block_tag))?
+                .header()
+                .number(),
+        };
         let latest_block = latest_block
             .ok_or_else(|| BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
             .header()
