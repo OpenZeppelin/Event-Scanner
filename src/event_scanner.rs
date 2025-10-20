@@ -663,8 +663,7 @@ impl<N: Network> Client<N> {
     /// * Historical: No reorg detection still WIP.
     /// * Live: emits [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
     ///   `with_block_confirmations` (re-emits confirmed portions as needed).
-    /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
-    ///   (historical or live).
+    /// * Historical → Live: reorgs are eventually handled by the live phase.
     ///
     /// # Errors
     ///
@@ -819,22 +818,6 @@ impl<N: Network> Client<N> {
     ///   configured via [`with_block_confirmations`](Self::with_block_confirmations). On reorg,
     ///   emits [`ScannerStatus::ReorgDetected`], adjusts the next confirmed window (possibly
     ///   re-emitting confirmed portions), and continues streaming.
-    ///
-    /// ## ⚠️ Warning: Parallel Reorg Detection
-    ///
-    /// Both phases run in parallel, which means if a reorg occurs during the historical rewind
-    /// phase, **both phases will independently detect and handle the same reorg**. This can result
-    /// in:
-    /// - **Duplicate [`ScannerStatus::ReorgDetected`] messages**: One from the historical phase and
-    ///   one from the live phase.
-    /// - **Potential duplicate logs**: The live phase may re-emit logs that were already delivered
-    ///   by the historical phase if the reorg affects blocks in the overlapping boundary region.
-    ///
-    /// Applications should be prepared to handle duplicate reorg notifications and implement
-    /// deduplication logic if necessary, especially when processing events near the phase
-    /// transition boundary.
-    ///
-    /// Will be handled by: <https://github.com/OpenZeppelin/Event-Scanner/issues/132>
     ///
     /// # Usage Notes
     ///

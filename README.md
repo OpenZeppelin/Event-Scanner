@@ -166,7 +166,7 @@ let multi_sigs = EventFilter::new()
 ### Scanning Modes
 
 - **Live mode** - `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only. On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window, streaming logs from the corrected confirmed block range.
-- **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range. Currently no reorg logic has been implemented (NOTE ⚠️: still WIP). In the case that the end block > finalized block and you need reorg resistance, we recommend to use sync mode.
+- **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range. Currently no reorg logic has been implemented (NOTE ⚠️: still WIP). In the case that the end block > finalized block and you need reorg resistance, we recommend you use sync mode.
 - **Historical → Live** - `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks. Reorgs are handled as per the particular mode phase the scanner is in (historical or live).
 - **Latest → Live** - `scan_latest_then_live(count)` fetches the most recent `count` events, then automatically transitions to live streaming. Ideal for applications that need recent historical context before monitoring real-time events.
 
@@ -247,11 +247,11 @@ The scanner captures the latest block number before starting to establish a clea
 
 **Key behaviors:**
 
-- **No duplicates (normal case)**: Events are not delivered twice across the phase transition under normal operation. During reorgs, duplicates may occur; see the warning below.
+- **No duplicates**: Events are not delivered twice across the phase transition
 - **Flexible count**: If fewer than `count` events exist, returns all available events
 - **Reorg handling**: Both phases handle reorgs appropriately:
   - Historical phase: resets and rescans on reorg detection
-  - Live phase: respects block confirmations set via `with_block_confirmations`
+  - Live phase: resets stream to the first post-reorg block that satisfies the block confirmations set via `with_block_confirmations`
 - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
 
 **Example:**
