@@ -109,10 +109,6 @@ pub const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_RPC_MAX_RETRIES: usize = 5;
 pub const DEFAULT_RPC_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
-// // State sync aware retry settings
-// const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
-// const STATE_SYNC_MAX_RETRIES: u64 = 12;
-
 pub type BlockRangeMessage = ScannerMessage<RangeInclusive<BlockNumber>, BlockRangeScannerError>;
 
 impl From<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>> for BlockRangeMessage {
