@@ -182,7 +182,7 @@ impl<N: Network> LatestEventScanner<N> {
         self.inner.create_event_stream(filter)
     }
 
-    /// WARN: unimplemented - will call stream latest
+    /// Calls stream latest
     ///
     /// # Errors
     ///
@@ -218,7 +218,7 @@ mod tests {
             .to_block(200)
             .block_confirmations(10)
             .then_live()
-            .block_read_limit(50);
+            .max_read_per_epoch(50);
 
         assert_eq!(config.count, 5);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn test_latest_scanner_builder_pattern_chaining() {
         let config = LatestScannerConfig::new()
-            .block_read_limit(25)
+            .max_read_per_epoch(25)
             .block_confirmations(5)
             .count(3)
             .from_block(BlockNumberOrTag::Number(50))

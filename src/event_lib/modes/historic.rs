@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn test_historic_scanner_builder_pattern() {
         let config =
-            HistoricScannerConfig::new().from_block(100u64).to_block(200u64).block_read_limit(50);
+            HistoricScannerConfig::new().from_block(100u64).to_block(200u64).max_read_per_epoch(50);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn test_historic_scanner_builder_pattern_chaining() {
         let config = HistoricScannerConfig::new()
-            .block_read_limit(25)
+            .max_read_per_epoch(25)
             .from_block(BlockNumberOrTag::Number(50))
             .to_block(BlockNumberOrTag::Number(150));
 

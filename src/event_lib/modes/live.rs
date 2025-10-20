@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_live_scanner_builder_pattern() {
-        let config = LiveScannerConfig::new().block_confirmations(10).block_read_limit(50);
+        let config = LiveScannerConfig::new().block_confirmations(10).max_read_per_epoch(50);
 
         assert_eq!(config.block_confirmations, 10);
         assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_live_scanner_builder_pattern_chaining() {
-        let config = LiveScannerConfig::new().block_read_limit(25).block_confirmations(5);
+        let config = LiveScannerConfig::new().max_read_per_epoch(25).block_confirmations(5);
 
         assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
         assert_eq!(config.block_confirmations, 5);
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_live_scanner_builder_with_zero_confirmations() {
-        let config = LiveScannerConfig::new().block_confirmations(0).block_read_limit(100);
+        let config = LiveScannerConfig::new().block_confirmations(0).max_read_per_epoch(100);
 
         assert_eq!(config.block_confirmations, 0);
         assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 100);
