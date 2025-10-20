@@ -240,7 +240,7 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-        self.spawn_log_consumers(&range_tx, ConsumerMode::Stream);
+        let log_consumers = self.spawn_log_consumers(&range_tx, ConsumerMode::Stream);
 
         while let Some(message) = stream.next().await {
             if let Err(err) = range_tx.send(message) {
@@ -248,6 +248,8 @@ impl<N: Network> ConnectedEventScanner<N> {
                 break;
             }
         }
+
+        log_consumers.join_all().await;
 
         Ok(())
     }
@@ -284,13 +286,16 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-        self.spawn_log_consumers(&range_tx, ConsumerMode::CollectLatest { count });
+        let log_consumers =
+            self.spawn_log_consumers(&range_tx, ConsumerMode::CollectLatest { count });
 
         while let Some(message) = stream.next().await {
             if !Self::try_broadcast(&range_tx, message) {
                 break;
             }
         }
+
+        log_consumers.join_all().await;
 
         Ok(())
     }
@@ -476,6 +481,7 @@ impl<N: Network> ConnectedEventScanner<N> {
         Ok(())
     }
 
+    #[must_use]
     fn spawn_log_consumers(
         &self,
         range_tx: &Sender<BlockRangeMessage>,
