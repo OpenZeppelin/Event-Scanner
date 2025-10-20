@@ -57,8 +57,8 @@ where
 pub async fn setup_live_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
-    confirmations: Option<u64>,
-) -> anyhow::Result<TestSetup<impl Provider<Ethereum> + Clone>> {
+    confirmations: u64,
+) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
     let anvil = spawn_anvil(block_interval)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(Arc::new(provider.clone())).await?;

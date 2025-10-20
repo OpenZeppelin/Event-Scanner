@@ -1,7 +1,5 @@
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::U256, sol_types::SolEvent};
-use event_scanner::{
-    assert_next, event_filter::EventFilter, event_scanner::EventScanner, types::ScannerStatus,
-};
+use alloy::{network::Ethereum, primitives::U256, sol_types::SolEvent};
+use event_scanner::{EventFilter, EventScanner, assert_next, types::ScannerStatus};
 
 use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 
@@ -32,7 +30,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
 
-    let mut stream = client.create_event_stream(filter);
+    let mut stream = scanner.create_event_stream(filter);
 
     tokio::spawn(async move { scanner.start().await });
 

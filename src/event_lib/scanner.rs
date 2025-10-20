@@ -15,7 +15,7 @@ use alloy::{
     providers::{Provider, RootProvider},
     rpc::types::{Filter, Log},
     sol_types::SolEvent,
-    transports::{RpcError, TransportErrorKind, http::reqwest::Url},
+    transports::{RpcError, TransportErrorKind},
 };
 use tokio::sync::{
     broadcast::{self, Sender, error::RecvError},
@@ -29,6 +29,55 @@ pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
 pub struct EventScannerService<N: Network> {
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     event_listeners: Vec<EventListener>,
+}
+
+impl From<Result<Vec<Log>, RpcError<TransportErrorKind>>> for EventScannerMessage {
+    fn from(logs: Result<Vec<Log>, RpcError<TransportErrorKind>>) -> Self {
+        match logs {
+            Ok(logs) => EventScannerMessage::Data(logs),
+            Err(e) => EventScannerMessage::Error(e.into()),
+        }
+    }
+}
+
+impl From<Vec<Log>> for EventScannerMessage {
+    fn from(logs: Vec<Log>) -> Self {
+        EventScannerMessage::Data(logs)
+    }
+}
+
+impl<E: SolEvent> PartialEq<Vec<E>> for EventScannerMessage {
+    fn eq(&self, other: &Vec<E>) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<E: SolEvent> PartialEq<&Vec<E>> for EventScannerMessage {
+    fn eq(&self, other: &&Vec<E>) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<E: SolEvent, const N: usize> PartialEq<&[E; N]> for EventScannerMessage {
+    fn eq(&self, other: &&[E; N]) -> bool {
+        self.eq(&other.as_slice())
+    }
+}
+
+impl<E: SolEvent> PartialEq<&[E]> for EventScannerMessage {
+    fn eq(&self, other: &&[E]) -> bool {
+        if let EventScannerMessage::Data(logs) = self {
+            logs.iter().map(|l| l.data().clone()).eq(other.iter().map(SolEvent::encode_log_data))
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+enum ConsumerMode {
+    Stream,
+    CollectLatest { count: usize },
 }
 
 impl<N: Network> EventScannerService<N> {
@@ -72,7 +121,7 @@ impl<N: Network> EventScannerService<N> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_live(block_confirmations).await?;
 
-        self.handle_stream(stream).await;
+        self.handle_stream(stream, ConsumerMode::Stream).await;
 
         Ok(())
     }
@@ -82,15 +131,15 @@ impl<N: Network> EventScannerService<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_historical(
+    pub async fn stream_historical<T: Into<BlockNumberOrTag>>(
         &self,
         start_height: T,
-        end_height: Option<T>,
+        end_height: T,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_historical(start_height, end_height).await?;
 
-        self.handle_stream(stream).await;
+        self.handle_stream(stream, ConsumerMode::Stream).await;
 
         Ok(())
     }
@@ -108,25 +157,9 @@ impl<N: Network> EventScannerService<N> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_from(start_height, block_confirmations).await?;
 
-        self.handle_stream(stream).await;
+        self.handle_stream(stream, ConsumerMode::Stream).await;
 
         Ok(())
-    }
-
-    async fn handle_stream(
-        &self,
-        mut stream: ReceiverStream<ScannerMessage<RangeInclusive<u64>, BlockRangeScannerError>>,
-    ) {
-        let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
-
-        self.spawn_log_consumers(&range_tx, ConsumerMode::Stream);
-
-        while let Some(message) = stream.next().await {
-            if let Err(err) = range_tx.send(message) {
-                error!(error = %err, "No receivers, stopping broadcast");
-                break;
-            }
-        }
     }
 
     /// Scans a block range and collects the latest `count` matching events per registered listener.
@@ -157,11 +190,21 @@ impl<N: Network> EventScannerService<N> {
         end_height: T,
     ) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
-        let mut stream = client.rewind(start_height, end_height).await?;
+        let stream = client.rewind(start_height, end_height).await?;
 
+        self.handle_stream(stream, ConsumerMode::CollectLatest { count }).await;
+
+        Ok(())
+    }
+
+    async fn handle_stream(
+        &self,
+        mut stream: ReceiverStream<ScannerMessage<RangeInclusive<u64>, BlockRangeScannerError>>,
+        mode: ConsumerMode,
+    ) {
         let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-        self.spawn_log_consumers(&range_tx, ConsumerMode::CollectLatest { count });
+        self.spawn_log_consumers(&range_tx, mode);
 
         while let Some(message) = stream.next().await {
             if let Err(err) = range_tx.send(message) {
@@ -169,8 +212,6 @@ impl<N: Network> EventScannerService<N> {
                 break;
             }
         }
-
-        Ok(())
     }
 
     fn spawn_log_consumers(&self, range_tx: &Sender<BlockRangeMessage>, mode: ConsumerMode) {
@@ -289,7 +330,7 @@ impl<N: Network> EventScannerService<N> {
     }
 
     async fn try_send<T: Into<EventScannerMessage>>(
-        sender: &tokio::sync::mpsc::Sender<EventScannerMessage>,
+        sender: &mpsc::Sender<EventScannerMessage>,
         msg: T,
     ) -> bool {
         if let Err(err) = sender.send(msg.into()).await {
@@ -304,107 +345,107 @@ impl<N: Network> EventScannerService<N> {
     }
 }
 
-pub struct Client<N: Network> {
-    event_scanner: ConnectedEventScanner<N>,
-}
-
-impl<N: Network> Client<N> {
-    pub fn create_event_stream(
-        &mut self,
-        event_filter: EventFilter,
-    ) -> ReceiverStream<EventScannerMessage> {
-        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
-
-        self.event_scanner.add_event_listener(EventListener { filter: event_filter, sender });
-
-        ReceiverStream::new(receiver)
-    }
-
-    /// Starts the scanner
-    ///
-    /// Selects live, historical, or historical→live mode based on `start_height`/`end_height`.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_height` - Start block (tag or number).
-    /// * `end_height` - Optional end block (tag or number). If `Some`, a historical scan is
-    ///   performed over the inclusive range; if `None`, the scanner either streams live or performs
-    ///   historical→live depending on `start_height`.
-    ///
-    /// # Reorg behavior
-    ///
-    /// * Historical: No reorg detection still WIP.
-    /// * Live: emits [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
-    ///   `with_block_confirmations` (re-emits confirmed portions as needed).
-    /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
-    ///   (historical or live).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the scanner fails to start
-    ///
-    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
-    pub async fn start_scanner<T: Into<BlockNumberOrTag>>(
-        self,
-        start_height: T,
-        end_height: Option<T>,
-    ) -> Result<(), EventScannerError> {
-        self.event_scanner.start(start_height.into(), end_height.map(Into::into)).await
-    }
-
-    /// Scans the chain and collects the latest `count` events per registered listener.
-    ///
-    /// Internally calls `scan_latest_in_range` with `Earliest..=Latest` and emits a single message
-    /// per listener with up to `count` logs, chronologically ordered.
-    ///
-    /// # Reorg behavior
-    ///
-    /// Same as `scan_latest_in_range` over the full chain; reorgs during rewind are detected,
-    /// [`ScannerStatus::ReorgDetected`] is emitted, and the reorg is handled by restarting from
-    /// the updated tip.
-    ///
-    /// # Arguments
-    ///
-    /// * `count` - Maximum number of events to return per listener.
-    ///
-    /// # Errors
-    ///
-    /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
-    ///
-    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
-    pub async fn scan_latest(self, count: usize) -> Result<(), EventScannerError> {
-        self.event_scanner
-            .scan_latest(count, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
-            .await
-    }
-
-    /// Scans within the provided block range and collects the latest `count` events per registered
-    /// listener.
-    ///
-    /// Emits a single message per listener with up to `count` logs, chronologically ordered.
-    ///
-    /// # Arguments
-    ///
-    /// * `count` - Maximum number of events to return per listener.
-    /// * `start_height` - Inclusive start block (tag or number).
-    /// * `end_height` - Inclusive end block (tag or number).
-    ///
-    /// # Reorg behavior
-    ///
-    /// Reverse-ordered rewind over the range with periodic tip checks. On reorg, emits
-    /// [`ScannerStatus::ReorgDetected`], resets the rewind start to the updated tip, and resumes.
-    ///
-    /// # Errors
-    ///
-    /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
-    ///
-    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
-    pub async fn scan_latest_in_range<T: Into<BlockNumberOrTag>>(
-        self,
-        count: usize,
-        start_height: T,
-        end_height: T,
-    ) -> Result<(), EventScannerError> {
-        self.event_scanner.scan_latest(count, start_height, end_height).await
-    }
-}
+// pub struct Client<N: Network> {
+//     event_scanner: ConnectedEventScanner<N>,
+// }
+//
+// impl<N: Network> Client<N> {
+//     pub fn create_event_stream(
+//         &mut self,
+//         event_filter: EventFilter,
+//     ) -> ReceiverStream<EventScannerMessage> {
+//         let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
+//
+//         self.event_scanner.add_event_listener(EventListener { filter: event_filter, sender });
+//
+//         ReceiverStream::new(receiver)
+//     }
+//
+//     /// Starts the scanner
+//     ///
+//     /// Selects live, historical, or historical→live mode based on `start_height`/`end_height`.
+//     ///
+//     /// # Arguments
+//     ///
+//     /// * `start_height` - Start block (tag or number).
+//     /// * `end_height` - Optional end block (tag or number). If `Some`, a historical scan is
+//     ///   performed over the inclusive range; if `None`, the scanner either streams live or
+// performs     ///   historical→live depending on `start_height`.
+//     ///
+//     /// # Reorg behavior
+//     ///
+//     /// * Historical: No reorg detection still WIP.
+//     /// * Live: emits [`ScannerStatus::ReorgDetected`] and adjusts the confirmed range using
+//     ///   `with_block_confirmations` (re-emits confirmed portions as needed).
+//     /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
+//     ///   (historical or live).
+//     ///
+//     /// # Errors
+//     ///
+//     /// Returns an error if the scanner fails to start
+//     ///
+//     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
+//     pub async fn start_scanner<T: Into<BlockNumberOrTag>>(
+//         self,
+//         start_height: T,
+//         end_height: Option<T>,
+//     ) -> Result<(), EventScannerError> {
+//         self.event_scanner.start(start_height.into(), end_height.map(Into::into)).await
+//     }
+//
+//     /// Scans the chain and collects the latest `count` events per registered listener.
+//     ///
+//     /// Internally calls `scan_latest_in_range` with `Earliest..=Latest` and emits a single
+// message     /// per listener with up to `count` logs, chronologically ordered.
+//     ///
+//     /// # Reorg behavior
+//     ///
+//     /// Same as `scan_latest_in_range` over the full chain; reorgs during rewind are detected,
+//     /// [`ScannerStatus::ReorgDetected`] is emitted, and the reorg is handled by restarting from
+//     /// the updated tip.
+//     ///
+//     /// # Arguments
+//     ///
+//     /// * `count` - Maximum number of events to return per listener.
+//     ///
+//     /// # Errors
+//     ///
+//     /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
+//     ///
+//     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
+//     pub async fn scan_latest(self, count: usize) -> Result<(), EventScannerError> {
+//         self.event_scanner
+//             .scan_latest(count, BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
+//             .await
+//     }
+//
+//     /// Scans within the provided block range and collects the latest `count` events per
+// registered     /// listener.
+//     ///
+//     /// Emits a single message per listener with up to `count` logs, chronologically ordered.
+//     ///
+//     /// # Arguments
+//     ///
+//     /// * `count` - Maximum number of events to return per listener.
+//     /// * `start_height` - Inclusive start block (tag or number).
+//     /// * `end_height` - Inclusive end block (tag or number).
+//     ///
+//     /// # Reorg behavior
+//     ///
+//     /// Reverse-ordered rewind over the range with periodic tip checks. On reorg, emits
+//     /// [`ScannerStatus::ReorgDetected`], resets the rewind start to the updated tip, and
+// resumes.     ///
+//     /// # Errors
+//     ///
+//     /// * Returns `EventScannerError` if the scan fails to start or fetching logs fails.
+//     ///
+//     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
+//     pub async fn scan_latest_in_range<T: Into<BlockNumberOrTag>>(
+//         self,
+//         count: usize,
+//         start_height: T,
+//         end_height: T,
+//     ) -> Result<(), EventScannerError> {
+//         self.event_scanner.scan_latest(count, start_height, end_height).await
+//     }
+// }

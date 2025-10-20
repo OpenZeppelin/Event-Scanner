@@ -4,7 +4,7 @@ use tokio_stream::StreamExt;
 
 use tokio::{sync::Mutex, time::timeout};
 
-use crate::common::{LiveScannerSetup, reorg_with_new_txs, setup_live_scanner};
+use crate::common::{LiveScannerSetup, reorg_with_new_count_incr_txs, setup_live_scanner};
 use alloy::providers::ext::AnvilApi;
 use event_scanner::{EventScannerMessage, ScannerStatus};
 

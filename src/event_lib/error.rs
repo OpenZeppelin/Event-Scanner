@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alloy::transports::{RpcError, TransportErrorKind};
 use thiserror::Error;
 
-use crate::block_range_scanner::BlockRangeScannerError;
+use crate::{EventScannerMessage, block_range_scanner::BlockRangeScannerError};
 
 #[derive(Error, Debug, Clone)]
 pub enum EventScannerError {
@@ -16,5 +16,17 @@ pub enum EventScannerError {
 impl From<RpcError<TransportErrorKind>> for EventScannerError {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
         EventScannerError::Provider(Arc::new(e))
+    }
+}
+
+impl From<RpcError<TransportErrorKind>> for EventScannerMessage {
+    fn from(e: RpcError<TransportErrorKind>) -> Self {
+        EventScannerMessage::Error(e.into())
+    }
+}
+
+impl From<BlockRangeScannerError> for EventScannerMessage {
+    fn from(e: BlockRangeScannerError) -> Self {
+        EventScannerMessage::Error(e.into())
     }
 }

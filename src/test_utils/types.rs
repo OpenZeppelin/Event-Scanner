@@ -1,6 +1,6 @@
 use alloy::sol_types::SolEvent;
 
-use crate::event_scanner::EventScannerMessage;
+use crate::EventScannerMessage;
 
 #[derive(Debug)]
 pub struct LogMetadata<E: SolEvent> {

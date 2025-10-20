@@ -7,7 +7,7 @@ use alloy::{
     sol_types::SolEvent,
 };
 
-use crate::common::{TestCounter, deploy_counter, setup_scanner};
+use crate::common::{TestCounter, deploy_counter, setup_latest_scanner};
 use event_scanner::{EventFilter, assert_next, test_utils::LogMetadata};
 
 macro_rules! increase {
