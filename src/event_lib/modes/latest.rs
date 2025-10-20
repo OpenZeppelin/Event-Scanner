@@ -21,10 +21,10 @@ use super::{BaseConfig, BaseConfigBuilder};
 pub struct LatestScannerConfig {
     base: BaseConfig,
     // Defatuls to 1
-    count: u64,
-    // Defaults to Earliest
-    from_block: BlockNumberOrTag,
+    count: usize,
     // Defaults to Latest
+    from_block: BlockNumberOrTag,
+    // Defaults to Earliest
     to_block: BlockNumberOrTag,
     // Defaults to 0
     block_confirmations: u64,
@@ -49,8 +49,8 @@ impl LatestScannerConfig {
         Self {
             base: BaseConfig::new(),
             count: 1,
-            from_block: BlockNumberOrTag::Earliest,
-            to_block: BlockNumberOrTag::Latest,
+            from_block: BlockNumberOrTag::Latest,
+            to_block: BlockNumberOrTag::Earliest,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
             switch_to_live: false,
         }
@@ -63,7 +63,7 @@ impl LatestScannerConfig {
     }
 
     #[must_use]
-    pub fn count(mut self, count: u64) -> Self {
+    pub fn count(mut self, count: usize) -> Self {
         self.count = count;
         self
     }
@@ -189,7 +189,9 @@ impl<N: Network> LatestEventScanner<N> {
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     #[allow(clippy::unused_async)]
     pub async fn start(self) -> Result<(), EventScannerError> {
-        unimplemented!()
+        self.inner
+            .stream_latest(self.config.count, self.config.from_block, self.config.to_block)
+            .await
     }
 }
 
@@ -202,8 +204,8 @@ mod tests {
         let config = LatestScannerConfig::new();
 
         assert_eq!(config.count, 1);
-        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
+        assert!(matches!(config.from_block, BlockNumberOrTag::Latest));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Earliest));
         assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
         assert!(!config.switch_to_live);
     }

@@ -183,7 +183,7 @@ impl<N: Network> EventScannerService<N> {
     /// * Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
-    pub async fn scan_latest<T: Into<BlockNumberOrTag>>(
+    pub async fn stream_latest<T: Into<BlockNumberOrTag>>(
         self,
         count: usize,
         start_height: T,

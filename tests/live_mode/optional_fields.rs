@@ -6,20 +6,19 @@ use std::{
     time::Duration,
 };
 
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use alloy::{network::Ethereum, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+use crate::common::{TestCounter, setup_live_scanner};
+use alloy::sol_types::SolEvent;
+use event_scanner::{EventFilter, EventScannerMessage};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn track_all_events_from_contract() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider.clone()).await?;
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
     let contract_address = *contract.address();
 
-    let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = setup.scanner;
 
     // Create filter that tracks ALL events from a specific contract (no event signature specified)
     let filter = EventFilter::new().with_contract_address(contract_address);
@@ -54,16 +53,15 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn track_all_events_in_block_range() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider.clone()).await?;
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
 
     // Create filter that tracks ALL events in block range (no contract address or event signature
     // specified)
     let filter = EventFilter::new();
     let expected_event_count = 3;
 
-    let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = setup.scanner;
 
     let mut stream = scanner.create_event_stream(filter).take(expected_event_count);
 
@@ -91,9 +89,8 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider.clone()).await?;
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
     let contract_address = *contract.address();
 
     // Filter for specific event from specific contract
@@ -106,7 +103,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
     let all_events_filter = EventFilter::new();
     let expected_all_count = 3;
 
-    let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = setup.scanner;
 
     let mut specific_stream =
         scanner.create_event_stream(specific_filter).take(expected_specific_count);

@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use alloy::{
     eips::BlockNumberOrTag,
+    network::Ethereum,
     primitives::U256,
     providers::{Provider, ext::AnvilApi},
     sol_types::SolEvent,
 };
 
-use crate::common::{TestCounter, deploy_counter, setup_latest_scanner};
-use event_scanner::{EventFilter, assert_next, test_utils::LogMetadata};
+use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
+use event_scanner::{EventFilter, EventScanner, assert_next, test_utils::LogMetadata};
 
 macro_rules! increase {
     ($contract: expr) => {{
@@ -38,9 +39,10 @@ macro_rules! decrease {
 
 #[tokio::test]
 async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let count = 5;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
     // Produce 8 events
@@ -57,7 +59,7 @@ async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Resul
     ];
 
     // Ask for the latest 5
-    client.scan_latest(5).await?;
+    scanner.start().await?;
 
     assert_next!(stream, expected);
     assert_next!(stream, None);
@@ -67,9 +69,10 @@ async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Resul
 
 #[tokio::test]
 async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let count = 5;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
     // Produce only 3 events
@@ -78,7 +81,7 @@ async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<
     expected.push(increase!(contract));
     expected.push(increase!(contract));
 
-    client.scan_latest(5).await?;
+    scanner.start().await?;
 
     assert_next!(stream, expected);
     assert_next!(stream, None);
@@ -88,11 +91,12 @@ async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<
 
 #[tokio::test]
 async fn scan_latest_no_events_returns_empty() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
-    let client = setup.client;
+    let count = 5;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
-    client.scan_latest(5).await?;
+    scanner.start().await?;
 
     let expected: &[LogMetadata<TestCounter::CountIncreased>] = &[];
 
@@ -104,12 +108,7 @@ async fn scan_latest_no_events_returns_empty() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
-    let provider = setup.provider;
-    let contract = setup.contract;
-    let client = setup.client;
-    let mut stream = setup.stream;
-
+    let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
     // Mine 6 events, one per tx (auto-mined), then manually mint 2 empty blocks to widen range
     _ = increase!(contract);
     _ = increase!(contract);
@@ -128,26 +127,35 @@ async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
-    client.scan_latest_in_range(10, start, end).await?;
+    let mut scanner_with_range = EventScanner::latest()
+        .count(10)
+        .from_block(start)
+        .to_block(end)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let mut stream_with_range = scanner_with_range.create_event_stream(default_filter);
 
-    assert_next!(stream, expected);
-    assert_next!(stream, None);
+    scanner_with_range.start().await?;
+
+    assert_next!(stream_with_range, expected);
+    assert_next!(stream_with_range, None);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let count = 5;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
-    let mut client = setup.client;
+    let mut scanner = setup.scanner;
     let mut stream1 = setup.stream;
 
     // Add a second listener with the same filter
     let filter2 = EventFilter::new()
         .with_contract_address(*contract.address())
         .with_event(TestCounter::CountIncreased::SIGNATURE);
-    let mut stream2 = client.create_event_stream(filter2);
+    let mut stream2 = scanner.create_event_stream(filter2);
 
     // Produce 7 events
     _ = increase!(contract);
@@ -161,7 +169,7 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
         increase!(contract),
     ];
 
-    client.scan_latest(5).await?;
+    scanner.start().await?;
 
     assert_next!(stream1, expected);
     assert_next!(stream1, None);
@@ -174,21 +182,22 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
 
 #[tokio::test]
 async fn scan_latest_different_filters_receive_different_results() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let count = 3;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
-    let mut client = setup.client;
+    let mut scanner = setup.scanner;
 
     // First listener for CountDecreased
     let filter_inc = EventFilter::new()
         .with_contract_address(*contract.address())
         .with_event(TestCounter::CountIncreased::SIGNATURE);
-    let mut stream_inc = client.create_event_stream(filter_inc);
+    let mut stream_inc = scanner.create_event_stream(filter_inc);
 
     // Second listener for CountDecreased
     let filter_dec = EventFilter::new()
         .with_contract_address(*contract.address())
         .with_event(TestCounter::CountDecreased::SIGNATURE);
-    let mut stream_dec = client.create_event_stream(filter_dec);
+    let mut stream_dec = scanner.create_event_stream(filter_dec);
 
     // Produce 5 increases, then 2 decreases
     _ = increase!(contract);
@@ -205,7 +214,7 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
 
     // Ask for latest 3 across the full range: each filtered listener should receive their own last
     // 3 events
-    client.scan_latest(3).await?;
+    scanner.start().await?;
 
     let expected = &inc_log_meta;
     assert_next!(stream_inc, expected);
@@ -220,16 +229,17 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
 
 #[tokio::test]
 async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let count = 2;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
-    let mut client = setup.client;
+    let mut scanner = setup.scanner;
     let mut stream_inc = setup.stream; // CountIncreased by default
 
     // Add a CountDecreased listener
     let filter_dec = EventFilter::new()
         .with_contract_address(*contract.address())
         .with_event(TestCounter::CountDecreased::SIGNATURE);
-    let mut stream_dec = client.create_event_stream(filter_dec);
+    let mut stream_dec = scanner.create_event_stream(filter_dec);
 
     // Sequence: inc(1), inc(2), dec(1), inc(2), dec(1)
     let mut inc_log_meta = Vec::new();
@@ -247,7 +257,7 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
     // dec -> 1
     dec_log_meta.push(decrease!(contract));
 
-    client.scan_latest(2).await?;
+    scanner.start().await?;
 
     let expected = &inc_log_meta;
     assert_next!(stream_inc, expected);
@@ -263,9 +273,10 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
 #[tokio::test]
 async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
     // Manual setup to deploy two contracts
-    let setup = setup_scanner(None, None, None).await?;
+    let count = 5;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let provider = setup.provider;
-    let mut client = setup.client;
+    let mut scanner = setup.scanner;
 
     let contract_a = deploy_counter(Arc::new(provider.clone())).await?;
     let contract_b = deploy_counter(Arc::new(provider.clone())).await?;
@@ -275,7 +286,7 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
         .with_contract_address(*contract_a.address())
         .with_event(TestCounter::CountIncreased::SIGNATURE);
 
-    let mut stream_a = client.create_event_stream(filter_a);
+    let mut stream_a = scanner.create_event_stream(filter_a);
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
     let mut a_log_meta = Vec::new();
@@ -285,7 +296,7 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
     let _ = contract_b.increase().send().await?.get_receipt().await?; // ignored by filter
     a_log_meta.push(increase!(contract_a));
 
-    client.scan_latest(5).await?;
+    scanner.start().await?;
 
     assert_next!(stream_a, &a_log_meta);
     assert_next!(stream_a, None);
@@ -296,11 +307,7 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
 #[tokio::test]
 async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     // Manual setup to mine empty blocks
-    let setup = setup_scanner(None, None, None).await?;
-    let provider = setup.provider;
-    let contract = setup.contract;
-    let client = setup.client;
-    let mut stream = setup.stream;
+    let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     // Emit 2 events
     let mut log_meta = vec![];
@@ -316,21 +323,25 @@ async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
-    client.scan_latest_in_range(5, start, end).await?;
+    let mut scanner_with_range = EventScanner::latest()
+        .count(5)
+        .from_block(start)
+        .to_block(end)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let mut stream_with_range = scanner_with_range.create_event_stream(default_filter);
 
-    assert_next!(stream, &log_meta);
-    assert_next!(stream, None);
+    scanner_with_range.start().await?;
+
+    assert_next!(stream_with_range, &log_meta);
+    assert_next!(stream_with_range, None);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
-    let provider = setup.provider;
-    let contract = setup.contract;
-    let client = setup.client;
-    let mut stream = setup.stream;
+    let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     _ = increase!(contract);
     let expected = &[increase!(contract)];
@@ -346,10 +357,18 @@ async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
         .unwrap();
     let end = start;
 
-    client.scan_latest_in_range(5, start, end).await?;
+    let mut scanner_with_range = EventScanner::latest()
+        .count(5)
+        .from_block(start)
+        .to_block(end)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
+    let mut stream_with_range = scanner_with_range.create_event_stream(default_filter);
 
-    assert_next!(stream, expected);
-    assert_next!(stream, None);
+    scanner_with_range.start().await?;
+
+    assert_next!(stream_with_range, expected);
+    assert_next!(stream_with_range, None);
 
     Ok(())
 }

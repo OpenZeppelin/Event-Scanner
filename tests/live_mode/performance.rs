@@ -6,27 +6,22 @@ use std::{
     time::Duration,
 };
 
-use alloy::{network::Ethereum, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+use event_scanner::EventScannerMessage;
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
+use crate::common::{TestCounter, setup_live_scanner};
 
 #[tokio::test]
 async fn high_event_volume_no_loss() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.05))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider).await?;
+    let setup = setup_live_scanner(Some(0.05), None, 0).await?;
+    let contract = setup.contract.clone();
 
-    let filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
     let expected_event_count = 100;
 
-    let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let scanner = setup.scanner;
 
-    let mut stream = scanner.create_event_stream(filter).take(expected_event_count);
+    let mut stream = setup.stream.take(expected_event_count);
 
     tokio::spawn(async move { scanner.start().await });
 

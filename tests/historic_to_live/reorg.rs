@@ -1,46 +1,29 @@
 use std::{sync::Arc, time::Duration};
 
-use alloy::{
-    network::Ethereum,
-    providers::{Provider, ext::AnvilApi},
-    sol_types::SolEvent,
-};
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage, ScannerStatus};
+use alloy::providers::ext::AnvilApi;
+use event_scanner::{EventScannerMessage, types::ScannerStatus};
 use tokio::{sync::Mutex, time::timeout};
 use tokio_stream::StreamExt;
 
-use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
-
-use crate::common::{TestSetup, reorg_with_new_count_incr_txs, setup_scanner};
+use crate::common::{reorg_with_new_count_incr_txs, setup_sync_scanner};
 
 #[tokio::test]
 async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
 
-    let anvil = spawn_anvil(1.0)?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(Arc::new(provider.clone())).await?;
-
-    let filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+    let setup = setup_sync_scanner(Some(1.0), None, block_confirmations).await?;
+    let provider = setup.provider.clone();
+    let contract = setup.contract.clone();
 
     provider.anvil_mine(Some(10), None).await?;
 
-    let start_height = provider.get_block_number().await?.saturating_sub(5);
-
-    let mut scanner = EventScanner::sync()
-        .from_block(start_height)
-        .block_confirmations(block_confirmations)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
-
-    let mut stream = scanner.create_event_stream(filter);
+    let scanner = setup.scanner;
+    let mut stream = setup.stream;
 
     tokio::spawn(async move { scanner.start().await });
 
-    //  perform a shallow reorg on the live tail
+    // Perform a shallow reorg on the live tail
     let num_initial_events = 4u64;
     let num_new_events = 2u64;
     let reorg_depth = 2u64;

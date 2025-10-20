@@ -1,36 +1,22 @@
-use alloy::{network::Ethereum, primitives::U256, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScanner, assert_next, types::ScannerStatus};
+use alloy::primitives::U256;
+use event_scanner::{assert_next, types::ScannerStatus};
 
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
+use crate::common::{TestCounter, setup_sync_scanner};
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider).await?;
-    let contract_address = *contract.address();
+    let setup = setup_sync_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
 
     let historical_events = 3;
     let live_events = 2;
 
-    let receipt = contract.increase().send().await?.get_receipt().await?;
-    let first_historical_block =
-        receipt.block_number.expect("historical receipt should contain block number");
-
-    for _ in 1..historical_events {
+    for _ in 0..historical_events {
         contract.increase().send().await?.watch().await?;
     }
 
-    let filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
-
-    let mut scanner = EventScanner::sync()
-        .from_block(first_historical_block)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
-
-    let mut stream = scanner.create_event_stream(filter);
+    let scanner = setup.scanner;
+    let mut stream = setup.stream;
 
     tokio::spawn(async move { scanner.start().await });
 

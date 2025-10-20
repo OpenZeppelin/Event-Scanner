@@ -10,7 +10,10 @@ use alloy::{
     sol_types::SolEvent,
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage, LiveEventScanner};
+use event_scanner::{
+    EventFilter, EventScanner, EventScannerMessage, HistoricEventScanner, LiveEventScanner,
+    SyncEventScanner, event_lib::modes::LatestEventScanner,
+};
 use tokio_stream::wrappers::ReceiverStream;
 
 // Shared test contract used across integration tests
@@ -42,23 +45,32 @@ sol! {
     }
 }
 
-pub struct LiveScannerSetup<P>
+pub struct ScannerSetup<S, P>
 where
     P: Provider<Ethereum> + Clone,
 {
     pub provider: RootProvider,
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
-    pub scanner: LiveEventScanner<Ethereum>,
+    pub scanner: S,
     pub stream: ReceiverStream<EventScannerMessage>,
     pub anvil: AnvilInstance,
 }
 
+pub type LiveScannerSetup<P> = ScannerSetup<LiveEventScanner<Ethereum>, P>;
+pub type HistoricScannerSetup<P> = ScannerSetup<HistoricEventScanner<Ethereum>, P>;
+pub type SyncScannerSetup<P> = ScannerSetup<SyncEventScanner<Ethereum>, P>;
+pub type LatestScannerSetup<P> = ScannerSetup<LatestEventScanner<Ethereum>, P>;
+
 #[allow(clippy::missing_errors_doc)]
-pub async fn setup_live_scanner(
+pub async fn setup_common(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
-    confirmations: u64,
-) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
+) -> anyhow::Result<(
+    AnvilInstance,
+    RootProvider,
+    TestCounter::TestCounterInstance<Arc<RootProvider>>,
+    EventFilter,
+)> {
     let anvil = spawn_anvil(block_interval)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(Arc::new(provider.clone())).await?;
@@ -69,6 +81,17 @@ pub async fn setup_live_scanner(
 
     let filter = filter.unwrap_or(default_filter);
 
+    Ok((anvil, provider, contract, filter))
+}
+
+#[allow(clippy::missing_errors_doc)]
+pub async fn setup_live_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    confirmations: u64,
+) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
     let mut scanner = EventScanner::live()
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
@@ -76,8 +99,69 @@ pub async fn setup_live_scanner(
 
     let stream = scanner.create_event_stream(filter);
 
-    // return anvil otherwise it doesnt live long enough...
-    Ok(LiveScannerSetup { provider, contract, scanner, stream, anvil })
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+#[allow(clippy::missing_errors_doc)]
+pub async fn setup_sync_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    confirmations: u64,
+) -> anyhow::Result<SyncScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScanner::sync()
+        .block_confirmations(confirmations)
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = scanner.create_event_stream(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+#[allow(clippy::missing_errors_doc)]
+pub async fn setup_historic_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    from: BlockNumberOrTag,
+    to: BlockNumberOrTag,
+) -> anyhow::Result<HistoricScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScanner::historic()
+        .from_block(from)
+        .to_block(to)
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = scanner.create_event_stream(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+#[allow(clippy::missing_errors_doc)]
+pub async fn setup_latest_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    count: usize,
+    from: Option<BlockNumberOrTag>,
+    to: Option<BlockNumberOrTag>,
+) -> anyhow::Result<LatestScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+    let mut builder = EventScanner::latest().count(count);
+    if let Some(f) = from {
+        builder = builder.from_block(f);
+    }
+    if let Some(t) = to {
+        builder = builder.to_block(t);
+    }
+
+    let mut scanner = builder.connect_ws(anvil.ws_endpoint_url()).await?;
+
+    let stream = scanner.create_event_stream(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
 #[allow(clippy::missing_errors_doc)]
