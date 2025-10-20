@@ -362,6 +362,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                 }
             }
 
+            // Close the rewind channel to signal to the log consumers that we're done
+            drop(rewind_tx);
+
             // Since both rewind and live log consumers are ultimately streaming to the same
             // channel, we must ensure that all latest events are streamed before
             // starting the live stream, otherwise the log consumers may send events out
@@ -470,6 +473,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                 }
 
                 if let ConsumerMode::CollectLatest { .. } = mode {
+                    println!("Sending collected logs: {collected:?}");
                     if !collected.is_empty() {
                         collected.reverse(); // restore chronological order
                     }
