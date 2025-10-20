@@ -343,7 +343,7 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let ws_url = "ws://localhost:8545".parse()?;
-    /// # let contract_address = "0x0000000000000000000000000000000000000000".parse()?;
+    /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
     ///
     /// let filter = EventFilter::new().with_contract_address(contract_address);
@@ -773,7 +773,7 @@ impl<N: Network> Client<N> {
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let ws_url = "ws://localhost:8545".parse()?;
-    /// # let contract_address = "0x0000000000000000000000000000000000000000".parse()?;
+    /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
     ///
     /// let filter = EventFilter::new().with_contract_address(contract_address);
