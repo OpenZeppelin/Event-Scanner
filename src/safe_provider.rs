@@ -126,7 +126,7 @@ impl<N: Network> SafeProvider<N> {
     }
 
     #[allow(clippy::missing_errors_doc)]
-    async fn retry_with_timeout<T, F, Fut>(
+    pub(crate) async fn retry_with_timeout<T, F, Fut>(
         &self,
         operation: F,
     ) -> Result<T, RpcError<TransportErrorKind>>
@@ -136,8 +136,106 @@ impl<N: Network> SafeProvider<N> {
     {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
+            .with_total_delay(Some(self.timeout))
             .with_min_delay(self.retry_interval);
 
         operation.retry(retry_strategy).sleep(tokio::time::sleep).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::network::Ethereum;
+    use std::sync::{Arc, Mutex};
+
+    fn create_test_provider(
+        timeout: Duration,
+        max_retries: usize,
+        retry_interval: Duration,
+    ) -> SafeProvider<Ethereum> {
+        SafeProvider {
+            provider: RootProvider::<Ethereum>::new_http("http://localhost:8545".parse().unwrap()),
+            timeout,
+            max_retries,
+            retry_interval,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retry_with_timeout_succeeds_on_first_attempt() {
+        let provider =
+            create_test_provider(Duration::from_millis(100), 3, Duration::from_millis(10));
+
+        let call_count = Arc::new(Mutex::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = provider
+            .retry_with_timeout(move || {
+                let count = call_count_clone.clone();
+                async move {
+                    let mut c = count.lock().unwrap();
+                    *c += 1;
+                    Ok(42)
+                }
+            })
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(*call_count.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_retry_with_timeout_retries_on_error() {
+        let provider =
+            create_test_provider(Duration::from_millis(100), 3, Duration::from_millis(10));
+
+        let call_count = Arc::new(Mutex::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = provider
+            .retry_with_timeout(move || {
+                let count = call_count_clone.clone();
+                async move {
+                    let mut c = count.lock().unwrap();
+                    *c += 1;
+                    if *c < 3 {
+                        Err(TransportErrorKind::custom_str("temporary error"))
+                    } else {
+                        Ok(42)
+                    }
+                }
+            })
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(*call_count.lock().unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_retry_with_timeout_fails_after_max_retries() {
+        let provider =
+            create_test_provider(Duration::from_millis(100), 2, Duration::from_millis(10));
+
+        let call_count = Arc::new(Mutex::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = provider
+            .retry_with_timeout(move || {
+                let count = call_count_clone.clone();
+                async move {
+                    let mut c = count.lock().unwrap();
+                    *c += 1;
+                    Err::<i32, RpcError<TransportErrorKind>>(TransportErrorKind::custom_str(
+                        "permanent error",
+                    ))
+                }
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(*call_count.lock().unwrap(), 3);
     }
 }
