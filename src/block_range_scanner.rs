@@ -81,7 +81,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    providers::{Provider, RootProvider},
+    providers::RootProvider,
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
@@ -487,13 +487,7 @@ impl<N: Network> Service<N> {
         let range_start = (latest + 1).saturating_sub(block_confirmations);
 
         tokio::spawn(async move {
-            Self::stream_live_blocks(
-                range_start,
-                provider.inner().clone(),
-                sender,
-                block_confirmations,
-            )
-            .await;
+            Self::stream_live_blocks(range_start, provider, sender, block_confirmations).await;
         });
 
         Ok(())
@@ -577,7 +571,7 @@ impl<N: Network> Service<N> {
             let sender =
                 self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
-            let provider = self.provider.inner().clone();
+            let provider = self.provider.clone();
             tokio::spawn(async move {
                 Self::stream_live_blocks(start_block_num, provider, sender, block_confirmations)
                     .await;
@@ -597,7 +591,7 @@ impl<N: Network> Service<N> {
         let (live_block_buffer_sender, live_block_buffer_receiver) =
             mpsc::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-        let provider = self.provider.inner().clone();
+        let provider = self.provider.clone();
 
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
@@ -792,9 +786,9 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn stream_live_blocks<P: Provider<N>>(
+    async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        provider: P,
+        provider: SafeProvider<N>,
         sender: mpsc::Sender<BlockRangeMessage>,
         block_confirmations: u64,
     ) {
@@ -900,7 +894,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn get_block_subscription(
-        provider: &impl Provider<N>,
+        provider: &SafeProvider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, BlockRangeScannerError> {
         let ws_stream = provider
             .subscribe_blocks()
@@ -1128,6 +1122,7 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
 
+    use alloy::providers::Provider;
     use std::time::Duration;
     use tokio::time::timeout;
 

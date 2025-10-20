@@ -32,18 +32,15 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::Network,
     providers::{Provider, RootProvider},
+    pubsub::Subscription,
     rpc::types::{Filter, Log},
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
 
-
-
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_MAX_RETRIES: usize = 5;
 pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-
-
 
 #[derive(Clone)]
 pub struct SafeProvider<N: Network> {
@@ -112,24 +109,35 @@ impl<N: Network> SafeProvider<N> {
     }
 
     #[allow(clippy::missing_errors_doc)]
-    pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
+    pub async fn get_logs(
+        &self,
+        filter: &Filter,
+    ) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
         let provider = self.provider.clone();
-        let filter = filter.clone();
-        self.retry_with_timeout(|| async { provider.get_logs(&filter).await }).await
+        self.retry_with_timeout(|| async { provider.get_logs(filter).await }).await
     }
 
     #[allow(clippy::missing_errors_doc)]
-    async fn retry_with_timeout<T, F, Fut>(&self, operation: F) -> Result<T, RpcError<TransportErrorKind>>
+    pub async fn subscribe_blocks(
+        &self,
+    ) -> Result<Subscription<N::HeaderResponse>, RpcError<TransportErrorKind>> {
+        let provider = self.provider.clone();
+        self.retry_with_timeout(|| async { provider.subscribe_blocks().await }).await
+    }
+
+    #[allow(clippy::missing_errors_doc)]
+    async fn retry_with_timeout<T, F, Fut>(
+        &self,
+        operation: F,
+    ) -> Result<T, RpcError<TransportErrorKind>>
     where
         F: Fn() -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let wrapped_operation = || async { operation().await };
-
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
             .with_min_delay(self.retry_interval);
 
-        wrapped_operation.retry(retry_strategy).sleep(tokio::time::sleep).await
+        operation.retry(retry_strategy).sleep(tokio::time::sleep).await
     }
 }
