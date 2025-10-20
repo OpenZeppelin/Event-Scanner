@@ -496,9 +496,7 @@ impl<N: Network> ConnectedEventScanner<N> {
                 };
 
                 loop {
-                    let next = sub.recv().await;
-
-                    match next {
+                    match sub.recv().await {
                         Ok(BlockRangeMessage::Data(range)) => {
                             match Self::get_logs(range, &filter, &base_filter, &provider).await {
                                 Ok(logs) => {
@@ -554,7 +552,6 @@ impl<N: Network> ConnectedEventScanner<N> {
                 }
 
                 if let ConsumerMode::CollectLatest { .. } = mode {
-                    println!("Sending collected logs: {collected:?}");
                     if !collected.is_empty() {
                         collected.reverse(); // restore chronological order
                     }
