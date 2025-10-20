@@ -103,7 +103,13 @@ async fn run_scanner(
 - `with_reorg_rewind_depth` - how many blocks to rewind when a reorg is detected (NOTE ⚠️: still WIP)
 - `with_block_confirmations` - how many confirmations to wait for before considering a block final
 
-Once configured, connect using either `connect_ws::<Ethereum>(ws_url)` or `connect_ipc::<Ethereum>(path)`. This will `connect` the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
+Once configured, connect using one of:
+
+- `connect_ws::<Ethereum>(ws_url)`
+- `connect_ipc::<Ethereum>(path)`
+- `connect_provider::<Ethereum>(provider)`
+
+This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ### Defining Event Filters
 
@@ -138,6 +144,25 @@ Register multiple filters by invoking `create_event_stream` repeatedly.
 
 The flexibility provided by `EventFilter` allows you to build sophisticated event monitoring systems that can track events at different granularities depending on your application's needs.
 
+Batch builder examples:
+
+```rust
+// Multiple contract addresses at once
+let multi_addr = EventFilter::new()
+    .with_contract_addresses([*counter_contract.address(), *other_counter_contract.address()]);
+
+// Multiple event names at once
+let multi_events = EventFilter::new()
+    .with_events([Counter::CountIncreased::SIGNATURE, Counter::CountDecreased::SIGNATURE]);
+
+// Multiple event signature hashes at once
+let multi_sigs = EventFilter::new()
+    .with_event_signatures([
+        Counter::CountIncreased::SIGNATURE_HASH,
+        Counter::CountDecreased::SIGNATURE_HASH,
+    ]);
+```
+
 ### Scanning Modes
 
 - **Live mode** - `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only. On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window, streaming logs from the corrected confirmed block range.
@@ -160,7 +185,7 @@ Basic usage:
 
 ```rust
 use alloy::{eips::BlockNumberOrTag, network::Ethereum};
-use event_scanner::{EventFilter, event_scanner::{EventScanner, EventScannerMessage}};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
 use tokio_stream::StreamExt;
 
 async fn latest_example(ws_url: alloy::transports::http::reqwest::Url, addr: alloy::primitives::Address) -> eyre::Result<()> {
@@ -222,7 +247,7 @@ The scanner captures the latest block number before starting to establish a clea
 
 **Key behaviors:**
 
-- **No duplicates**: Events are never delivered twice across the phase transition
+- **No duplicates (normal case)**: Events are not delivered twice across the phase transition under normal operation. During reorgs, duplicates may occur; see the warning below.
 - **Flexible count**: If fewer than `count` events exist, returns all available events
 - **Reorg handling**: Both phases handle reorgs appropriately:
   - Historical phase: resets and rescans on reorg detection
@@ -286,8 +311,6 @@ Run an example with:
 
 ```bash
 RUST_LOG=info cargo run -p simple_counter
-# or
-RUST_LOG=info cargo run -p historical_scanning
 ```
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
@@ -303,4 +326,18 @@ Integration tests cover all modes:
 ```bash
 cargo nextest run --features test-utils
 ```
+
+---
+
+## Errors
+
+The scanner surfaces errors via `EventScannerError`:
+
+- `EventScannerError::BlockRangeScanner(BlockRangeScannerError)` – issues from the underlying block range service (e.g., subscription/channel constraints, historical/sync failures).
+- `EventScannerError::Provider(RpcError<TransportErrorKind>)` – transport/provider-level failures (e.g., connection problems, RPC errors).
+
+Status notifications are emitted as `EventScannerMessage::Status(ScannerStatus)`, including:
+
+- `ScannerStatus::ReorgDetected`
+- `ScannerStatus::SwitchingToLive`
 

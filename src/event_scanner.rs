@@ -207,34 +207,17 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///   performed over the inclusive range; if `None`, the scanner either streams live or performs
     ///   historical→live depending on `start_height`.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the scanner fails to start
+    ///
     /// # Reorg behavior
     ///
-    /// * Historical: verifies chain continuity and if a reorg is detected, rewinds to the
-    ///   appropriate post-reorg block, then continues forward.
+    /// * Historical: no reorg detection yet (WIP).
     /// * Live: on reorg, emits [`ScannerStatus::ReorgDetected`] and adjusts the next block range
     ///   using `with_block_confirmations` to re-emit the confirmed portion.
     /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
     ///   (historical or live).
-    ///
-    /// ## ⚠️ Warning: Parallel Reorg Detection (Historical → Live mode)
-    ///
-    /// When using Historical → Live mode (sync mode via `stream_from`), both the historical and
-    /// live phases run in parallel. If a reorg occurs during the historical phase, **both phases
-    /// will independently detect and handle the same reorg**. This can result in:
-    /// - **Duplicate [`ScannerStatus::ReorgDetected`] messages**: One from the historical phase and
-    ///   one from the live phase.
-    /// - **Potential duplicate logs**: The live phase may re-emit logs that were already delivered
-    ///   by the historical phase if the reorg affects blocks in the overlapping boundary region.
-    ///
-    /// Applications should be prepared to handle duplicate reorg notifications and implement
-    /// deduplication logic if necessary, especially when processing events near the phase
-    /// transition boundary.
-    ///
-    /// Will be handled by: <https://github.com/OpenZeppelin/Event-Scanner/issues/131>
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the scanner fails to start
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn start<T: Into<BlockNumberOrTag>>(
@@ -759,6 +742,117 @@ impl<N: Network> Client<N> {
         self.event_scanner.scan_latest(count, start_height.into(), end_height.into()).await
     }
 
+    /// Scans the latest `count` matching events per registered listener, then automatically
+    /// transitions to live streaming mode.
+    ///
+    /// This method combines two scanning phases into a single operation:
+    /// 1. **Historical rewind phase**: Collects up to `count` most recent events by scanning
+    ///    backwards from the current chain tip
+    /// 2. **Live streaming phase**: Continuously monitors and streams new events as they arrive
+    ///    on-chain
+    ///
+    /// # Two-Phase Operation
+    ///
+    /// The method captures the latest block number before starting both phases to establish a
+    /// clear boundary. The historical phase scans from `Earliest` to `latest_block`, while the
+    /// live phase uses sync mode starting from `latest_block + 1`. This design prevents duplicate
+    /// events and handles race conditions where new blocks arrive during setup.
+    ///
+    /// Between phases, the scanner emits [`ScannerStatus::SwitchingToLive`] to notify listeners
+    /// of the transition. As previously mentioned, the live phase internally uses sync mode
+    /// (historical → live) to ensure no events are missed if blocks were mined during the
+    /// transition or if reorgs occur.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of recent events to collect per listener before switching to
+    ///   live.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use alloy::network::Ethereum;
+    /// use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+    /// use tokio_stream::StreamExt;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let ws_url = "ws://localhost:8545".parse()?;
+    /// # let contract_address = "0x0000000000000000000000000000000000000000".parse()?;
+    /// let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
+    ///
+    /// let filter = EventFilter::new().with_contract_address(contract_address);
+    /// let mut stream = client.create_event_stream(filter);
+    ///
+    /// // Fetch the latest 10 events, then stream new events continuously
+    /// client.scan_latest_then_live(10).await?;
+    ///
+    /// while let Some(msg) = stream.next().await {
+    ///     match msg {
+    ///         EventScannerMessage::Data(logs) => {
+    ///             println!("Received {} events", logs.len());
+    ///         }
+    ///         EventScannerMessage::Status(status) => {
+    ///             println!("Status: {:?}", status);
+    ///         }
+    ///         EventScannerMessage::Error(e) => {
+    ///             eprintln!("Error: {}", e);
+    ///         }
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Edge Cases
+    ///
+    /// - **No historical events**: If fewer than `count` events exist (or none at all), the method
+    ///   returns all available events, then transitions to live streaming normally.
+    /// - **Duplicate prevention**: The boundary at `latest_block` ensures events are never
+    ///   delivered twice across the phase transition.
+    /// - **Race conditions**: Fetching `latest_block` before setting up streams prevents missing
+    ///   events that arrive during initialization.
+    ///
+    /// # Reorg Behavior
+    ///
+    /// - **Historical rewind phase**: Reverse-ordered rewind over `Earliest..=latest_block`. On
+    ///   detecting a reorg, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
+    ///   new tip, and continues until collectors accumulate `count` logs. Final delivery to
+    ///   listeners preserves chronological order.
+    /// - **Live streaming phase**: Starts from `latest_block + 1` and respects block confirmations
+    ///   configured via [`with_block_confirmations`](Self::with_block_confirmations). On reorg,
+    ///   emits [`ScannerStatus::ReorgDetected`], adjusts the next confirmed window (possibly
+    ///   re-emitting confirmed portions), and continues streaming.
+    ///
+    /// ## ⚠️ Warning: Parallel Reorg Detection
+    ///
+    /// Both phases run in parallel, which means if a reorg occurs during the historical rewind
+    /// phase, **both phases will independently detect and handle the same reorg**. This can result
+    /// in:
+    /// - **Duplicate [`ScannerStatus::ReorgDetected`] messages**: One from the historical phase and
+    ///   one from the live phase.
+    /// - **Potential duplicate logs**: The live phase may re-emit logs that were already delivered
+    ///   by the historical phase if the reorg affects blocks in the overlapping boundary region.
+    ///
+    /// Applications should be prepared to handle duplicate reorg notifications and implement
+    /// deduplication logic if necessary, especially when processing events near the phase
+    /// transition boundary.
+    ///
+    /// Will be handled by: <https://github.com/OpenZeppelin/Event-Scanner/issues/132>
+    ///
+    /// # Usage Notes
+    ///
+    /// - Call [`create_event_stream`](Self::create_event_stream) to register listeners **before**
+    ///   calling this method, otherwise no events will be delivered.
+    /// - The method returns immediately after spawning the scanning task. Events are delivered
+    ///   asynchronously through the registered streams.
+    /// - The live phase continues indefinitely until the scanner is dropped or an error occurs.
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
+    /// [`ScannerStatus::SwitchingToLive`]: crate::types::ScannerStatus::SwitchingToLive
     pub async fn scan_latest_then_live(self, count: usize) -> Result<(), EventScannerError> {
         self.event_scanner.scan_latest_then_live(count.into()).await
     }
