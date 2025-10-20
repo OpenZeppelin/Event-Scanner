@@ -514,7 +514,7 @@ impl<N: Network> Service<N> {
 
         let start_block_num = match start_height {
             BlockNumberOrTag::Number(num) => num,
-            block_tag @ _ => start_block
+            block_tag => start_block
                 .ok_or_else(|| BlockRangeScannerError::BlockNotFound(block_tag))?
                 .header()
                 .number(),
@@ -663,7 +663,7 @@ impl<N: Network> Service<N> {
         let mut batch_from = from;
 
         while batch_from >= to {
-            let batch_to = batch_from.saturating_sub(blocks_read_per_epoch as u64 - 1).max(to);
+            let batch_to = batch_from.saturating_sub(blocks_read_per_epoch - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
             if !Self::try_send(&sender, batch_to..=batch_from).await {

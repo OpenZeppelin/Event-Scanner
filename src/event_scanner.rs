@@ -854,6 +854,6 @@ impl<N: Network> Client<N> {
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     /// [`ScannerStatus::SwitchingToLive`]: crate::types::ScannerStatus::SwitchingToLive
     pub async fn scan_latest_then_live(self, count: usize) -> Result<(), EventScannerError> {
-        self.event_scanner.scan_latest_then_live(count.into()).await
+        self.event_scanner.scan_latest_then_live(count).await
     }
 }
