@@ -125,6 +125,9 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
     // Historical: emit 3, mine 1 empty block to form a clear boundary
     let mut expected_latest = vec![];
     expected_latest.push(increase(&contract).await?);
+
+    provider.anvil_mine(Some(1), None).await?;
+
     expected_latest.push(increase(&contract).await?);
     expected_latest.push(increase(&contract).await?);
 
@@ -139,6 +142,31 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
     // Immediately produce a new live event in a new block
     let live = increase(&contract).await?;
     assert_next!(stream, &[live]);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn scan_latest_then_live_waiting_on_live_logs_arriving() -> anyhow::Result<()> {
+    let setup = setup_scanner(None, None, None).await?;
+    let contract = setup.contract;
+    let client = setup.client;
+    let mut stream = setup.stream;
+
+    // Historical: emit 3, mine 1 empty block to form a clear boundary
+    let mut expected_latest = vec![];
+    expected_latest.push(increase(&contract).await?);
+    expected_latest.push(increase(&contract).await?);
+    expected_latest.push(increase(&contract).await?);
+
+    client.scan_latest_then_live(3).await?;
+
+    // Latest phase
+    assert_next!(stream, &expected_latest);
+    assert_next!(stream, ScannerStatus::SwitchingToLive);
+
+    let inner = stream.into_inner();
+    assert!(inner.is_empty());
 
     Ok(())
 }
