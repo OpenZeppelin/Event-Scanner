@@ -81,7 +81,6 @@ pub enum EventScannerError {
     BlockRangeScanner(#[from] BlockRangeScannerError),
     #[error("Provider error: {0}")]
     Provider(Arc<RpcError<TransportErrorKind>>),
-
 }
 
 impl From<RpcError<TransportErrorKind>> for EventScannerError {
@@ -89,7 +88,6 @@ impl From<RpcError<TransportErrorKind>> for EventScannerError {
         EventScannerError::Provider(Arc::new(e))
     }
 }
-
 
 impl From<RpcError<TransportErrorKind>> for EventScannerMessage {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
