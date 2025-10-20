@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use alloy::transports::{RpcError, TransportErrorKind};
+use alloy::{
+    rpc::types::Log,
+    transports::{RpcError, TransportErrorKind},
+};
 use thiserror::Error;
 
 use crate::{EventScannerMessage, block_range_scanner::BlockRangeScannerError};
@@ -28,5 +31,14 @@ impl From<RpcError<TransportErrorKind>> for EventScannerMessage {
 impl From<BlockRangeScannerError> for EventScannerMessage {
     fn from(e: BlockRangeScannerError) -> Self {
         EventScannerMessage::Error(e.into())
+    }
+}
+
+impl From<Result<Vec<Log>, RpcError<TransportErrorKind>>> for EventScannerMessage {
+    fn from(logs: Result<Vec<Log>, RpcError<TransportErrorKind>>) -> Self {
+        match logs {
+            Ok(logs) => EventScannerMessage::Data(logs),
+            Err(e) => EventScannerMessage::Error(e.into()),
+        }
     }
 }

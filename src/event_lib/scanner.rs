@@ -26,20 +26,6 @@ use tracing::{error, info, warn};
 
 pub type EventScannerMessage = ScannerMessage<Vec<Log>, EventScannerError>;
 
-pub struct EventScannerService<N: Network> {
-    block_range_scanner: ConnectedBlockRangeScanner<N>,
-    event_listeners: Vec<EventListener>,
-}
-
-impl From<Result<Vec<Log>, RpcError<TransportErrorKind>>> for EventScannerMessage {
-    fn from(logs: Result<Vec<Log>, RpcError<TransportErrorKind>>) -> Self {
-        match logs {
-            Ok(logs) => EventScannerMessage::Data(logs),
-            Err(e) => EventScannerMessage::Error(e.into()),
-        }
-    }
-}
-
 impl From<Vec<Log>> for EventScannerMessage {
     fn from(logs: Vec<Log>) -> Self {
         EventScannerMessage::Data(logs)
@@ -72,6 +58,11 @@ impl<E: SolEvent> PartialEq<&[E]> for EventScannerMessage {
             false
         }
     }
+}
+
+pub struct EventScannerService<N: Network> {
+    block_range_scanner: ConnectedBlockRangeScanner<N>,
+    event_listeners: Vec<EventListener>,
 }
 
 #[derive(Copy, Clone)]
