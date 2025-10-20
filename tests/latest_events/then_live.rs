@@ -72,10 +72,12 @@ async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Res
     let client = setup.client;
     let mut stream = setup.stream;
 
-    // Historical: produce exactly 4 across two phases
-    _ = increase(&contract).await?;
-    let expected_latest =
-        &[increase(&contract).await?, increase(&contract).await?, increase(&contract).await?];
+    // Historical: produce exactly 4 events
+    let mut expected_latest = vec![];
+    expected_latest.push(increase(&contract).await?);
+    expected_latest.push(increase(&contract).await?);
+    expected_latest.push(increase(&contract).await?);
+    expected_latest.push(increase(&contract).await?);
 
     client.scan_latest_then_live(4).await?;
 
