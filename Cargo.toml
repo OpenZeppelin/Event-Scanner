@@ -76,3 +76,8 @@ workspace = true
 
 [features]
 test-utils = []
+
+[[test]]
+# see tests/mod.rs
+name = "mod"
+required-features = ["test-utils"]

@@ -324,7 +324,7 @@ All examples spin up a local `anvil` instance, deploy a demo counter contract, a
 Integration tests cover all modes:
 
 ```bash
-cargo nextest run --features test-utils
+cargo nextest run
 ```
 
 ---
