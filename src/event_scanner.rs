@@ -321,24 +321,20 @@ impl<N: Network> ConnectedEventScanner<N> {
     pub async fn scan_latest_then_live(self, count: usize) -> Result<(), EventScannerError> {
         info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
 
-        // Step 0: Setup the client and log consumers
         let client = self.block_range_scanner.run()?;
 
-        // Step 1: Setup rewind stream to collect the specified number of latest events
-        // The log consumer and the respective tokio tasks they run in will be dropped after the
-        // operation is done.
+        // Setup rewind and live stream log consumers.
         let (rewind_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
         let rewind_log_consumers =
             self.spawn_log_consumers(&rewind_tx, ConsumerMode::CollectLatest { count });
 
-        // Step 2: Setup live stream
-        // The log consumers will keep running in their respective tokio tasks as long as the
-        // scanner is running.
         let (live_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
         let live_consumers = self.spawn_log_consumers(&live_tx, ConsumerMode::Stream);
 
-        // Step 3: Fetch the latest block number.
+        // Fetch the latest block number.
         // This is used to determine the starting point for the rewind stream and the live stream.
+        // We do this before starting the streams to avoid a race condition where the latest block
+        // changes while we're setting up the streams.
         let latest_block = self
             .block_range_scanner
             .provider()
@@ -348,35 +344,39 @@ impl<N: Network> ConnectedEventScanner<N> {
             .header()
             .number();
 
-        // Step 4: Setup rewind stream to collect the specified number of latest events
+        // Setup streams, which run in parallel.
         let mut rewind_stream = client.rewind(BlockNumberOrTag::Earliest, latest_block).await?;
 
+        // We actually rely on the sync mode for the live stream, to ensure that we don't miss any
+        // events in case a new block was minted while we were setting up the streams or a reorg
+        // happens.
         let mut sync_stream = client.stream_from(latest_block + 1).await?;
 
-        // Step 5: Start streaming
+        // Start streaming...
         tokio::spawn(async move {
-            // Step 5.1: Collect the specified number of latest events
+            // Collect the specified number of latest events.
             while let Some(message) = rewind_stream.next().await {
                 if !Self::try_broadcast(&rewind_tx, message) {
                     return;
                 }
             }
 
-            // Close the rewind channel to signal to the log consumers that we're done
+            // Close the rewind channel sender to signal to the log consumers that the rewind phase
+            // is done.
             drop(rewind_tx);
 
             // Since both rewind and live log consumers are ultimately streaming to the same
             // channel, we must ensure that all latest events are streamed before
-            // starting the live stream, otherwise the log consumers may send events out
-            // of order
+            // consuming the live stream, otherwise the log consumers may send events out
+            // of order.
             rewind_log_consumers.join_all().await;
 
-            // Step 5.2: Notify the client that we're not streaming live
+            // Notify the client that we're now streaming live.
             if !Self::try_broadcast(&live_tx, ScannerStatus::SwitchingToLive) {
                 return;
             }
 
-            // Step 5.3: Start the live stream
+            // Start the live (sync) stream.
             while let Some(message) = sync_stream.next().await {
                 if !Self::try_broadcast(&live_tx, message) {
                     return;
