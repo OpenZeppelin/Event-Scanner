@@ -20,7 +20,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let reorg_depth = 5;
     let same_block = true;
 
-    let expected_event_tx_hashes = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
         provider,
         contract,
         num_initial_events,
@@ -83,7 +83,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     // add events in ascending blocks from reorg point
     let same_block = false;
 
-    let expected_event_tx_hashes = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
         provider,
         contract,
         num_initial_events,
@@ -145,7 +145,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let num_new_events = 1;
     let same_block = true;
 
-    let expected_event_tx_hashes = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
         provider,
         contract,
         num_initial_events,
@@ -207,7 +207,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let reorg_depth = 2;
 
     let same_block = true;
-    let expected_event_tx_hashes = reorg_with_new_txs(
+    let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
         provider,
         contract,
         num_initial_events,
@@ -273,7 +273,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let reorg_depth = 2_u64;
     let same_block = true;
 
-    let all_tx_hashes = reorg_with_new_txs(
+    let all_tx_hashes = reorg_with_new_count_incr_txs(
         provider.clone(),
         contract,
         num_initial_events,

@@ -15,7 +15,7 @@ use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
 
 #[tokio::test]
 async fn high_event_volume_no_loss() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(0.05)?;
+    let anvil = spawn_anvil(Some(0.05))?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(provider).await?;
 

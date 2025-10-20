@@ -1,5 +1,10 @@
 [workspace]
-members = [".", "examples/historical_scanning", "examples/simple_counter"]
+members = [
+    ".",
+    "examples/historical_scanning",
+    "examples/simple_counter",
+    "examples/latest_events_scanning",
+]
 resolver = "2"
 
 [workspace.package]
@@ -7,7 +12,7 @@ authors = ["OpenZeppelin"]
 edition = "2024"
 license = "AGPL-3.0-only"
 repository = "https://github.com/OpenZeppelin/Event-Scanner"
-version = "0.2.1-alpha"
+version = "0.3.0-alpha"
 
 [workspace.lints.clippy]
 pedantic = "warn"
@@ -63,3 +68,6 @@ tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+test-utils = []
