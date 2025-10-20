@@ -384,8 +384,8 @@ impl<N: Network> ConnectedEventScanner<N> {
             // 1. Ensure that all log consumers finish streaming live events before the scanner is
             //    stopped
             // 2. If we didn't move the log consumer handles into this tokio task, they would've
-            //    been dropped when the end of `scan_latest_then_live` was reached, which would've
-            //    stopped the live stream before it even begins.
+            //    been dropped at the end of `scan_latest_then_live` scope, which would've stopped
+            //    the live stream before it even begins.
             live_consumers.join_all().await;
         });
 
