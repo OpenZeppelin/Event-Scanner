@@ -463,6 +463,9 @@ impl<N: Network> ConnectedEventScanner<N> {
                 }
             }
 
+            // TODO: create helper function for appropriately spawning and cleaning up log consumers
+            drop(live_tx);
+
             // This serves two purposes:
             // 1. Ensure that all log consumers finish streaming live events before the scanner is
             //    stopped
