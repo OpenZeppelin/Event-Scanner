@@ -216,6 +216,22 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// * Historical → Live: reorgs are handled as per the particular mode the scanner is in
     ///   (historical or live).
     ///
+    /// ## ⚠️ Warning: Parallel Reorg Detection (Historical → Live mode)
+    ///
+    /// When using Historical → Live mode (sync mode via `stream_from`), both the historical and
+    /// live phases run in parallel. If a reorg occurs during the historical phase, **both phases
+    /// will independently detect and handle the same reorg**. This can result in:
+    /// - **Duplicate [`ScannerStatus::ReorgDetected`] messages**: One from the historical phase and
+    ///   one from the live phase.
+    /// - **Potential duplicate logs**: The live phase may re-emit logs that were already delivered
+    ///   by the historical phase if the reorg affects blocks in the overlapping boundary region.
+    ///
+    /// Applications should be prepared to handle duplicate reorg notifications and implement
+    /// deduplication logic if necessary, especially when processing events near the phase
+    /// transition boundary.
+    ///
+    /// Will be handled by: <https://github.com/OpenZeppelin/Event-Scanner/issues/131>
+    ///
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start
@@ -322,34 +338,6 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// * `count` - Maximum number of recent events to collect per listener before switching to
     ///   live.
     ///
-    /// # Edge Cases
-    ///
-    /// - **No historical events**: If fewer than `count` events exist (or none at all), the method
-    ///   returns all available events, then transitions to live streaming normally.
-    /// - **Duplicate prevention**: The boundary at `latest_block` ensures events are never
-    ///   delivered twice across the phase transition.
-    /// - **Race conditions**: Fetching `latest_block` before setting up streams prevents missing
-    ///   events that arrive during initialization.
-    ///
-    /// # Reorg Behavior
-    ///
-    /// - **Historical rewind phase**: Reverse-ordered rewind over `Earliest..=latest_block`. On
-    ///   detecting a reorg, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
-    ///   new tip, and continues until collectors accumulate `count` logs. Final delivery to
-    ///   listeners preserves chronological order.
-    /// - **Live streaming phase**: Starts from `latest_block + 1` and respects block confirmations
-    ///   configured via [`with_block_confirmations`](Self::with_block_confirmations). On reorg,
-    ///   emits [`ScannerStatus::ReorgDetected`], adjusts the next confirmed window (possibly
-    ///   re-emitting confirmed portions), and continues streaming.
-    ///
-    /// # Usage Notes
-    ///
-    /// - Call [`create_event_stream`](Self::create_event_stream) to register listeners **before**
-    ///   calling this method, otherwise no events will be delivered.
-    /// - The method returns immediately after spawning the scanning task. Events are delivered
-    ///   asynchronously through the registered streams.
-    /// - The live phase continues indefinitely until the scanner is dropped or an error occurs.
-    ///
     /// # Errors
     ///
     /// Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
@@ -388,6 +376,50 @@ impl<N: Network> ConnectedEventScanner<N> {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Edge Cases
+    ///
+    /// - **No historical events**: If fewer than `count` events exist (or none at all), the method
+    ///   returns all available events, then transitions to live streaming normally.
+    /// - **Duplicate prevention**: The boundary at `latest_block` ensures events are never
+    ///   delivered twice across the phase transition.
+    /// - **Race conditions**: Fetching `latest_block` before setting up streams prevents missing
+    ///   events that arrive during initialization.
+    ///
+    /// # Reorg Behavior
+    ///
+    /// - **Historical rewind phase**: Reverse-ordered rewind over `Earliest..=latest_block`. On
+    ///   detecting a reorg, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
+    ///   new tip, and continues until collectors accumulate `count` logs. Final delivery to
+    ///   listeners preserves chronological order.
+    /// - **Live streaming phase**: Starts from `latest_block + 1` and respects block confirmations
+    ///   configured via [`with_block_confirmations`](Self::with_block_confirmations). On reorg,
+    ///   emits [`ScannerStatus::ReorgDetected`], adjusts the next confirmed window (possibly
+    ///   re-emitting confirmed portions), and continues streaming.
+    ///
+    /// ## ⚠️ Warning: Parallel Reorg Detection
+    ///
+    /// Both phases run in parallel, which means if a reorg occurs during the historical rewind
+    /// phase, **both phases will independently detect and handle the same reorg**. This can result
+    /// in:
+    /// - **Duplicate [`ScannerStatus::ReorgDetected`] messages**: One from the historical phase and
+    ///   one from the live phase.
+    /// - **Potential duplicate logs**: The live phase may re-emit logs that were already delivered
+    ///   by the historical phase if the reorg affects blocks in the overlapping boundary region.
+    ///
+    /// Applications should be prepared to handle duplicate reorg notifications and implement
+    /// deduplication logic if necessary, especially when processing events near the phase
+    /// transition boundary.
+    ///
+    /// Will be handled by: <https://github.com/OpenZeppelin/Event-Scanner/issues/132>
+    ///
+    /// # Usage Notes
+    ///
+    /// - Call [`create_event_stream`](Self::create_event_stream) to register listeners **before**
+    ///   calling this method, otherwise no events will be delivered.
+    /// - The method returns immediately after spawning the scanning task. Events are delivered
+    ///   asynchronously through the registered streams.
+    /// - The live phase continues indefinitely until the scanner is dropped or an error occurs.
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     /// [`ScannerStatus::SwitchingToLive`]: crate::types::ScannerStatus::SwitchingToLive
