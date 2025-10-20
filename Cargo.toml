@@ -4,6 +4,7 @@ members = [
     "examples/historical_scanning",
     "examples/simple_counter",
     "examples/latest_events_scanning",
+    "examples/latest_events_then_live_scanning",
 ]
 resolver = "2"
 
