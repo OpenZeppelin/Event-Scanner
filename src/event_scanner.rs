@@ -380,22 +380,6 @@ impl<N: Network> ConnectedEventScanner<N> {
     ///   emits [`ScannerStatus::ReorgDetected`], adjusts the next confirmed window (possibly
     ///   re-emitting confirmed portions), and continues streaming.
     ///
-    /// ## ⚠️ Warning: Parallel Reorg Detection
-    ///
-    /// Both phases run in parallel, which means if a reorg occurs during the historical rewind
-    /// phase, **both phases will independently detect and handle the same reorg**. This can result
-    /// in:
-    /// - **Duplicate [`ScannerStatus::ReorgDetected`] messages**: One from the historical phase and
-    ///   one from the live phase.
-    /// - **Potential duplicate logs**: The live phase may re-emit logs that were already delivered
-    ///   by the historical phase if the reorg affects blocks in the overlapping boundary region.
-    ///
-    /// Applications should be prepared to handle duplicate reorg notifications and implement
-    /// deduplication logic if necessary, especially when processing events near the phase
-    /// transition boundary.
-    ///
-    /// Will be handled by: <https://github.com/OpenZeppelin/Event-Scanner/issues/132>
-    ///
     /// # Usage Notes
     ///
     /// - Call [`create_event_stream`](Self::create_event_stream) to register listeners **before**
@@ -432,13 +416,8 @@ impl<N: Network> ConnectedEventScanner<N> {
             .header()
             .number();
 
-        // Setup streams, which run in parallel.
+        // First run only the rewind stream.
         let mut rewind_stream = client.rewind(BlockNumberOrTag::Earliest, latest_block).await?;
-
-        // We actually rely on the sync mode for the live stream, to ensure that we don't miss any
-        // events in case a new block was minted while we were setting up the streams or a reorg
-        // happens.
-        let mut sync_stream = client.stream_from(latest_block + 1).await?;
 
         // Start streaming...
         tokio::spawn(async move {
@@ -458,6 +437,20 @@ impl<N: Network> ConnectedEventScanner<N> {
             // consuming the live stream, otherwise the log consumers may send events out
             // of order.
             rewind_log_consumers.join_all().await;
+
+            // Run the live stream only once rewind is done. This ensures that there's no
+            // reorg-detection overlap between the rewind and live streams and avoids
+            // running . We actually rely on the sync mode for the live stream, to
+            // ensure that we don't miss any events in case a new block was minted while
+            // we were setting up the streams or a reorg happens.
+            let mut sync_stream = match client.stream_from(latest_block + 1).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!(error = %e, "Failed to start live stream");
+                    _ = Self::try_broadcast(&live_tx, e);
+                    return;
+                }
+            };
 
             // Notify the client that we're now streaming live.
             if !Self::try_broadcast(&live_tx, ScannerStatus::SwitchingToLive) {
