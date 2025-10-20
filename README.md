@@ -23,6 +23,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
   - [Scanning Latest Events](#scanning-latest-events)
+  - [Scanning Latest Events Then Live](#scanning-latest-events-then-live)
 - [Examples](#examples)
 - [Testing](#testing)
 
@@ -142,10 +143,11 @@ The flexibility provided by `EventFilter` allows you to build sophisticated even
 - **Live mode** - `start_scanner(BlockNumberOrTag::Latest, None)` subscribes to new blocks only. On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window, streaming logs from the corrected confirmed block range.
 - **Historical mode** - `start_scanner(BlockNumberOrTag::Number(start), Some(BlockNumberOrTag::Number(end)))`, scanner fetches events from a historical block range. Currently no reorg logic has been implemented (NOTE ⚠️: still WIP). In the case that the end block > finalized block and you need reorg resistance, we recommend to use sync mode.
 - **Historical → Live** - `start_scanner(BlockNumberOrTag::Number(start), None)` replays from `start` to current head, then streams future blocks. Reorgs are handled as per the particular mode phase the scanner is in (historical or live).
+- **Latest → Live** - `scan_latest_then_live(count)` fetches the most recent `count` events, then automatically transitions to live streaming. Ideal for applications that need recent historical context before monitoring real-time events.
 
 For now modes are deduced from the `start` and `end` parameters. In the future, we might add explicit commands to select the mode.
 
-See the integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
+See the integration tests under `tests/live_mode`, `tests/historic_mode`, `tests/historic_to_live`, and `tests/latest_events` for concrete examples.
 
 ### Scanning Latest Events
 
@@ -195,7 +197,81 @@ The scanner periodically checks the tip to detect reorgs. On reorg, the scanner 
 Notes:
 
 - Ensure you create streams via `create_event_stream()` before calling `scan_latest*` so listeners are registered.
-<!-- TODO: uncomment once implemented - The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`. -->
+- The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`.
+
+### Scanning Latest Events Then Live
+
+`scan_latest_then_live` combines the best of both worlds: it fetches recent historical events and then seamlessly transitions to live streaming mode for continuous monitoring.
+
+**What it does:**
+
+1. **Historical rewind phase**: Scans backwards from the current chain tip to collect up to `count` most recent matching events
+2. **Automatic transition**: Emits `ScannerStatus::SwitchingToLive` to signal the mode change
+3. **Live streaming phase**: Continuously monitors and streams new events as they arrive on-chain
+
+**When to use it:**
+
+This mode is ideal for applications that need recent historical context before monitoring real-time events, such as:
+- Dashboards that show recent activity and update in real-time
+- Analytics tools that need to "warm up" with recent data
+- Event processors that need to catch up on missed events before going live
+
+**How it works:**
+
+The scanner captures the latest block number before starting to establish a clear boundary between phases. The historical phase scans from `Earliest` to `latest_block`, while the live phase starts from `latest_block + 1`. This design prevents duplicate events and handles race conditions where new blocks arrive during setup.
+
+**Key behaviors:**
+
+- **No duplicates**: Events are never delivered twice across the phase transition
+- **Flexible count**: If fewer than `count` events exist, returns all available events
+- **Reorg handling**: Both phases handle reorgs appropriately:
+  - Historical phase: resets and rescans on reorg detection
+  - Live phase: respects block confirmations set via `with_block_confirmations`
+- **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
+
+**Example:**
+
+```rust
+use alloy::{network::Ethereum, sol_types::SolEvent};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+use tokio_stream::StreamExt;
+
+async fn latest_then_live_example(
+    ws_url: alloy::transports::http::reqwest::Url,
+    addr: alloy::primitives::Address,
+) -> eyre::Result<()> {
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
+
+    let filter = EventFilter::new().with_contract_address(addr);
+    let mut stream = client.create_event_stream(filter);
+
+    // Fetch the latest 10 events, then stream new events continuously
+    client.scan_latest_then_live(10).await?;
+
+    while let Some(msg) = stream.next().await {
+        match msg {
+            EventScannerMessage::Data(logs) => {
+                println!("Received {} events", logs.len());
+            }
+            EventScannerMessage::Status(status) => {
+                println!("Status update: {:?}", status);
+                // You'll see ScannerStatus::SwitchingToLive when transitioning
+            }
+            EventScannerMessage::Error(e) => {
+                eprintln!("Error: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+**Important notes:**
+
+- Create event streams via `create_event_stream()` **before** calling `scan_latest_then_live`
+- The method returns immediately; events are delivered asynchronously
+- The live phase continues indefinitely until the scanner is dropped or encounters an error
 
 ---
 
@@ -203,7 +279,8 @@ Notes:
 
 - `examples/simple_counter` – minimal live-mode scanner
 - `examples/historical_scanning` – demonstrates replaying from genesis (block 0) before continuing streaming latest blocks
-- `examples/latest_events_scanning` – demonstrates scanning the latest events
+- `examples/latest_events_scanning` – demonstrates scanning the latest events using `scan_latest` (one-shot collection)
+- `examples/latest_events_then_live_scanning` – demonstrates scanning the latest events using `scan_latest_then_live`.
 
 Run an example with:
 
@@ -213,7 +290,7 @@ RUST_LOG=info cargo run -p simple_counter
 RUST_LOG=info cargo run -p historical_scanning
 ```
 
-Both examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
+All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
 
 ---
 
