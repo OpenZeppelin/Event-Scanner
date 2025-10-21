@@ -49,8 +49,8 @@ pub trait BaseConfigBuilder: Sized {
     fn base_mut(&mut self) -> &mut BaseConfig;
 
     #[must_use]
-    fn max_read_per_epoch(mut self, max: usize) -> Self {
-        self.base_mut().block_range_scanner.max_read_per_epoch = max;
+    fn max_block_range(mut self, max: usize) -> Self {
+        self.base_mut().block_range_scanner.max_block_range = max;
         self
     }
 }

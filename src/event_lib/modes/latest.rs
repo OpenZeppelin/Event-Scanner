@@ -218,27 +218,27 @@ mod tests {
             .to_block(200)
             .block_confirmations(10)
             .then_live()
-            .max_read_per_epoch(50);
+            .max_block_range(50);
 
         assert_eq!(config.count, 5);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
         assert_eq!(config.block_confirmations, 10);
         assert!(config.switch_to_live);
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
     fn test_latest_scanner_builder_pattern_chaining() {
         let config = LatestScannerConfig::new()
-            .max_read_per_epoch(25)
+            .max_block_range(25)
             .block_confirmations(5)
             .count(3)
             .from_block(BlockNumberOrTag::Number(50))
             .to_block(BlockNumberOrTag::Number(150))
             .then_live();
 
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 25);
         assert_eq!(config.block_confirmations, 5);
         assert_eq!(config.count, 3);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));

@@ -180,7 +180,7 @@ impl From<BlockRangeScannerError> for BlockRangeMessage {
 
 #[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
-    pub max_read_per_epoch: usize,
+    pub max_block_range: usize,
 }
 
 impl Default for BlockRangeScanner {
@@ -192,12 +192,12 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self { max_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH }
+        Self { max_block_range: DEFAULT_BLOCKS_READ_PER_EPOCH }
     }
 
     #[must_use]
-    pub fn with_max_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
-        self.max_read_per_epoch = blocks_read_per_epoch;
+    pub fn with_max_block_range(mut self, blocks_read_per_epoch: usize) -> Self {
+        self.max_block_range = blocks_read_per_epoch;
         self
     }
 
@@ -237,7 +237,7 @@ impl BlockRangeScanner {
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        Ok(ConnectedBlockRangeScanner { provider, max_read_per_epoch: self.max_read_per_epoch })
+        Ok(ConnectedBlockRangeScanner { provider, max_read_per_epoch: self.max_block_range })
     }
 }
 
@@ -1106,16 +1106,16 @@ mod tests {
     fn block_range_scanner_defaults_match_constants() {
         let scanner = BlockRangeScanner::new();
 
-        assert_eq!(scanner.max_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        assert_eq!(scanner.max_block_range, DEFAULT_BLOCKS_READ_PER_EPOCH);
     }
 
     #[test]
     fn builder_methods_update_configuration() {
         let blocks_read_per_epoch = 42;
 
-        let scanner = BlockRangeScanner::new().with_max_read_per_epoch(blocks_read_per_epoch);
+        let scanner = BlockRangeScanner::new().with_max_block_range(blocks_read_per_epoch);
 
-        assert_eq!(scanner.max_read_per_epoch, blocks_read_per_epoch);
+        assert_eq!(scanner.max_block_range, blocks_read_per_epoch);
     }
 
     #[tokio::test]
@@ -1447,7 +1447,7 @@ mod tests {
         let end_num = 110;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(30)
+            .with_max_block_range(30)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1482,7 +1482,7 @@ mod tests {
         let end_num = 120;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(30)
+            .with_max_block_range(30)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1517,7 +1517,7 @@ mod tests {
         provider.anvil_mine(Option::Some(100), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(5)
+            .with_max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1548,7 +1548,7 @@ mod tests {
 
         // range where blocks per epoch is larger than the number of blocks on chain
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(200)
+            .with_max_block_range(200)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1572,7 +1572,7 @@ mod tests {
         provider.anvil_mine(Option::Some(11), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(5)
+            .with_max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1762,7 +1762,7 @@ mod tests {
         provider.anvil_mine(Option::Some(150), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(100)
+            .with_max_block_range(100)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1786,7 +1786,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(5)
+            .with_max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1811,7 +1811,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(4)
+            .with_max_block_range(4)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1836,7 +1836,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(5)
+            .with_max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1858,7 +1858,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(1)
+            .with_max_block_range(1)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1884,7 +1884,7 @@ mod tests {
         provider.anvil_mine(Option::Some(20), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(7)
+            .with_max_block_range(7)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1910,7 +1910,7 @@ mod tests {
         provider.anvil_mine(Option::Some(16), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(5)
+            .with_max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1938,7 +1938,7 @@ mod tests {
 
         // Do not mine up to 999 so start won't exist
         let client = BlockRangeScanner::new()
-            .with_max_read_per_epoch(5)
+            .with_max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;

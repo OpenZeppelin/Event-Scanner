@@ -134,21 +134,21 @@ mod tests {
     #[test]
     fn test_historic_scanner_builder_pattern() {
         let config =
-            HistoricScannerConfig::new().from_block(100u64).to_block(200u64).max_read_per_epoch(50);
+            HistoricScannerConfig::new().from_block(100u64).to_block(200u64).max_block_range(50);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
     fn test_historic_scanner_builder_pattern_chaining() {
         let config = HistoricScannerConfig::new()
-            .max_read_per_epoch(25)
+            .max_block_range(25)
             .from_block(BlockNumberOrTag::Number(50))
             .to_block(BlockNumberOrTag::Number(150));
 
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 25);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(150)));
     }

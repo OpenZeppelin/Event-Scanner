@@ -134,21 +134,21 @@ mod tests {
     #[test]
     fn test_sync_scanner_builder_pattern() {
         let config =
-            SyncScannerConfig::new().from_block(100).block_confirmations(10).max_read_per_epoch(50);
+            SyncScannerConfig::new().from_block(100).block_confirmations(10).max_block_range(50);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert_eq!(config.block_confirmations, 10);
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 50);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
     fn test_sync_scanner_builder_pattern_chaining() {
         let config = SyncScannerConfig::new()
-            .max_read_per_epoch(25)
+            .max_block_range(25)
             .block_confirmations(5)
             .from_block(BlockNumberOrTag::Number(50));
 
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 25);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 25);
         assert_eq!(config.block_confirmations, 5);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
     }
@@ -158,20 +158,20 @@ mod tests {
         let config = SyncScannerConfig::new()
             .from_block(BlockNumberOrTag::Earliest)
             .block_confirmations(20)
-            .max_read_per_epoch(100);
+            .max_block_range(100);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
         assert_eq!(config.block_confirmations, 20);
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 100);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 100);
     }
 
     #[test]
     fn test_sync_scanner_builder_with_zero_confirmations() {
         let config =
-            SyncScannerConfig::new().from_block(0).block_confirmations(0).max_read_per_epoch(75);
+            SyncScannerConfig::new().from_block(0).block_confirmations(0).max_block_range(75);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(0)));
         assert_eq!(config.block_confirmations, 0);
-        assert_eq!(config.base.block_range_scanner.max_read_per_epoch, 75);
+        assert_eq!(config.base.block_range_scanner.max_block_range, 75);
     }
 }
