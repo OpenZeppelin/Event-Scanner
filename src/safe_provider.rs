@@ -39,32 +39,38 @@ use alloy::{
 use backon::{ExponentialBuilder, Retryable};
 use tracing::{debug, error};
 
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+// RPC retry and timeout settings
+/// Default timeout used by `SafeProvider`
+pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 5;
+/// Default base delay between retries.
 pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Provider wrapper adding retries and timeouts.
 #[derive(Clone)]
 pub struct SafeProvider<N: Network> {
     provider: RootProvider<N>,
-    timeout: Duration,
+    max_timeout: Duration,
     max_retries: usize,
     retry_interval: Duration,
 }
 
 impl<N: Network> SafeProvider<N> {
+    /// Create a new `SafeProvider` with default settings.
     #[must_use]
     pub fn new(provider: RootProvider<N>) -> Self {
         Self {
             provider,
-            timeout: DEFAULT_TIMEOUT,
+            max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             retry_interval: DEFAULT_RETRY_INTERVAL,
         }
     }
 
     #[must_use]
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
+    pub fn with_max_timeout(mut self, timeout: Duration) -> Self {
+        self.max_timeout = timeout;
         self
     }
 
@@ -85,7 +91,11 @@ impl<N: Network> SafeProvider<N> {
         &self.provider
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    /// Fetch a block by number with retry and timeout.
+    ///
+    /// # Errors
+    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
+    /// after exhausting retries or times out.
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -100,7 +110,11 @@ impl<N: Network> SafeProvider<N> {
         result
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    /// Fetch the latest block number with retry and timeout.
+    ///
+    /// # Errors
+    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
+    /// after exhausting retries or times out.
     pub async fn get_block_number(&self) -> Result<u64, RpcError<TransportErrorKind>> {
         debug!("SafeProvider eth_getBlockNumber called");
         let provider = self.provider.clone();
@@ -111,7 +125,11 @@ impl<N: Network> SafeProvider<N> {
         result
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    /// Fetch a block by hash with retry and timeout.
+    ///
+    /// # Errors
+    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
+    /// after exhausting retries or times out.
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
@@ -126,7 +144,11 @@ impl<N: Network> SafeProvider<N> {
         result
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    /// Fetch logs for the given filter with retry and timeout.
+    ///
+    /// # Errors
+    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
+    /// after exhausting retries or times out.
     pub async fn get_logs(
         &self,
         filter: &Filter,
@@ -140,7 +162,11 @@ impl<N: Network> SafeProvider<N> {
         result
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    /// Subscribe to new block headers with retry and timeout.
+    ///
+    /// # Errors
+    /// Returns `RpcError<TransportErrorKind>` if the subscription
+    /// cannot be established after retries or times out.
     pub async fn subscribe_blocks(
         &self,
     ) -> Result<Subscription<N::HeaderResponse>, RpcError<TransportErrorKind>> {
@@ -153,7 +179,11 @@ impl<N: Network> SafeProvider<N> {
         result
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    /// Execute `operation` with exponential backoff and a total timeout.
+    ///
+    /// # Errors
+    /// Returns `RpcError<TransportErrorKind>` if all attempts fail or the
+    /// total delay exceeds the configured timeout.
     pub(crate) async fn retry_with_timeout<T, F, Fut>(
         &self,
         operation: F,
@@ -164,7 +194,7 @@ impl<N: Network> SafeProvider<N> {
     {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
-            .with_total_delay(Some(self.timeout))
+            .with_total_delay(Some(self.max_timeout))
             .with_min_delay(self.retry_interval);
 
         operation.retry(retry_strategy).sleep(tokio::time::sleep).await
@@ -184,7 +214,7 @@ mod tests {
     ) -> SafeProvider<Ethereum> {
         SafeProvider {
             provider: RootProvider::<Ethereum>::new_http("http://localhost:8545".parse().unwrap()),
-            timeout,
+            max_timeout: timeout,
             max_retries,
             retry_interval,
         }

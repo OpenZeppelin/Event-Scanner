@@ -73,7 +73,9 @@ use tokio::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
-    safe_provider::{DEFAULT_MAX_RETRIES, DEFAULT_RETRY_INTERVAL, DEFAULT_TIMEOUT, SafeProvider},
+    safe_provider::{
+        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL, SafeProvider,
+    },
     types::{ScannerMessage, ScannerStatus},
 };
 use alloy::{
@@ -103,11 +105,6 @@ pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 // Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
 // is considered final)
 pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
-
-// RPC retry and timeout settings
-pub const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-pub const DEFAULT_RPC_MAX_RETRIES: usize = 5;
-pub const DEFAULT_RPC_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 pub type BlockRangeMessage = ScannerMessage<RangeInclusive<BlockNumber>, BlockRangeScannerError>;
 
@@ -237,7 +234,7 @@ pub struct BlockRangeScanner {
     blocks_read_per_epoch: usize,
     max_reorg_depth: u64,
     block_confirmations: u64,
-    timeout: Duration,
+    max_timeout: Duration,
     max_retries: usize,
     retry_interval: Duration,
 }
@@ -255,7 +252,7 @@ impl BlockRangeScanner {
             blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
             max_reorg_depth: DEFAULT_REORG_REWIND_DEPTH,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-            timeout: DEFAULT_TIMEOUT,
+            max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             retry_interval: DEFAULT_RETRY_INTERVAL,
         }
@@ -280,8 +277,8 @@ impl BlockRangeScanner {
     }
 
     #[must_use]
-    pub fn with_timeout(mut self, rpc_timeout: Duration) -> Self {
-        self.timeout = rpc_timeout;
+    pub fn with_max_timeout(mut self, rpc_timeout: Duration) -> Self {
+        self.max_timeout = rpc_timeout;
         self
     }
 
@@ -334,7 +331,7 @@ impl BlockRangeScanner {
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let safe_provider = SafeProvider::new(provider)
-            .with_timeout(self.timeout)
+            .with_max_timeout(self.max_timeout)
             .with_max_retries(self.max_retries)
             .with_retry_interval(self.retry_interval);
 
@@ -1141,9 +1138,9 @@ mod tests {
     fn mocked_provider(asserter: Asserter) -> SafeProvider<Ethereum> {
         let root_provider = RootProvider::new(RpcClient::mocked(asserter));
         SafeProvider::new(root_provider)
-            .with_timeout(DEFAULT_RPC_TIMEOUT)
-            .with_max_retries(DEFAULT_RPC_MAX_RETRIES)
-            .with_retry_interval(DEFAULT_RPC_RETRY_INTERVAL)
+            .with_max_timeout(DEFAULT_MAX_TIMEOUT)
+            .with_max_retries(DEFAULT_MAX_RETRIES)
+            .with_retry_interval(DEFAULT_RETRY_INTERVAL)
     }
 
     #[test]
