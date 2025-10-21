@@ -103,8 +103,9 @@ impl<N: Network> SafeProvider<N> {
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
         debug!("SafeProvider eth_getBlockByNumber called with number: {:?}", number);
         let provider = self.provider.clone();
-        let result =
-            self.retry_with_timeout(|| async { provider.get_block_by_number(number).await }).await;
+        let result = self
+            .retry_with_total_timeout(|| async { provider.get_block_by_number(number).await })
+            .await;
         if let Err(e) = &result {
             error!("SafeProvider eth_getByBlockNumber failed: {}", e);
         }
@@ -119,7 +120,8 @@ impl<N: Network> SafeProvider<N> {
     pub async fn get_block_number(&self) -> Result<u64, RpcError<TransportErrorKind>> {
         debug!("SafeProvider eth_getBlockNumber called");
         let provider = self.provider.clone();
-        let result = self.retry_with_timeout(|| async { provider.get_block_number().await }).await;
+        let result =
+            self.retry_with_total_timeout(|| async { provider.get_block_number().await }).await;
         if let Err(e) = &result {
             error!("SafeProvider eth_getBlockNumber failed: {}", e);
         }
@@ -137,8 +139,9 @@ impl<N: Network> SafeProvider<N> {
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
         debug!("SafeProvider eth_getBlockByHash called with hash: {:?}", hash);
         let provider = self.provider.clone();
-        let result =
-            self.retry_with_timeout(|| async { provider.get_block_by_hash(hash).await }).await;
+        let result = self
+            .retry_with_total_timeout(|| async { provider.get_block_by_hash(hash).await })
+            .await;
         if let Err(e) = &result {
             error!("SafeProvider eth_getBlockByHash failed: {}", e);
         }
@@ -156,7 +159,8 @@ impl<N: Network> SafeProvider<N> {
     ) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
         debug!("eth_getLogs called with filter: {:?}", filter);
         let provider = self.provider.clone();
-        let result = self.retry_with_timeout(|| async { provider.get_logs(filter).await }).await;
+        let result =
+            self.retry_with_total_timeout(|| async { provider.get_logs(filter).await }).await;
         if let Err(e) = &result {
             error!("SafeProvider eth_getLogs failed: {}", e);
         }
@@ -173,19 +177,20 @@ impl<N: Network> SafeProvider<N> {
     ) -> Result<Subscription<N::HeaderResponse>, RpcError<TransportErrorKind>> {
         debug!("eth_subscribe called");
         let provider = self.provider.clone();
-        let result = self.retry_with_timeout(|| async { provider.subscribe_blocks().await }).await;
+        let result =
+            self.retry_with_total_timeout(|| async { provider.subscribe_blocks().await }).await;
         if let Err(e) = &result {
             error!("SafeProvider eth_subscribe failed: {}", e);
         }
         result
     }
 
-    /// Execute `operation` with exponential backoff and a total timeout.
+    /// Execute `operation` with exponential backoff respecting only the backoff budget.
     ///
     /// # Errors
     /// Returns `RpcError<TransportErrorKind>` if all attempts fail or the
-    /// total delay exceeds the configured timeout.
-    pub(crate) async fn retry_with_timeout<T, F, Fut>(
+    /// cumulative backoff delay exceeds the configured budget.
+    async fn retry_with_timeout<T, F, Fut>(
         &self,
         operation: F,
     ) -> Result<T, RpcError<TransportErrorKind>>
@@ -195,10 +200,33 @@ impl<N: Network> SafeProvider<N> {
     {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
-            .with_total_delay(Some(self.max_timeout))
             .with_min_delay(self.retry_interval);
 
         operation.retry(retry_strategy).sleep(tokio::time::sleep).await
+    }
+
+    /// Execute `operation` with exponential backoff and a true total timeout.
+    ///
+    /// Wraps the retry logic with `tokio::time::timeout(self.max_timeout, ...)` so
+    /// the entire operation (including time spent inside the RPC call) cannot exceed
+    /// `max_timeout`.
+    ///
+    /// # Errors
+    /// - Returns `RpcError<TransportErrorKind>` with message "total operation timeout exceeded" if
+    ///   the overall timeout elapses.
+    /// - Propagates any `RpcError<TransportErrorKind>` from the underlying retries.
+    async fn retry_with_total_timeout<T, F, Fut>(
+        &self,
+        operation: F,
+    ) -> Result<T, RpcError<TransportErrorKind>>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
+    {
+        match tokio::time::timeout(self.max_timeout, self.retry_with_timeout(operation)).await {
+            Ok(res) => res,
+            Err(_) => Err(TransportErrorKind::custom_str("total operation timeout exceeded")),
+        }
     }
 }
 
@@ -207,6 +235,7 @@ mod tests {
     use super::*;
     use alloy::network::Ethereum;
     use std::sync::{Arc, Mutex};
+    use tokio::time::sleep;
 
     fn create_test_provider(
         timeout: Duration,
@@ -296,5 +325,20 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(*call_count.lock().unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_retry_with_timeout_respects_total_delay() {
+        let max_timeout = Duration::from_millis(50);
+        let provider = create_test_provider(max_timeout, 10, Duration::from_millis(1));
+
+        let result = provider
+            .retry_with_total_timeout(move || async move {
+                sleep(max_timeout + Duration::from_millis(10)).await;
+                Ok(42)
+            })
+            .await;
+
+        assert!(result.is_err());
     }
 }
