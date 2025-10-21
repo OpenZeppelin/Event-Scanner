@@ -37,6 +37,7 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
+use tracing::{debug, error};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_MAX_RETRIES: usize = 5;
@@ -89,14 +90,25 @@ impl<N: Network> SafeProvider<N> {
         &self,
         number: BlockNumberOrTag,
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
+        debug!("SafeProvider eth_getBlockByNumber called with number: {:?}", number);
         let provider = self.provider.clone();
-        self.retry_with_timeout(|| async { provider.get_block_by_number(number).await }).await
+        let result =
+            self.retry_with_timeout(|| async { provider.get_block_by_number(number).await }).await;
+        if let Err(e) = &result {
+            error!("SafeProvider eth_getByBlockNumber failed: {}", e);
+        }
+        result
     }
 
     #[allow(clippy::missing_errors_doc)]
     pub async fn get_block_number(&self) -> Result<u64, RpcError<TransportErrorKind>> {
+        debug!("SafeProvider eth_getBlockNumber called");
         let provider = self.provider.clone();
-        self.retry_with_timeout(|| async { provider.get_block_number().await }).await
+        let result = self.retry_with_timeout(|| async { provider.get_block_number().await }).await;
+        if let Err(e) = &result {
+            error!("SafeProvider eth_getBlockNumber failed: {}", e);
+        }
+        result
     }
 
     #[allow(clippy::missing_errors_doc)]
@@ -104,8 +116,14 @@ impl<N: Network> SafeProvider<N> {
         &self,
         hash: alloy::primitives::BlockHash,
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
+        debug!("SafeProvider eth_getBlockByHash called with hash: {:?}", hash);
         let provider = self.provider.clone();
-        self.retry_with_timeout(|| async { provider.get_block_by_hash(hash).await }).await
+        let result =
+            self.retry_with_timeout(|| async { provider.get_block_by_hash(hash).await }).await;
+        if let Err(e) = &result {
+            error!("SafeProvider eth_getBlockByHash failed: {}", e);
+        }
+        result
     }
 
     #[allow(clippy::missing_errors_doc)]
@@ -113,16 +131,26 @@ impl<N: Network> SafeProvider<N> {
         &self,
         filter: &Filter,
     ) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
+        debug!("eth_getLogs called with filter: {:?}", filter);
         let provider = self.provider.clone();
-        self.retry_with_timeout(|| async { provider.get_logs(filter).await }).await
+        let result = self.retry_with_timeout(|| async { provider.get_logs(filter).await }).await;
+        if let Err(e) = &result {
+            error!("SafeProvider eth_getLogs failed: {}", e);
+        }
+        result
     }
 
     #[allow(clippy::missing_errors_doc)]
     pub async fn subscribe_blocks(
         &self,
     ) -> Result<Subscription<N::HeaderResponse>, RpcError<TransportErrorKind>> {
+        debug!("eth_subscribe called");
         let provider = self.provider.clone();
-        self.retry_with_timeout(|| async { provider.subscribe_blocks().await }).await
+        let result = self.retry_with_timeout(|| async { provider.subscribe_blocks().await }).await;
+        if let Err(e) = &result {
+            error!("SafeProvider eth_subscribe failed: {}", e);
+        }
+        result
     }
 
     #[allow(clippy::missing_errors_doc)]
