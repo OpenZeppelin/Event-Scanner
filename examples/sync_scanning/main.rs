@@ -110,4 +110,3 @@ async fn main() -> anyhow::Result<()> {
     scanner_task.abort();
     Ok(())
 }
-
