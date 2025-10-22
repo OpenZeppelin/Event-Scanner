@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = scanner.create_event_stream(increase_filter);
 
     info!("Starting sync scanner...");
-    let scanner_task = tokio::spawn(async move {
+    tokio::spawn(async move {
         scanner.start().await.expect("failed to start scanner");
     });
 
@@ -104,6 +104,5 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    scanner_task.abort();
     Ok(())
 }
