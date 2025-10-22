@@ -18,7 +18,7 @@ use crate::{
 
 use super::{BaseConfig, BaseConfigBuilder};
 
-pub struct SyncScannerConfig {
+pub struct SyncScannerBuilder {
     base: BaseConfig,
     // Defaults to Earliest
     from_block: BlockNumberOrTag,
@@ -27,17 +27,17 @@ pub struct SyncScannerConfig {
 }
 
 pub struct SyncEventScanner<N: Network> {
-    config: SyncScannerConfig,
+    config: SyncScannerBuilder,
     inner: EventScannerService<N>,
 }
 
-impl BaseConfigBuilder for SyncScannerConfig {
+impl BaseConfigBuilder for SyncScannerBuilder {
     fn base_mut(&mut self) -> &mut BaseConfig {
         &mut self.base
     }
 }
 
-impl SyncScannerConfig {
+impl SyncScannerBuilder {
     pub(super) fn new() -> Self {
         Self {
             base: BaseConfig::new(),
@@ -64,10 +64,8 @@ impl SyncScannerConfig {
     ///
     /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
-        let SyncScannerConfig { base, from_block, block_confirmations } = self;
-        let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        let config = SyncScannerConfig { base, from_block, block_confirmations };
-        Ok(SyncEventScanner { config, inner: EventScannerService::from_config(brs) })
+        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(SyncEventScanner { config: self, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to the provider via IPC
@@ -79,10 +77,8 @@ impl SyncScannerConfig {
         self,
         ipc_path: String,
     ) -> TransportResult<SyncEventScanner<N>> {
-        let SyncScannerConfig { base, from_block, block_confirmations } = self;
-        let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        let config = SyncScannerConfig { base, from_block, block_confirmations };
-        Ok(SyncEventScanner { config, inner: EventScannerService::from_config(brs) })
+        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(SyncEventScanner { config: self, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to an existing provider
@@ -90,14 +86,13 @@ impl SyncScannerConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
+    #[must_use]
     pub fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> TransportResult<SyncEventScanner<N>> {
-        let SyncScannerConfig { base, from_block, block_confirmations } = self;
-        let brs = base.block_range_scanner.connect::<N>(provider);
-        let config = SyncScannerConfig { base, from_block, block_confirmations };
-        Ok(SyncEventScanner { config, inner: EventScannerService::from_config(brs) })
+    ) -> SyncEventScanner<N> {
+        let brs = self.base.block_range_scanner.connect::<N>(provider);
+        SyncEventScanner { config: self, inner: EventScannerService::from_config(brs) }
     }
 }
 
@@ -125,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_config_defaults() {
-        let config = SyncScannerConfig::new();
+        let config = SyncScannerBuilder::new();
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
         assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
@@ -134,7 +129,7 @@ mod tests {
     #[test]
     fn test_sync_scanner_builder_pattern() {
         let config =
-            SyncScannerConfig::new().from_block(100).block_confirmations(10).max_block_range(50);
+            SyncScannerBuilder::new().from_block(100).block_confirmations(10).max_block_range(50);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert_eq!(config.block_confirmations, 10);
@@ -143,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_pattern_chaining() {
-        let config = SyncScannerConfig::new()
+        let config = SyncScannerBuilder::new()
             .max_block_range(25)
             .block_confirmations(5)
             .from_block(BlockNumberOrTag::Number(50));
@@ -155,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_with_different_block_types() {
-        let config = SyncScannerConfig::new()
+        let config = SyncScannerBuilder::new()
             .from_block(BlockNumberOrTag::Earliest)
             .block_confirmations(20)
             .max_block_range(100);
@@ -168,7 +163,7 @@ mod tests {
     #[test]
     fn test_sync_scanner_builder_with_zero_confirmations() {
         let config =
-            SyncScannerConfig::new().from_block(0).block_confirmations(0).max_block_range(75);
+            SyncScannerBuilder::new().from_block(0).block_confirmations(0).max_block_range(75);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(0)));
         assert_eq!(config.block_confirmations, 0);

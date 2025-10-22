@@ -4,9 +4,9 @@ mod live;
 mod sync;
 
 pub use historic::{HistoricEventScanner, HistoricScannerBuilder};
-pub use latest::{LatestEventScanner, LatestScannerConfig};
-pub use live::{LiveEventScanner, LiveScannerConfig};
-pub use sync::{SyncEventScanner, SyncScannerConfig};
+pub use latest::{LatestEventScanner, LatestScannerBuilder};
+pub use live::{LiveEventScanner, LiveScannerBuilder};
+pub use sync::{SyncEventScanner, SyncScannerBuilder};
 
 use crate::block_range_scanner::BlockRangeScanner;
 
@@ -19,18 +19,18 @@ impl EventScanner {
     }
 
     #[must_use]
-    pub fn live() -> LiveScannerConfig {
-        LiveScannerConfig::new()
+    pub fn live() -> LiveScannerBuilder {
+        LiveScannerBuilder::new()
     }
 
     #[must_use]
-    pub fn sync() -> SyncScannerConfig {
-        SyncScannerConfig::new()
+    pub fn sync() -> SyncScannerBuilder {
+        SyncScannerBuilder::new()
     }
 
     #[must_use]
-    pub fn latest() -> LatestScannerConfig {
-        LatestScannerConfig::new()
+    pub fn latest() -> LatestScannerBuilder {
+        LatestScannerBuilder::new()
     }
 }
 

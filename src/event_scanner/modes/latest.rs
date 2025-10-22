@@ -18,7 +18,7 @@ use crate::{
 
 use super::{BaseConfig, BaseConfigBuilder};
 
-pub struct LatestScannerConfig {
+pub struct LatestScannerBuilder {
     base: BaseConfig,
     // Defatuls to 1
     count: usize,
@@ -34,17 +34,17 @@ pub struct LatestScannerConfig {
 
 pub struct LatestEventScanner<N: Network> {
     #[allow(dead_code)]
-    config: LatestScannerConfig,
+    config: LatestScannerBuilder,
     inner: EventScannerService<N>,
 }
 
-impl BaseConfigBuilder for LatestScannerConfig {
+impl BaseConfigBuilder for LatestScannerBuilder {
     fn base_mut(&mut self) -> &mut BaseConfig {
         &mut self.base
     }
 }
 
-impl LatestScannerConfig {
+impl LatestScannerBuilder {
     pub(super) fn new() -> Self {
         Self {
             base: BaseConfig::new(),
@@ -86,7 +86,7 @@ impl LatestScannerConfig {
         self
     }
 
-    /// Connects to the provider via IPC
+    /// Connects to the provider via WebSocket
     ///
     /// # Errors
     ///
@@ -95,24 +95,8 @@ impl LatestScannerConfig {
         self,
         ws_url: Url,
     ) -> TransportResult<LatestEventScanner<N>> {
-        let LatestScannerConfig {
-            base,
-            count,
-            from_block,
-            to_block,
-            block_confirmations,
-            switch_to_live,
-        } = self;
-        let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        let config = LatestScannerConfig {
-            base,
-            count,
-            from_block,
-            to_block,
-            block_confirmations,
-            switch_to_live,
-        };
-        Ok(LatestEventScanner { config, inner: EventScannerService::from_config(brs) })
+        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(LatestEventScanner { config: self, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to the provider via IPC
@@ -124,24 +108,8 @@ impl LatestScannerConfig {
         self,
         ipc_path: String,
     ) -> TransportResult<LatestEventScanner<N>> {
-        let LatestScannerConfig {
-            base,
-            count,
-            from_block,
-            to_block,
-            block_confirmations,
-            switch_to_live,
-        } = self;
-        let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        let config = LatestScannerConfig {
-            base,
-            count,
-            from_block,
-            to_block,
-            block_confirmations,
-            switch_to_live,
-        };
-        Ok(LatestEventScanner { config, inner: EventScannerService::from_config(brs) })
+        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(LatestEventScanner { config: self, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to an existing provider
@@ -149,28 +117,10 @@ impl LatestScannerConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect<N: Network>(
-        self,
-        provider: RootProvider<N>,
-    ) -> TransportResult<LatestEventScanner<N>> {
-        let LatestScannerConfig {
-            base,
-            count,
-            from_block,
-            to_block,
-            block_confirmations,
-            switch_to_live,
-        } = self;
-        let brs = base.block_range_scanner.connect::<N>(provider);
-        let config = LatestScannerConfig {
-            base,
-            count,
-            from_block,
-            to_block,
-            block_confirmations,
-            switch_to_live,
-        };
-        Ok(LatestEventScanner { config, inner: EventScannerService::from_config(brs) })
+    #[must_use]
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> LatestEventScanner<N> {
+        let brs = self.base.block_range_scanner.connect::<N>(provider);
+        LatestEventScanner { config: self, inner: EventScannerService::from_config(brs) }
     }
 }
 
@@ -201,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_config_defaults() {
-        let config = LatestScannerConfig::new();
+        let config = LatestScannerBuilder::new();
 
         assert_eq!(config.count, 1);
         assert!(matches!(config.from_block, BlockNumberOrTag::Latest));
@@ -212,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_pattern() {
-        let config = LatestScannerConfig::new()
+        let config = LatestScannerBuilder::new()
             .count(5)
             .from_block(100)
             .to_block(200)
@@ -230,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_pattern_chaining() {
-        let config = LatestScannerConfig::new()
+        let config = LatestScannerBuilder::new()
             .max_block_range(25)
             .block_confirmations(5)
             .count(3)
@@ -248,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_with_different_block_types() {
-        let config = LatestScannerConfig::new()
+        let config = LatestScannerBuilder::new()
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest)
             .count(10)
@@ -263,10 +213,10 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_then_live_method() {
-        let config = LatestScannerConfig::new().then_live();
+        let config = LatestScannerBuilder::new().then_live();
         assert!(config.switch_to_live);
 
-        let config_without_live = LatestScannerConfig::new();
+        let config_without_live = LatestScannerBuilder::new();
         assert!(!config_without_live.switch_to_live);
     }
 }
