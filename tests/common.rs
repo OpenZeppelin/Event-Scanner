@@ -12,7 +12,7 @@ use alloy::{
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
     EventFilter, EventScanner, EventScannerMessage, HistoricEventScanner, LiveEventScanner,
-    SyncEventScanner, event_lib::modes::LatestEventScanner,
+    SyncEventScanner, event_scanner::modes::LatestEventScanner,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
