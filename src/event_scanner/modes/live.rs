@@ -11,7 +11,8 @@ use crate::{
     event_scanner::{
         EventScannerError,
         filter::EventFilter,
-        scanner::{EventScannerMessage, EventScannerService},
+        message::EventScannerMessage,
+        scanner::EventScannerService,
     },
 };
 

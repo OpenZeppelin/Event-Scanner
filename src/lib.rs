@@ -7,8 +7,7 @@ pub mod types;
 pub use types::{ScannerMessage, ScannerStatus};
 
 pub use event_scanner::{
-    EventFilter, EventListener, EventScanner, EventScannerError, EventScannerMessage,
-    EventScannerService, HistoricEventScanner, HistoricScannerBuilder, LatestEventScanner,
-    LatestScannerBuilder, LiveEventScanner, LiveScannerBuilder, SyncEventScanner,
-    SyncScannerBuilder,
+    EventFilter, EventScanner, EventScannerError, EventScannerMessage, HistoricEventScanner,
+    HistoricScannerBuilder, LatestEventScanner, LatestScannerBuilder, LiveEventScanner,
+    LiveScannerBuilder, SyncEventScanner, SyncScannerBuilder,
 };

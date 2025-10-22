@@ -10,7 +10,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::event_scanner::{
     EventScannerError,
     filter::EventFilter,
-    scanner::{EventScannerMessage, EventScannerService},
+    message::EventScannerMessage,
+    scanner::EventScannerService,
 };
 
 use super::{BaseConfig, BaseConfigBuilder};

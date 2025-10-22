@@ -6,7 +6,7 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::{EventScannerMessage, block_range_scanner::BlockRangeScannerError};
+use crate::{event_scanner::message::EventScannerMessage, block_range_scanner::BlockRangeScannerError};
 
 #[derive(Error, Debug, Clone)]
 pub enum EventScannerError {

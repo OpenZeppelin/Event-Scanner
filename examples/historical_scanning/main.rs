@@ -3,7 +3,7 @@ use std::time::Duration;
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 
-use event_scanner::{EventFilter, EventScanner, event_scanner::EventScannerMessage};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
