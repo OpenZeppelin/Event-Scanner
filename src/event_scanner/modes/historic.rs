@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    block_range_scanner::{ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES},
+    block_range_scanner::{BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES},
     event_scanner::{
         EventScannerError,
         consumer::{ConsumerMode, handle_stream},
@@ -19,10 +19,8 @@ use crate::{
     },
 };
 
-use super::{BaseConfig, BaseConfigBuilder};
-
 pub struct HistoricScannerBuilder {
-    base: BaseConfig,
+    block_range_scanner: BlockRangeScanner,
     // Defaults to Earliest
     from_block: BlockNumberOrTag,
     // Defaults to Latest
@@ -35,19 +33,19 @@ pub struct HistoricEventScanner<N: Network> {
     listeners: Vec<EventListener>,
 }
 
-impl BaseConfigBuilder for HistoricScannerBuilder {
-    fn base_mut(&mut self) -> &mut BaseConfig {
-        &mut self.base
-    }
-}
-
 impl HistoricScannerBuilder {
     pub(super) fn new() -> Self {
         Self {
-            base: BaseConfig::new(),
+            block_range_scanner: BlockRangeScanner::new(),
             from_block: BlockNumberOrTag::Earliest,
             to_block: BlockNumberOrTag::Latest,
         }
+    }
+
+    #[must_use]
+    pub fn max_block_range(mut self, max_block_range: u64) -> Self {
+        self.block_range_scanner.max_block_range = max_block_range;
+        self
     }
 
     #[must_use]
@@ -71,7 +69,7 @@ impl HistoricScannerBuilder {
         self,
         ws_url: Url,
     ) -> TransportResult<HistoricEventScanner<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
         Ok(HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -84,7 +82,7 @@ impl HistoricScannerBuilder {
         self,
         ipc_path: String,
     ) -> TransportResult<HistoricEventScanner<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
         Ok(HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -95,7 +93,7 @@ impl HistoricScannerBuilder {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> HistoricEventScanner<N> {
-        let block_range_scanner = self.base.block_range_scanner.connect::<N>(provider);
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
         HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -148,7 +146,7 @@ mod tests {
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
-        assert_eq!(config.base.block_range_scanner.max_block_range, 50);
+        assert_eq!(config.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
@@ -158,7 +156,7 @@ mod tests {
             .from_block(BlockNumberOrTag::Number(50))
             .to_block(BlockNumberOrTag::Number(150));
 
-        assert_eq!(config.base.block_range_scanner.max_block_range, 25);
+        assert_eq!(config.block_range_scanner.max_block_range, 25);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(150)));
     }

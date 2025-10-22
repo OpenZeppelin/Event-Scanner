@@ -10,7 +10,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     block_range_scanner::{
-        ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, MAX_BUFFERED_MESSAGES,
+        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
+        MAX_BUFFERED_MESSAGES,
     },
     event_scanner::{
         EventScannerError,
@@ -21,10 +22,8 @@ use crate::{
     },
 };
 
-use super::{BaseConfig, BaseConfigBuilder};
-
 pub struct SyncScannerBuilder {
-    base: BaseConfig,
+    block_range_scanner: BlockRangeScanner,
     // Defaults to Earliest
     from_block: BlockNumberOrTag,
     // Defaults to DEFAULT_BLOCK_CONFIRMATIONS
@@ -37,19 +36,19 @@ pub struct SyncEventScanner<N: Network> {
     listeners: Vec<EventListener>,
 }
 
-impl BaseConfigBuilder for SyncScannerBuilder {
-    fn base_mut(&mut self) -> &mut BaseConfig {
-        &mut self.base
-    }
-}
-
 impl SyncScannerBuilder {
     pub(super) fn new() -> Self {
         Self {
-            base: BaseConfig::new(),
+            block_range_scanner: BlockRangeScanner::new(),
             from_block: BlockNumberOrTag::Earliest,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
         }
+    }
+
+    #[must_use]
+    pub fn max_block_range(mut self, max_block_range: u64) -> Self {
+        self.block_range_scanner.max_block_range = max_block_range;
+        self
     }
 
     #[must_use]
@@ -70,7 +69,7 @@ impl SyncScannerBuilder {
     ///
     /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
         Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -83,7 +82,7 @@ impl SyncScannerBuilder {
         self,
         ipc_path: String,
     ) -> TransportResult<SyncEventScanner<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
         Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -94,7 +93,7 @@ impl SyncScannerBuilder {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> SyncEventScanner<N> {
-        let block_range_scanner = self.base.block_range_scanner.connect::<N>(provider);
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
         SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -148,7 +147,7 @@ mod tests {
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert_eq!(config.block_confirmations, 10);
-        assert_eq!(config.base.block_range_scanner.max_block_range, 50);
+        assert_eq!(config.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
@@ -158,7 +157,7 @@ mod tests {
             .block_confirmations(5)
             .from_block(BlockNumberOrTag::Number(50));
 
-        assert_eq!(config.base.block_range_scanner.max_block_range, 25);
+        assert_eq!(config.block_range_scanner.max_block_range, 25);
         assert_eq!(config.block_confirmations, 5);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
     }
@@ -172,7 +171,7 @@ mod tests {
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
         assert_eq!(config.block_confirmations, 20);
-        assert_eq!(config.base.block_range_scanner.max_block_range, 100);
+        assert_eq!(config.block_range_scanner.max_block_range, 100);
     }
 
     #[test]
@@ -182,6 +181,6 @@ mod tests {
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(0)));
         assert_eq!(config.block_confirmations, 0);
-        assert_eq!(config.base.block_range_scanner.max_block_range, 75);
+        assert_eq!(config.block_range_scanner.max_block_range, 75);
     }
 }

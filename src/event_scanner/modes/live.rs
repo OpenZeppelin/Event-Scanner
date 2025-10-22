@@ -9,7 +9,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     block_range_scanner::{
-        ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, MAX_BUFFERED_MESSAGES,
+        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
+        MAX_BUFFERED_MESSAGES,
     },
     event_scanner::{
         EventScannerError,
@@ -20,10 +21,8 @@ use crate::{
     },
 };
 
-use super::{BaseConfig, BaseConfigBuilder};
-
 pub struct LiveScannerBuilder {
-    base: BaseConfig,
+    block_range_scanner: BlockRangeScanner,
     // Defaults to DEFAULT_BLOCK_CONFIRMATIONS
     block_confirmations: u64,
 }
@@ -34,20 +33,23 @@ pub struct LiveEventScanner<N: Network> {
     listeners: Vec<EventListener>,
 }
 
-impl BaseConfigBuilder for LiveScannerBuilder {
-    fn base_mut(&mut self) -> &mut BaseConfig {
-        &mut self.base
-    }
-}
-
 impl LiveScannerBuilder {
     pub(super) fn new() -> Self {
-        Self { base: BaseConfig::new(), block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
+        Self {
+            block_range_scanner: BlockRangeScanner::new(),
+            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+        }
     }
 
     #[must_use]
-    pub fn block_confirmations(mut self, count: u64) -> Self {
-        self.block_confirmations = count;
+    pub fn max_block_range(mut self, max_block_range: u64) -> Self {
+        self.block_range_scanner.max_block_range = max_block_range;
+        self
+    }
+
+    #[must_use]
+    pub fn block_confirmations(mut self, confirmations: u64) -> Self {
+        self.block_confirmations = confirmations;
         self
     }
 
@@ -57,7 +59,7 @@ impl LiveScannerBuilder {
     ///
     /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<LiveEventScanner<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
         Ok(LiveEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -70,7 +72,7 @@ impl LiveScannerBuilder {
         self,
         ipc_path: String,
     ) -> TransportResult<LiveEventScanner<N>> {
-        let block_range_scanner = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
         Ok(LiveEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -81,7 +83,7 @@ impl LiveScannerBuilder {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> LiveEventScanner<N> {
-        let block_range_scanner = self.base.block_range_scanner.connect::<N>(provider);
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
         LiveEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -131,14 +133,14 @@ mod tests {
         let config = LiveScannerBuilder::new().block_confirmations(10).max_block_range(50);
 
         assert_eq!(config.block_confirmations, 10);
-        assert_eq!(config.base.block_range_scanner.max_block_range, 50);
+        assert_eq!(config.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
     fn test_live_scanner_builder_pattern_chaining() {
         let config = LiveScannerBuilder::new().max_block_range(25).block_confirmations(5);
 
-        assert_eq!(config.base.block_range_scanner.max_block_range, 25);
+        assert_eq!(config.block_range_scanner.max_block_range, 25);
         assert_eq!(config.block_confirmations, 5);
     }
 
@@ -147,6 +149,6 @@ mod tests {
         let config = LiveScannerBuilder::new().block_confirmations(0).max_block_range(100);
 
         assert_eq!(config.block_confirmations, 0);
-        assert_eq!(config.base.block_range_scanner.max_block_range, 100);
+        assert_eq!(config.block_range_scanner.max_block_range, 100);
     }
 }
