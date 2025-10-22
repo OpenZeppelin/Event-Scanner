@@ -1,4 +1,3 @@
-mod consumer;
 pub mod error;
 pub mod filter;
 pub mod listener;

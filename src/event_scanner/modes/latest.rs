@@ -15,10 +15,10 @@ use crate::{
     },
     event_scanner::{
         EventScannerError,
-        consumer::{ConsumerMode, handle_stream},
         filter::EventFilter,
         listener::EventListener,
         message::EventScannerMessage,
+        modes::common::{ConsumerMode, handle_stream},
     },
 };
 

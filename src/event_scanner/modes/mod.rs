@@ -1,3 +1,4 @@
+mod common;
 mod historic;
 mod latest;
 mod live;

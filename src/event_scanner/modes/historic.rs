@@ -12,10 +12,10 @@ use crate::{
     block_range_scanner::{BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES},
     event_scanner::{
         EventScannerError,
-        consumer::{ConsumerMode, handle_stream},
         filter::EventFilter,
         listener::EventListener,
         message::EventScannerMessage,
+        modes::common::{ConsumerMode, handle_stream},
     },
 };
 
