@@ -33,8 +33,6 @@ pub struct LatestScannerBuilder {
     to_block: BlockNumberOrTag,
     // Defaults to 0
     block_confirmations: u64,
-    // Defaults to false
-    switch_to_live: bool,
 }
 
 pub struct LatestEventScanner<N: Network> {
@@ -57,7 +55,6 @@ impl LatestScannerBuilder {
             from_block: BlockNumberOrTag::Latest,
             to_block: BlockNumberOrTag::Earliest,
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-            switch_to_live: false,
         }
     }
 
@@ -82,12 +79,6 @@ impl LatestScannerBuilder {
     #[must_use]
     pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.to_block = block.into();
-        self
-    }
-
-    #[must_use]
-    pub fn then_live(mut self) -> Self {
-        self.switch_to_live = true;
         self
     }
 
@@ -171,7 +162,6 @@ mod tests {
         assert!(matches!(config.from_block, BlockNumberOrTag::Latest));
         assert!(matches!(config.to_block, BlockNumberOrTag::Earliest));
         assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
-        assert!(!config.switch_to_live);
     }
 
     #[test]
@@ -181,14 +171,12 @@ mod tests {
             .from_block(100)
             .to_block(200)
             .block_confirmations(10)
-            .then_live()
             .max_block_range(50);
 
         assert_eq!(config.count, 5);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
         assert_eq!(config.block_confirmations, 10);
-        assert!(config.switch_to_live);
         assert_eq!(config.base.block_range_scanner.max_block_range, 50);
     }
 
@@ -199,15 +187,13 @@ mod tests {
             .block_confirmations(5)
             .count(3)
             .from_block(BlockNumberOrTag::Number(50))
-            .to_block(BlockNumberOrTag::Number(150))
-            .then_live();
+            .to_block(BlockNumberOrTag::Number(150));
 
         assert_eq!(config.base.block_range_scanner.max_block_range, 25);
         assert_eq!(config.block_confirmations, 5);
         assert_eq!(config.count, 3);
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(150)));
-        assert!(config.switch_to_live);
     }
 
     #[test]
@@ -222,15 +208,5 @@ mod tests {
         assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
         assert_eq!(config.count, 10);
         assert_eq!(config.block_confirmations, 20);
-        assert!(!config.switch_to_live);
-    }
-
-    #[test]
-    fn test_latest_scanner_then_live_method() {
-        let config = LatestScannerBuilder::new().then_live();
-        assert!(config.switch_to_live);
-
-        let config_without_live = LatestScannerBuilder::new();
-        assert!(!config_without_live.switch_to_live);
     }
 }
