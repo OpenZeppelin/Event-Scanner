@@ -22,11 +22,10 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     )
     .await?;
 
-    let contract = setup.contract.clone();
     let expected_event_count = 4;
 
     for _ in 0..expected_event_count {
-        contract.increase().send().await?.watch().await?;
+        setup.contract.increase().send().await?.watch().await?;
     }
 
     let scanner = setup.scanner;
