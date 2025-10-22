@@ -68,11 +68,11 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let b = deploy_counter(Arc::new(provider.clone())).await?;
 
     let a_filter = EventFilter::new()
-        .with_contract_address(*a.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE.to_owned());
+        .contract_address(*a.address())
+        .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
     let b_filter = EventFilter::new()
-        .with_contract_address(*b.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE.to_owned());
+        .contract_address(*b.address())
+        .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
     let expected_events_a = 3;
     let expected_events_b = 2;
 
@@ -138,11 +138,11 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let contract_address = *contract.address();
 
     let increase_filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountIncreased::SIGNATURE.to_owned());
+        .contract_address(contract_address)
+        .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
     let decrease_filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountDecreased::SIGNATURE.to_owned());
+        .contract_address(contract_address)
+        .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
 
     let expected_incr_events = 6;
     let expected_decr_events = 2;
@@ -209,8 +209,8 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     // Subscribe to CountDecreased but only emit CountIncreased
     let filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountDecreased::SIGNATURE.to_owned());
+        .contract_address(*contract.address())
+        .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
 
     let num_of_events = 3;
 
@@ -240,9 +240,8 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let setup = setup_live_scanner(Some(0.1), None, 0).await?;
     let contract = setup.contract.clone();
 
-    let filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event("invalid-sig".to_string());
+    let filter =
+        EventFilter::new().contract_address(*contract.address()).event("invalid-sig".to_string());
 
     let num_of_events = 3;
 

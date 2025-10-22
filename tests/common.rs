@@ -77,8 +77,8 @@ pub async fn setup_common(
     let contract = deploy_counter(Arc::new(provider.clone())).await?;
 
     let default_filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+        .contract_address(*contract.address())
+        .event(TestCounter::CountIncreased::SIGNATURE);
 
     let filter = filter.unwrap_or(default_filter);
 

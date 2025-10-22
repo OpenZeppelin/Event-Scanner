@@ -153,8 +153,8 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
 
     // Add a second listener with the same filter
     let filter2 = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+        .contract_address(*contract.address())
+        .event(TestCounter::CountIncreased::SIGNATURE);
     let mut stream2 = scanner.create_event_stream(filter2);
 
     // Produce 7 events
@@ -189,14 +189,14 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
 
     // First listener for CountDecreased
     let filter_inc = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+        .contract_address(*contract.address())
+        .event(TestCounter::CountIncreased::SIGNATURE);
     let mut stream_inc = scanner.create_event_stream(filter_inc);
 
     // Second listener for CountDecreased
     let filter_dec = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountDecreased::SIGNATURE);
+        .contract_address(*contract.address())
+        .event(TestCounter::CountDecreased::SIGNATURE);
     let mut stream_dec = scanner.create_event_stream(filter_dec);
 
     // Produce 5 increases, then 2 decreases
@@ -237,8 +237,8 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
 
     // Add a CountDecreased listener
     let filter_dec = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountDecreased::SIGNATURE);
+        .contract_address(*contract.address())
+        .event(TestCounter::CountDecreased::SIGNATURE);
     let mut stream_dec = scanner.create_event_stream(filter_dec);
 
     // Sequence: inc(1), inc(2), dec(1), inc(2), dec(1)
@@ -283,8 +283,8 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
 
     // Listener only for contract A CountIncreased
     let filter_a = EventFilter::new()
-        .with_contract_address(*contract_a.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+        .contract_address(*contract_a.address())
+        .event(TestCounter::CountIncreased::SIGNATURE);
 
     let mut stream_a = scanner.create_event_stream(filter_a);
 

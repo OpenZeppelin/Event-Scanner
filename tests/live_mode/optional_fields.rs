@@ -21,7 +21,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     let mut scanner = setup.scanner;
 
     // Create filter that tracks ALL events from a specific contract (no event signature specified)
-    let filter = EventFilter::new().with_contract_address(contract_address);
+    let filter = EventFilter::new().contract_address(contract_address);
     let expected_event_count = 5;
 
     let mut stream = scanner.create_event_stream(filter).take(expected_event_count);
@@ -95,8 +95,8 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
 
     // Filter for specific event from specific contract
     let specific_filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+        .contract_address(contract_address)
+        .event(TestCounter::CountIncreased::SIGNATURE);
     let expected_specific_count = 2;
 
     // Filter for all events from all contracts
