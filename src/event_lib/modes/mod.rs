@@ -49,8 +49,8 @@ pub trait BaseConfigBuilder: Sized {
     fn base_mut(&mut self) -> &mut BaseConfig;
 
     #[must_use]
-    fn max_block_range(mut self, max: usize) -> Self {
-        self.base_mut().block_range_scanner.max_block_range = max;
+    fn max_block_range(mut self, max_block_range: u64) -> Self {
+        self.base_mut().block_range_scanner.max_block_range = max_block_range;
         self
     }
 }

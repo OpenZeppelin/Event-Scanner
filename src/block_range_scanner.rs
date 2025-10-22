@@ -86,7 +86,7 @@ use alloy::{
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-pub const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
+pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 
@@ -180,7 +180,7 @@ impl From<BlockRangeScannerError> for BlockRangeMessage {
 
 #[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
-    pub max_block_range: usize,
+    pub max_block_range: u64,
 }
 
 impl Default for BlockRangeScanner {
@@ -192,12 +192,12 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self { max_block_range: DEFAULT_BLOCKS_READ_PER_EPOCH }
+        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
     }
 
     #[must_use]
-    pub fn with_max_block_range(mut self, blocks_read_per_epoch: usize) -> Self {
-        self.max_block_range = blocks_read_per_epoch;
+    pub fn with_max_block_range(mut self, max_block_range: u64) -> Self {
+        self.max_block_range = max_block_range;
         self
     }
 
@@ -237,13 +237,13 @@ impl BlockRangeScanner {
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        Ok(ConnectedBlockRangeScanner { provider, max_read_per_epoch: self.max_block_range })
+        Ok(ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range })
     }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RootProvider<N>,
-    max_read_per_epoch: usize,
+    max_block_range: u64,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
@@ -259,7 +259,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     ///
     /// Returns an error if the subscription service fails to start.
     pub fn run(&self) -> Result<BlockRangeScannerClient, BlockRangeScannerError> {
-        let (service, cmd_tx) = Service::new(self.provider.clone(), self.max_read_per_epoch);
+        let (service, cmd_tx) = Service::new(self.provider.clone(), self.max_block_range);
         tokio::spawn(async move {
             service.run().await;
         });
@@ -302,7 +302,7 @@ pub enum Command {
 
 struct Service<N: Network> {
     provider: RootProvider<N>,
-    max_read_per_epoch: usize,
+    max_block_range: u64,
     subscriber: Option<mpsc::Sender<BlockRangeMessage>>,
     websocket_connected: bool,
     processed_count: u64,
@@ -312,15 +312,12 @@ struct Service<N: Network> {
 }
 
 impl<N: Network> Service<N> {
-    pub fn new(
-        provider: RootProvider<N>,
-        max_read_per_epoch: usize,
-    ) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(provider: RootProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
             provider,
-            max_read_per_epoch,
+            max_block_range,
             subscriber: None,
             websocket_connected: false,
             processed_count: 0,
@@ -404,7 +401,7 @@ impl<N: Network> Service<N> {
         let sender =
             self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
-        let max_read_per_epoch = self.max_read_per_epoch;
+        let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
 
@@ -419,7 +416,7 @@ impl<N: Network> Service<N> {
                 provider,
                 sender,
                 block_confirmations,
-                max_read_per_epoch,
+                max_block_range,
             )
             .await;
         });
@@ -455,15 +452,10 @@ impl<N: Network> Service<N> {
 
         let sender =
             self.subscriber.take().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
-        let blocks_read_per_epoch = self.max_read_per_epoch as u64;
+        let max_block_range = self.max_block_range;
 
-        Self::stream_historical_blocks(
-            start_block_num,
-            end_block_num,
-            blocks_read_per_epoch,
-            &sender,
-        )
-        .await?;
+        Self::stream_historical_blocks(start_block_num, end_block_num, max_block_range, &sender)
+            .await?;
 
         Ok(())
     }
@@ -476,7 +468,7 @@ impl<N: Network> Service<N> {
         let sender =
             self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
-        let max_read_per_epoch = self.max_read_per_epoch;
+        let max_block_range = self.max_block_range;
 
         // Step 1:
         // Fetches the starting block and end block for historical sync in parallel
@@ -514,7 +506,7 @@ impl<N: Network> Service<N> {
                     provider,
                     sender,
                     block_confirmations,
-                    max_read_per_epoch,
+                    max_block_range,
                 )
                 .await;
             });
@@ -546,7 +538,7 @@ impl<N: Network> Service<N> {
                 provider,
                 live_block_buffer_sender,
                 block_confirmations,
-                max_read_per_epoch,
+                max_block_range,
             )
             .await;
         });
@@ -557,7 +549,7 @@ impl<N: Network> Service<N> {
         if let Err(e) = Self::stream_historical_blocks(
             start_block_num,
             confirmed_tip_num,
-            self.max_read_per_epoch as u64,
+            self.max_block_range,
             &sender,
         )
         .await
@@ -624,7 +616,7 @@ impl<N: Network> Service<N> {
         to: N::BlockResponse,
     ) -> Result<(), BlockRangeScannerError> {
         let mut batch_count = 0;
-        let blocks_read_per_epoch = self.max_read_per_epoch;
+        let max_block_range = self.max_block_range;
 
         // for checking whether reorg occurred
         let mut tip_hash = from.header().hash();
@@ -636,7 +628,7 @@ impl<N: Network> Service<N> {
         let mut batch_from = from;
 
         while batch_from >= to {
-            let batch_to = batch_from.saturating_sub(blocks_read_per_epoch as u64 - 1).max(to);
+            let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
             self.send_to_subscriber(BlockRangeMessage::Data(batch_to..=batch_from)).await;
@@ -687,7 +679,7 @@ impl<N: Network> Service<N> {
     async fn stream_historical_blocks(
         start: BlockNumber,
         end: BlockNumber,
-        blocks_read_per_epoch: u64,
+        max_block_range: u64,
         sender: &mpsc::Sender<BlockRangeMessage>,
     ) -> Result<(), BlockRangeScannerError> {
         let mut batch_count = 0;
@@ -698,7 +690,7 @@ impl<N: Network> Service<N> {
         // range)
         while next_start_block <= end {
             let batch_end_block_number =
-                next_start_block.saturating_add(blocks_read_per_epoch - 1).min(end);
+                next_start_block.saturating_add(max_block_range - 1).min(end);
 
             if !Self::try_send(
                 sender,
@@ -734,7 +726,7 @@ impl<N: Network> Service<N> {
         provider: P,
         sender: mpsc::Sender<BlockRangeMessage>,
         block_confirmations: u64,
-        max_read_per_epoch: usize,
+        max_block_range: u64,
     ) {
         match Self::get_block_subscription(&provider).await {
             Ok(ws_stream) => {
@@ -772,8 +764,8 @@ impl<N: Network> Service<N> {
                     if confirmed >= range_start {
                         // NOTE: Edge case when difference between range end and range start >= max
                         // reads
-                        let range_end = confirmed
-                            .min(range_start.saturating_add(max_read_per_epoch as u64 - 1));
+                        let range_end =
+                            confirmed.min(range_start.saturating_add(max_block_range - 1));
 
                         if sender
                             .send(BlockRangeMessage::Data(range_start..=range_end))
@@ -1106,23 +1098,23 @@ mod tests {
     fn block_range_scanner_defaults_match_constants() {
         let scanner = BlockRangeScanner::new();
 
-        assert_eq!(scanner.max_block_range, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        assert_eq!(scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
     }
 
     #[test]
     fn builder_methods_update_configuration() {
-        let blocks_read_per_epoch = 42;
+        let max_block_range = 42;
 
-        let scanner = BlockRangeScanner::new().with_max_block_range(blocks_read_per_epoch);
+        let scanner = BlockRangeScanner::new().with_max_block_range(max_block_range);
 
-        assert_eq!(scanner.max_block_range, blocks_read_per_epoch);
+        assert_eq!(scanner.max_block_range, max_block_range);
     }
 
     #[tokio::test]
     async fn send_to_subscriber_increments_processed_count() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
@@ -1145,7 +1137,7 @@ mod tests {
     async fn send_to_subscriber_removes_closed_channel() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -1166,7 +1158,7 @@ mod tests {
     fn handle_unsubscribe_clears_subscriber() {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, _rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -1730,7 +1722,7 @@ mod tests {
     async fn forwards_errors_to_subscribers() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_BLOCKS_READ_PER_EPOCH);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
