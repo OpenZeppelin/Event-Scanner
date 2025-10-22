@@ -111,8 +111,8 @@ impl<N: Network> LiveEventScanner<N> {
     ///
     /// # Reorg behavior
     ///
-    /// - Emits [`ScannerStatus::ReorgDetected`] and adjusts the next confirmed
-    ///   range using `block_confirmations` to re-emit the confirmed portion.
+    /// - Emits [`ScannerStatus::ReorgDetected`] and adjusts the next confirmed range using
+    ///   `block_confirmations` to re-emit the confirmed portion.
     ///
     /// # Errors
     ///
@@ -134,6 +134,7 @@ impl<N: Network> LiveEventScanner<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::{network::Ethereum, rpc::client::RpcClient, transports::mock::Asserter};
 
     #[test]
     fn test_live_scanner_config_defaults() {
@@ -143,15 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn test_live_scanner_builder_pattern() {
-        let config = LiveScannerBuilder::new().block_confirmations(10).max_block_range(50);
-
-        assert_eq!(config.block_confirmations, 10);
-        assert_eq!(config.block_range_scanner.max_block_range, 50);
-    }
-
-    #[test]
-    fn test_live_scanner_builder_pattern_chaining() {
+    fn test_live_scanner_builder_pattern_random_order_chaining() {
         let config = LiveScannerBuilder::new().max_block_range(25).block_confirmations(5);
 
         assert_eq!(config.block_range_scanner.max_block_range, 25);
@@ -164,5 +157,40 @@ mod tests {
 
         assert_eq!(config.block_confirmations, 0);
         assert_eq!(config.block_range_scanner.max_block_range, 100);
+    }
+
+    #[test]
+    fn test_live_scanner_builder_last_call_wins() {
+        let config = LiveScannerBuilder::new()
+            .max_block_range(25)
+            .max_block_range(55)
+            .max_block_range(105)
+            .block_confirmations(2)
+            .block_confirmations(4)
+            .block_confirmations(8);
+
+        assert_eq!(config.block_range_scanner.max_block_range, 105);
+        assert_eq!(config.block_confirmations, 8);
+    }
+
+    #[test]
+    fn test_live_event_stream_listeners_vector_updates() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let mut scanner = LiveScannerBuilder::new().connect::<Ethereum>(provider);
+        assert_eq!(scanner.listeners.len(), 0);
+        let _stream1 = scanner.create_event_stream(EventFilter::new());
+        assert_eq!(scanner.listeners.len(), 1);
+        let _stream2 = scanner.create_event_stream(EventFilter::new());
+        let _stream3 = scanner.create_event_stream(EventFilter::new());
+        assert_eq!(scanner.listeners.len(), 3);
+    }
+
+    #[test]
+    fn test_live_event_stream_channel_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let mut scanner = LiveScannerBuilder::new().connect::<Ethereum>(provider);
+        let _stream = scanner.create_event_stream(EventFilter::new());
+        let sender = &scanner.listeners[0].sender;
+        assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
     }
 }

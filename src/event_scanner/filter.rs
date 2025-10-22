@@ -22,6 +22,7 @@ use alloy::{
 ///     filter
 /// }
 /// ```
+
 #[derive(Clone, Default)]
 pub struct EventFilter {
     /// Contract addresses to filter events from. If empty, events from all contracts will be

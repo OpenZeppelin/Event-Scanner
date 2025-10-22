@@ -167,6 +167,7 @@ impl<N: Network> LatestEventScanner<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::{network::Ethereum, rpc::client::RpcClient, transports::mock::Asserter};
 
     #[test]
     fn test_latest_scanner_config_defaults() {
@@ -179,23 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn test_latest_scanner_builder_pattern() {
-        let config = LatestScannerBuilder::new()
-            .count(5)
-            .from_block(100)
-            .to_block(200)
-            .block_confirmations(10)
-            .max_block_range(50);
-
-        assert_eq!(config.count, 5);
-        assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
-        assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
-        assert_eq!(config.block_confirmations, 10);
-        assert_eq!(config.block_range_scanner.max_block_range, 50);
-    }
-
-    #[test]
-    fn test_latest_scanner_builder_pattern_chaining() {
+    fn test_latest_scanner_builder_pattern_random_order_chaining() {
         let config = LatestScannerBuilder::new()
             .max_block_range(25)
             .block_confirmations(5)
@@ -222,5 +207,48 @@ mod tests {
         assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
         assert_eq!(config.count, 10);
         assert_eq!(config.block_confirmations, 20);
+    }
+
+    #[test]
+    fn test_latest_scanner_builder_last_call_wins() {
+        let config = LatestScannerBuilder::new()
+            .count(1)
+            .count(2)
+            .count(3)
+            .from_block(10)
+            .from_block(20)
+            .to_block(100)
+            .to_block(200)
+            .block_confirmations(5)
+            .block_confirmations(7)
+            .max_block_range(50)
+            .max_block_range(60);
+
+        assert_eq!(config.count, 3);
+        assert!(matches!(config.from_block, BlockNumberOrTag::Number(20)));
+        assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
+        assert_eq!(config.block_confirmations, 7);
+        assert_eq!(config.block_range_scanner.max_block_range, 60);
+    }
+
+    #[test]
+    fn test_latest_event_stream_listeners_vector_updates() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let mut scanner = LatestScannerBuilder::new().connect::<Ethereum>(provider);
+        assert_eq!(scanner.listeners.len(), 0);
+        let _stream1 = scanner.create_event_stream(EventFilter::new());
+        assert_eq!(scanner.listeners.len(), 1);
+        let _stream2 = scanner.create_event_stream(EventFilter::new());
+        let _stream3 = scanner.create_event_stream(EventFilter::new());
+        assert_eq!(scanner.listeners.len(), 3);
+    }
+
+    #[test]
+    fn test_latest_event_stream_channel_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let mut scanner = LatestScannerBuilder::new().connect::<Ethereum>(provider);
+        let _stream = scanner.create_event_stream(EventFilter::new());
+        let sender = &scanner.listeners[0].sender;
+        assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
     }
 }
