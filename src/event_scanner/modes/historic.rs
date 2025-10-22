@@ -8,9 +8,7 @@ use alloy::{
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::event_scanner::{
-    EventScannerError,
-    filter::EventFilter,
-    message::EventScannerMessage,
+    EventScannerError, filter::EventFilter, message::EventScannerMessage,
     scanner::EventScannerService,
 };
 
