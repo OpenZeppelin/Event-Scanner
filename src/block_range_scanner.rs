@@ -8,7 +8,7 @@
 //! use alloy::transports::http::reqwest::Url;
 //! use event_scanner::block_range_scanner::{
 //!     BlockRangeMessage, BlockRangeScanner, BlockRangeScannerClient, BlockRangeScannerError,
-//!     DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_BLOCKS_READ_PER_EPOCH,
+//!     DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
