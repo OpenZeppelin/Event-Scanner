@@ -63,7 +63,9 @@ impl SyncScannerBuilder {
         self
     }
 
-    /// Connects to the provider via WebSocket
+    /// Connects to the provider via WebSocket.
+    ///
+    /// Final builder method: consumes the builder and returns the actual `SyncEventScanner`.
     ///
     /// # Errors
     ///
@@ -73,7 +75,9 @@ impl SyncScannerBuilder {
         Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
-    /// Connects to the provider via IPC
+    /// Connects to the provider via IPC.
+    ///
+    /// Final builder method: consumes the builder and returns the actual `SyncEventScanner`.
     ///
     /// # Errors
     ///
@@ -86,7 +90,9 @@ impl SyncScannerBuilder {
         Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
-    /// Connects to an existing provider
+    /// Connects to an existing provider.
+    ///
+    /// Final builder method: consumes the builder and returns the actual `SyncEventScanner`.
     ///
     /// # Errors
     ///
