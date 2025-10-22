@@ -95,7 +95,7 @@ impl SyncScannerConfig {
         provider: RootProvider<N>,
     ) -> TransportResult<SyncEventScanner<N>> {
         let SyncScannerConfig { base, from_block, block_confirmations } = self;
-        let brs = base.block_range_scanner.connect::<N>(provider)?;
+        let brs = base.block_range_scanner.connect::<N>(provider);
         let config = SyncScannerConfig { base, from_block, block_confirmations };
         Ok(SyncEventScanner { config, inner: EventScannerService::from_config(brs) })
     }

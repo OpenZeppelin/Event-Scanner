@@ -3,7 +3,7 @@ mod latest;
 mod live;
 mod sync;
 
-pub use historic::{HistoricEventScanner, HistoricScannerConfig};
+pub use historic::{HistoricEventScanner, HistoricScannerBuilder};
 pub use latest::{LatestEventScanner, LatestScannerConfig};
 pub use live::{LiveEventScanner, LiveScannerConfig};
 pub use sync::{SyncEventScanner, SyncScannerConfig};
@@ -14,8 +14,8 @@ pub struct EventScanner;
 
 impl EventScanner {
     #[must_use]
-    pub fn historic() -> HistoricScannerConfig {
-        HistoricScannerConfig::new()
+    pub fn historic() -> HistoricScannerBuilder {
+        HistoricScannerBuilder::new()
     }
 
     #[must_use]

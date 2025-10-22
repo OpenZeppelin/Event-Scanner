@@ -15,7 +15,7 @@ use crate::event_scanner::{
 
 use super::{BaseConfig, BaseConfigBuilder};
 
-pub struct HistoricScannerConfig {
+pub struct HistoricScannerBuilder {
     base: BaseConfig,
     // Defaults to Earliest
     from_block: BlockNumberOrTag,
@@ -24,17 +24,17 @@ pub struct HistoricScannerConfig {
 }
 
 pub struct HistoricEventScanner<N: Network> {
-    config: HistoricScannerConfig,
+    config: HistoricScannerBuilder,
     inner: EventScannerService<N>,
 }
 
-impl BaseConfigBuilder for HistoricScannerConfig {
+impl BaseConfigBuilder for HistoricScannerBuilder {
     fn base_mut(&mut self) -> &mut BaseConfig {
         &mut self.base
     }
 }
 
-impl HistoricScannerConfig {
+impl HistoricScannerBuilder {
     pub(super) fn new() -> Self {
         Self {
             base: BaseConfig::new(),
@@ -64,10 +64,8 @@ impl HistoricScannerConfig {
         self,
         ws_url: Url,
     ) -> TransportResult<HistoricEventScanner<N>> {
-        let HistoricScannerConfig { base, from_block, to_block } = self;
-        let brs = base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        let config = HistoricScannerConfig { base, from_block, to_block };
-        Ok(HistoricEventScanner { config, inner: EventScannerService::from_config(brs) })
+        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(HistoricEventScanner { config: self, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to the provider via IPC
@@ -79,10 +77,8 @@ impl HistoricScannerConfig {
         self,
         ipc_path: String,
     ) -> TransportResult<HistoricEventScanner<N>> {
-        let HistoricScannerConfig { base, from_block, to_block } = self;
-        let brs = base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        let config = HistoricScannerConfig { base, from_block, to_block };
-        Ok(HistoricEventScanner { config, inner: EventScannerService::from_config(brs) })
+        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(HistoricEventScanner { config: self, inner: EventScannerService::from_config(brs) })
     }
 
     /// Connects to an existing provider
@@ -90,14 +86,10 @@ impl HistoricScannerConfig {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect<N: Network>(
-        self,
-        provider: RootProvider<N>,
-    ) -> TransportResult<HistoricEventScanner<N>> {
-        let HistoricScannerConfig { base, from_block, to_block } = self;
-        let brs = base.block_range_scanner.connect::<N>(provider)?;
-        let config = HistoricScannerConfig { base, from_block, to_block };
-        Ok(HistoricEventScanner { config, inner: EventScannerService::from_config(brs) })
+    #[must_use]
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> HistoricEventScanner<N> {
+        let brs = self.base.block_range_scanner.connect::<N>(provider);
+        HistoricEventScanner { config: self, inner: EventScannerService::from_config(brs) }
     }
 }
 
@@ -125,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_config_defaults() {
-        let config = HistoricScannerConfig::new();
+        let config = HistoricScannerBuilder::new();
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
         assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
@@ -134,7 +126,7 @@ mod tests {
     #[test]
     fn test_historic_scanner_builder_pattern() {
         let config =
-            HistoricScannerConfig::new().from_block(100u64).to_block(200u64).max_block_range(50);
+            HistoricScannerBuilder::new().from_block(100u64).to_block(200u64).max_block_range(50);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
         assert!(matches!(config.to_block, BlockNumberOrTag::Number(200)));
@@ -143,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_pattern_chaining() {
-        let config = HistoricScannerConfig::new()
+        let config = HistoricScannerBuilder::new()
             .max_block_range(25)
             .from_block(BlockNumberOrTag::Number(50))
             .to_block(BlockNumberOrTag::Number(150));
@@ -155,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_with_different_block_types() {
-        let config = HistoricScannerConfig::new()
+        let config = HistoricScannerBuilder::new()
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest);
 

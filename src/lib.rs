@@ -8,6 +8,6 @@ pub use types::{ScannerMessage, ScannerStatus};
 
 pub use event_scanner::{
     EventFilter, EventListener, EventScanner, EventScannerError, EventScannerMessage,
-    EventScannerService, HistoricEventScanner, HistoricScannerConfig, LiveEventScanner,
+    EventScannerService, HistoricEventScanner, HistoricScannerBuilder, LiveEventScanner,
     LiveScannerConfig, SyncEventScanner, SyncScannerConfig,
 };
