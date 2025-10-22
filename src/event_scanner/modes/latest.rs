@@ -5,13 +5,19 @@ use alloy::{
     transports::{TransportResult, http::reqwest::Url},
 };
 
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
+    block_range_scanner::{
+        ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, MAX_BUFFERED_MESSAGES,
+    },
     event_scanner::{
-        EventScannerError, filter::EventFilter, message::EventScannerMessage,
-        scanner::EventScannerService,
+        EventScannerError,
+        consumer::{ConsumerMode, handle_stream},
+        filter::EventFilter,
+        listener::EventListener,
+        message::EventScannerMessage,
     },
 };
 
@@ -32,9 +38,9 @@ pub struct LatestScannerBuilder {
 }
 
 pub struct LatestEventScanner<N: Network> {
-    #[allow(dead_code)]
     config: LatestScannerBuilder,
-    inner: EventScannerService<N>,
+    block_range_scanner: ConnectedBlockRangeScanner<N>,
+    listeners: Vec<EventListener>,
 }
 
 impl BaseConfigBuilder for LatestScannerBuilder {
@@ -94,8 +100,8 @@ impl LatestScannerBuilder {
         self,
         ws_url: Url,
     ) -> TransportResult<LatestEventScanner<N>> {
-        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(LatestEventScanner { config: self, inner: EventScannerService::from_config(brs) })
+        let block_range_scanner = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(LatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to the provider via IPC
@@ -107,8 +113,8 @@ impl LatestScannerBuilder {
         self,
         ipc_path: String,
     ) -> TransportResult<LatestEventScanner<N>> {
-        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(LatestEventScanner { config: self, inner: EventScannerService::from_config(brs) })
+        let block_range_scanner = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(LatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to an existing provider
@@ -118,8 +124,8 @@ impl LatestScannerBuilder {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> LatestEventScanner<N> {
-        let brs = self.base.block_range_scanner.connect::<N>(provider);
-        LatestEventScanner { config: self, inner: EventScannerService::from_config(brs) }
+        let block_range_scanner = self.base.block_range_scanner.connect::<N>(provider);
+        LatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
 
@@ -128,7 +134,9 @@ impl<N: Network> LatestEventScanner<N> {
         &mut self,
         filter: EventFilter,
     ) -> ReceiverStream<EventScannerMessage> {
-        self.inner.create_event_stream(filter)
+        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
+        self.listeners.push(EventListener { filter, sender });
+        ReceiverStream::new(receiver)
     }
 
     /// Calls stream latest
@@ -138,9 +146,16 @@ impl<N: Network> LatestEventScanner<N> {
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     #[allow(clippy::unused_async)]
     pub async fn start(self) -> Result<(), EventScannerError> {
-        self.inner
-            .stream_latest(self.config.count, self.config.from_block, self.config.to_block)
-            .await
+        let client = self.block_range_scanner.run()?;
+        let stream = client.rewind(self.config.from_block, self.config.to_block).await?;
+        handle_stream(
+            stream,
+            self.block_range_scanner.provider(),
+            &self.listeners,
+            ConsumerMode::CollectLatest { count: self.config.count },
+        )
+        .await;
+        Ok(())
     }
 }
 

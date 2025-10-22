@@ -1,9 +1,9 @@
+mod consumer;
 pub mod error;
 pub mod filter;
 pub mod listener;
 pub mod message;
 pub mod modes;
-pub mod scanner;
 
 pub use error::EventScannerError;
 pub use filter::EventFilter;

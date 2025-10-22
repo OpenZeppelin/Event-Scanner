@@ -5,13 +5,19 @@ use alloy::{
     transports::{TransportResult, http::reqwest::Url},
 };
 
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
+    block_range_scanner::{
+        ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, MAX_BUFFERED_MESSAGES,
+    },
     event_scanner::{
-        EventScannerError, filter::EventFilter, message::EventScannerMessage,
-        scanner::EventScannerService,
+        EventScannerError,
+        consumer::{ConsumerMode, handle_stream},
+        filter::EventFilter,
+        listener::EventListener,
+        message::EventScannerMessage,
     },
 };
 
@@ -27,7 +33,8 @@ pub struct SyncScannerBuilder {
 
 pub struct SyncEventScanner<N: Network> {
     config: SyncScannerBuilder,
-    inner: EventScannerService<N>,
+    block_range_scanner: ConnectedBlockRangeScanner<N>,
+    listeners: Vec<EventListener>,
 }
 
 impl BaseConfigBuilder for SyncScannerBuilder {
@@ -63,8 +70,8 @@ impl SyncScannerBuilder {
     ///
     /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
-        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(SyncEventScanner { config: self, inner: EventScannerService::from_config(brs) })
+        let block_range_scanner = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to the provider via IPC
@@ -76,8 +83,8 @@ impl SyncScannerBuilder {
         self,
         ipc_path: String,
     ) -> TransportResult<SyncEventScanner<N>> {
-        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(SyncEventScanner { config: self, inner: EventScannerService::from_config(brs) })
+        let block_range_scanner = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to an existing provider
@@ -87,8 +94,8 @@ impl SyncScannerBuilder {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> SyncEventScanner<N> {
-        let brs = self.base.block_range_scanner.connect::<N>(provider);
-        SyncEventScanner { config: self, inner: EventScannerService::from_config(brs) }
+        let block_range_scanner = self.base.block_range_scanner.connect::<N>(provider);
+        SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
 
@@ -97,7 +104,9 @@ impl<N: Network> SyncEventScanner<N> {
         &mut self,
         filter: EventFilter,
     ) -> ReceiverStream<EventScannerMessage> {
-        self.inner.create_event_stream(filter)
+        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
+        self.listeners.push(EventListener { filter, sender });
+        ReceiverStream::new(receiver)
     }
 
     /// Calls stream from
@@ -106,7 +115,17 @@ impl<N: Network> SyncEventScanner<N> {
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     pub async fn start(self) -> Result<(), EventScannerError> {
-        self.inner.stream_from(self.config.from_block, self.config.block_confirmations).await
+        let client = self.block_range_scanner.run()?;
+        let stream =
+            client.stream_from(self.config.from_block, self.config.block_confirmations).await?;
+        handle_stream(
+            stream,
+            self.block_range_scanner.provider(),
+            &self.listeners,
+            ConsumerMode::Stream,
+        )
+        .await;
+        Ok(())
     }
 }
 

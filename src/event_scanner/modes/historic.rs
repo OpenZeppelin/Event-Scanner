@@ -5,11 +5,18 @@ use alloy::{
     transports::{TransportResult, http::reqwest::Url},
 };
 
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::event_scanner::{
-    EventScannerError, filter::EventFilter, message::EventScannerMessage,
-    scanner::EventScannerService,
+use crate::{
+    block_range_scanner::{ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES},
+    event_scanner::{
+        EventScannerError,
+        consumer::{ConsumerMode, handle_stream},
+        filter::EventFilter,
+        listener::EventListener,
+        message::EventScannerMessage,
+    },
 };
 
 use super::{BaseConfig, BaseConfigBuilder};
@@ -24,7 +31,8 @@ pub struct HistoricScannerBuilder {
 
 pub struct HistoricEventScanner<N: Network> {
     config: HistoricScannerBuilder,
-    inner: EventScannerService<N>,
+    block_range_scanner: ConnectedBlockRangeScanner<N>,
+    listeners: Vec<EventListener>,
 }
 
 impl BaseConfigBuilder for HistoricScannerBuilder {
@@ -63,8 +71,8 @@ impl HistoricScannerBuilder {
         self,
         ws_url: Url,
     ) -> TransportResult<HistoricEventScanner<N>> {
-        let brs = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(HistoricEventScanner { config: self, inner: EventScannerService::from_config(brs) })
+        let block_range_scanner = self.base.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to the provider via IPC
@@ -76,8 +84,8 @@ impl HistoricScannerBuilder {
         self,
         ipc_path: String,
     ) -> TransportResult<HistoricEventScanner<N>> {
-        let brs = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(HistoricEventScanner { config: self, inner: EventScannerService::from_config(brs) })
+        let block_range_scanner = self.base.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to an existing provider
@@ -87,8 +95,8 @@ impl HistoricScannerBuilder {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> HistoricEventScanner<N> {
-        let brs = self.base.block_range_scanner.connect::<N>(provider);
-        HistoricEventScanner { config: self, inner: EventScannerService::from_config(brs) }
+        let block_range_scanner = self.base.block_range_scanner.connect::<N>(provider);
+        HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
 
@@ -97,7 +105,9 @@ impl<N: Network> HistoricEventScanner<N> {
         &mut self,
         filter: EventFilter,
     ) -> ReceiverStream<EventScannerMessage> {
-        self.inner.create_event_stream(filter)
+        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
+        self.listeners.push(EventListener { filter, sender });
+        ReceiverStream::new(receiver)
     }
 
     /// Calls stream historical
@@ -106,7 +116,16 @@ impl<N: Network> HistoricEventScanner<N> {
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
     pub async fn run(self) -> Result<(), EventScannerError> {
-        self.inner.stream_historical(self.config.from_block, self.config.to_block).await
+        let client = self.block_range_scanner.run()?;
+        let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;
+        handle_stream(
+            stream,
+            self.block_range_scanner.provider(),
+            &self.listeners,
+            ConsumerMode::Stream,
+        )
+        .await;
+        Ok(())
     }
 }
 
