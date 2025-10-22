@@ -8,7 +8,8 @@ pub use error::EventScannerError;
 pub use filter::EventFilter;
 pub use listener::EventListener;
 pub use modes::{
-    EventScanner, HistoricEventScanner, HistoricScannerBuilder, LiveEventScanner,
-    LiveScannerBuilder, SyncEventScanner, SyncScannerBuilder, LatestEventScanner, LatestScannerBuilder,
+    EventScanner, HistoricEventScanner, HistoricScannerBuilder, LatestEventScanner,
+    LatestScannerBuilder, LiveEventScanner, LiveScannerBuilder, SyncEventScanner,
+    SyncScannerBuilder,
 };
 pub use scanner::{EventScannerMessage, EventScannerService};

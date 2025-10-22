@@ -87,10 +87,7 @@ impl SyncScannerBuilder {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(
-        self,
-        provider: RootProvider<N>,
-    ) -> SyncEventScanner<N> {
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> SyncEventScanner<N> {
         let brs = self.base.block_range_scanner.connect::<N>(provider);
         SyncEventScanner { config: self, inner: EventScannerService::from_config(brs) }
     }
