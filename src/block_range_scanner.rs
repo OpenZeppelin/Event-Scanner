@@ -60,8 +60,7 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
-
+use std::{cmp::Ordering, ops::RangeInclusive, result::Result::Ok, sync::Arc};
 use tokio::{
     join,
     sync::{mpsc, oneshot},
@@ -212,7 +211,7 @@ impl BlockRangeScanner {
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let provider =
             RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
-        self.connect(provider)
+        Ok(self.connect(provider))
     }
 
     /// Connects to the provider via IPC
@@ -223,9 +222,9 @@ impl BlockRangeScanner {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
-    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
+    ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
         let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-        self.connect(provider)
+        Ok(self.connect(provider))
     }
 
     /// Connects to an existing provider
@@ -233,11 +232,9 @@ impl BlockRangeScanner {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect<N: Network>(
-        self,
-        provider: RootProvider<N>,
-    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        Ok(ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range })
+    #[must_use]
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
+        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
     }
 }
 
@@ -383,12 +380,12 @@ impl<N: Network> Service<N> {
             }
             Command::Unsubscribe { response } => {
                 self.handle_unsubscribe();
-                let _ = response.send(Ok(()));
+                let _ = response.send(Ok::<(), BlockRangeScannerError>(()));
             }
             Command::Shutdown { response } => {
                 self.shutdown = true;
                 self.handle_unsubscribe();
-                let _ = response.send(Ok(()));
+                let _ = response.send(Ok::<(), BlockRangeScannerError>(()));
             }
         }
         Ok(())
@@ -432,7 +429,8 @@ impl<N: Network> Service<N> {
         let (start_block, end_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height)
-        )?;
+        )
+        .map_err(BlockRangeScannerError::from)?;
 
         let start_block_num = start_block
             .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
@@ -475,7 +473,8 @@ impl<N: Network> Service<N> {
         let (start_block, latest_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(BlockNumberOrTag::Latest)
-        )?;
+        )
+        .map_err(BlockRangeScannerError::from)?;
 
         let start_block_num = start_block
             .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
@@ -673,7 +672,12 @@ impl<N: Network> Service<N> {
     }
 
     async fn reorg_detected(&self, hash_to_check: B256) -> Result<bool, BlockRangeScannerError> {
-        Ok(self.provider.get_block_by_hash(hash_to_check).await?.is_none())
+        Ok(self
+            .provider
+            .get_block_by_hash(hash_to_check)
+            .await
+            .map_err(BlockRangeScannerError::from)?
+            .is_none())
     }
 
     async fn stream_historical_blocks(
