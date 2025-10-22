@@ -66,9 +66,6 @@ async fn main() -> anyhow::Result<()> {
         scanner.start().await.expect("failed to start scanner");
     });
 
-    // Wait a bit for historical events to be processed
-    sleep(Duration::from_secs(2)).await;
-
     info!("Creating live events...");
     for i in 0..2 {
         let _ = counter_contract.increase().send().await?.get_receipt().await?;
