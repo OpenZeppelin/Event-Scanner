@@ -1,3 +1,5 @@
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 use std::sync::Arc;
 
 use alloy::{
@@ -61,7 +63,6 @@ pub type HistoricScannerSetup<P> = ScannerSetup<HistoricEventScanner<Ethereum>, 
 pub type SyncScannerSetup<P> = ScannerSetup<SyncEventScanner<Ethereum>, P>;
 pub type LatestScannerSetup<P> = ScannerSetup<LatestEventScanner<Ethereum>, P>;
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn setup_common(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
@@ -84,7 +85,6 @@ pub async fn setup_common(
     Ok((anvil, provider, contract, filter))
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn setup_live_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
@@ -102,7 +102,6 @@ pub async fn setup_live_scanner(
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn setup_sync_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
@@ -120,7 +119,6 @@ pub async fn setup_sync_scanner(
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn setup_historic_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
@@ -140,7 +138,6 @@ pub async fn setup_historic_scanner(
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn setup_latest_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
@@ -164,8 +161,6 @@ pub async fn setup_latest_scanner(
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
-#[allow(clippy::missing_errors_doc)]
-#[allow(clippy::missing_panics_doc)]
 pub async fn reorg_with_new_count_incr_txs<P>(
     provider: RootProvider,
     contract: TestCounter::TestCounterInstance<Arc<P>>,
@@ -232,7 +227,6 @@ where
     Ok(event_tx_hashes)
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
     let mut anvil = Anvil::new();
     if let Some(block_time) = block_time {
@@ -241,8 +235,6 @@ pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
     Ok(anvil.try_spawn()?)
 }
 
-#[allow(clippy::missing_errors_doc)]
-#[allow(clippy::missing_panics_doc)]
 pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RootProvider> {
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
     let provider = ProviderBuilder::new().wallet(wallet).connect(anvil.endpoint().as_str()).await?;
