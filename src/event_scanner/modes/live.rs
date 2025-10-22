@@ -9,9 +9,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
     event_scanner::{
-        EventScannerError,
-        filter::EventFilter,
-        message::EventScannerMessage,
+        EventScannerError, filter::EventFilter, message::EventScannerMessage,
         scanner::EventScannerService,
     },
 };
@@ -20,7 +18,7 @@ use super::{BaseConfig, BaseConfigBuilder};
 
 pub struct LiveScannerBuilder {
     base: BaseConfig,
-    // Defaults to 0
+    // Defaults to DEFAULT_BLOCK_CONFIRMATIONS
     block_confirmations: u64,
 }
 

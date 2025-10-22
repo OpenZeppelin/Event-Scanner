@@ -10,9 +10,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
     event_scanner::{
-        EventScannerError,
-        filter::EventFilter,
-        message::EventScannerMessage,
+        EventScannerError, filter::EventFilter, message::EventScannerMessage,
         scanner::EventScannerService,
     },
 };
@@ -23,7 +21,7 @@ pub struct SyncScannerBuilder {
     base: BaseConfig,
     // Defaults to Earliest
     from_block: BlockNumberOrTag,
-    // Defaults to 0
+    // Defaults to DEFAULT_BLOCK_CONFIRMATIONS
     block_confirmations: u64,
 }
 
