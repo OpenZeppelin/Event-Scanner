@@ -135,7 +135,6 @@ impl<N: Network> LatestEventScanner<N> {
     /// # Errors
     ///
     /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
-    #[allow(clippy::unused_async)]
     pub async fn start(self) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.rewind(self.config.from_block, self.config.to_block).await?;
