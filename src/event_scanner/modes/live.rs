@@ -104,11 +104,19 @@ impl<N: Network> LiveEventScanner<N> {
         ReceiverStream::new(receiver)
     }
 
-    /// Calls stream live
+    /// Starts the scanner in live mode.
+    ///
+    /// Streams new blocks as they are produced, applying the configured
+    /// `block_confirmations` to mitigate reorgs.
+    ///
+    /// # Reorg behavior
+    ///
+    /// - Emits [`ScannerStatus::ReorgDetected`] and adjusts the next confirmed
+    ///   range using `block_confirmations` to re-emit the confirmed portion.
     ///
     /// # Errors
     ///
-    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    /// - `EventScannerMessage::ServiceShutdown` if the service is already shutting down.
     pub async fn start(self) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_live(self.config.block_confirmations).await?;

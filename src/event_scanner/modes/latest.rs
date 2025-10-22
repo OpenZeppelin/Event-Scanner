@@ -135,11 +135,21 @@ impl<N: Network> LatestEventScanner<N> {
         ReceiverStream::new(receiver)
     }
 
-    /// Calls stream latest
+    /// Scans a block range and collects the latest `count` matching events per registered listener.
+    ///
+    /// Emits a single message per listener with up to `count` logs, ordered oldest→newest.
+    ///
+    /// # Reorg behavior
+    ///
+    /// Performs a reverse-ordered rewind over the range, periodically checking the tip hash. If a
+    /// reorg is detected, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
+    /// updated tip, and resumes until completion. Final log delivery preserves chronological order.
     ///
     /// # Errors
     ///
-    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    /// - Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
+    ///
+    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
     pub async fn start(self) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.rewind(self.config.from_block, self.config.to_block).await?;

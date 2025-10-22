@@ -114,11 +114,14 @@ impl<N: Network> HistoricEventScanner<N> {
         ReceiverStream::new(receiver)
     }
 
-    /// Calls stream historical
+    /// Starts the scanner in historical mode.
+    ///
+    /// Scans from `from_block` to `to_block` (inclusive), emitting block ranges
+    /// and matching logs to registered listeners.
     ///
     /// # Errors
     ///
-    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    /// - `EventScannerMessage::ServiceShutdown` if the service is already shutting down.
     pub async fn start(self) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;

@@ -114,11 +114,19 @@ impl<N: Network> SyncEventScanner<N> {
         ReceiverStream::new(receiver)
     }
 
-    /// Calls stream from
+    /// Starts the scanner in sync (historical → live) mode.
+    ///
+    /// Streams from `from_block` up to the current confirmed tip using the configured
+    /// `block_confirmations`, then continues streaming new confirmed ranges live.
+    ///
+    /// # Reorg behavior
+    ///
+    /// - In live mode, emits [`ScannerStatus::ReorgDetected`] and adjusts the next confirmed range
+    ///   using `block_confirmations` to re-emit the confirmed portion.
     ///
     /// # Errors
     ///
-    /// * `EventScannerMessage::ServiceShutdown` - if the service is already shutting down.
+    /// - `EventScannerMessage::ServiceShutdown` if the service is already shutting down.
     pub async fn start(self) -> Result<(), EventScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream =
