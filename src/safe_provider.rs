@@ -15,29 +15,6 @@ use tracing::{error, info};
 ///
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
-///
-/// # Example
-///
-/// ```rust,no_run
-/// # use alloy::{
-/// #     network::Ethereum,
-/// #     providers::{RootProvider, WsConnect},
-/// #     rpc::client::ClientBuilder,
-/// # };
-/// # use event_scanner::safe_provider::SafeProvider;
-/// # use std::time::Duration;
-///
-/// async fn create_safe_provider() -> Result<(), Box<dyn std::error::Error>> {
-///     let provider = RootProvider::<Ethereum>::new(
-///         ClientBuilder::default().ws(WsConnect::new("wss://localhost:8000")).await?,
-///     );
-///     let safe_provider =
-///         SafeProvider::new(provider).max_timeout(Duration::from_secs(30)).max_retries(5);
-///
-///     let block = safe_provider.get_block_by_number(12345.into()).await?;
-///     Ok(())
-/// }
-/// ```
 #[derive(Clone)]
 pub struct SafeProvider<N: Network> {
     provider: RootProvider<N>,
