@@ -6,9 +6,12 @@
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
 //! use alloy::transports::http::reqwest::Url;
-//! use event_scanner::block_range_scanner::{
-//!     BlockRangeMessage, BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
-//!     DEFAULT_MAX_BLOCK_RANGE, ScannerError,
+//! use event_scanner::{
+//!     ScannerError,
+//!     block_range_scanner::{
+//!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
+//!         DEFAULT_MAX_BLOCK_RANGE, Message,
+//!     },
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -31,10 +34,10 @@
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
-//!             BlockRangeMessage::Data(range) => {
+//!             Message::Data(range) => {
 //!                 // process range
 //!             }
-//!             BlockRangeMessage::Error(e) => {
+//!             Message::Error(e) => {
 //!                 error!("Received error from subscription: {e}");
 //!                 match e {
 //!                     ScannerError::ServiceShutdown => break,
@@ -48,7 +51,7 @@
 //!                     }
 //!                 }
 //!             }
-//!             BlockRangeMessage::Status(status) => {
+//!             Message::Status(status) => {
 //!                 info!("Received status message: {:?}", status);
 //!             }
 //!         }
@@ -60,7 +63,7 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive, result::Result::Ok};
+use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     join,
     sync::{mpsc, oneshot},
