@@ -90,8 +90,9 @@ impl<N: Network> SafeProvider<N> {
     /// Fetch a block by number with retry and timeout.
     ///
     /// # Errors
-    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
-    /// after exhausting retries or times out.
+    ///
+    /// Returns an error if RPC call fails repeatedly even
+    /// after exhausting retries or if the call times out.
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -110,8 +111,9 @@ impl<N: Network> SafeProvider<N> {
     /// Fetch the latest block number with retry and timeout.
     ///
     /// # Errors
-    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
-    /// after exhausting retries or times out.
+    ///
+    /// Returns an error if RPC call fails repeatedly even
+    /// after exhausting retries or if the call times out.
     pub async fn get_block_number(&self) -> Result<u64, RpcError<TransportErrorKind>> {
         info!("eth_getBlockNumber called");
         let provider = self.provider.clone();
@@ -126,8 +128,9 @@ impl<N: Network> SafeProvider<N> {
     /// Fetch a block by hash with retry and timeout.
     ///
     /// # Errors
-    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
-    /// after exhausting retries or times out.
+    ///
+    /// Returns an error if RPC call fails repeatedly even
+    /// after exhausting retries or if the call times out.
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
@@ -146,8 +149,9 @@ impl<N: Network> SafeProvider<N> {
     /// Fetch logs for the given filter with retry and timeout.
     ///
     /// # Errors
-    /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
-    /// after exhausting retries or times out.
+    ///
+    /// Returns an error if RPC call fails repeatedly even
+    /// after exhausting retries or if the call times out.
     pub async fn get_logs(
         &self,
         filter: &Filter,
@@ -165,8 +169,9 @@ impl<N: Network> SafeProvider<N> {
     /// Subscribe to new block headers with retry and timeout.
     ///
     /// # Errors
-    /// Returns `RpcError<TransportErrorKind>` if the subscription
-    /// cannot be established after retries or times out.
+    ///
+    /// Returns an error if RPC call fails repeatedly even
+    /// after exhausting retries or if the call times out.
     pub async fn subscribe_blocks(
         &self,
     ) -> Result<Subscription<N::HeaderResponse>, RpcError<TransportErrorKind>> {
@@ -180,12 +185,18 @@ impl<N: Network> SafeProvider<N> {
         result
     }
 
-    /// Execute `operation` with exponential backoff respecting only the backoff budget.
+    /// Execute `operation` with exponential backoff and a total timeout.
+    ///
+    /// Wraps the retry logic with `tokio::time::timeout(self.max_timeout, ...)` so
+    /// the entire operation (including time spent inside the RPC call) cannot exceed
+    /// `max_timeout`.
     ///
     /// # Errors
-    /// Returns `RpcError<TransportErrorKind>` if all attempts fail or the
-    /// cumulative backoff delay exceeds the configured budget.
-    async fn retry_with_timeout<T, F, Fut>(
+    ///
+    /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded"
+    ///   if the overall timeout elapses.
+    /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
+    async fn retry_with_total_timeout<T, F, Fut>(
         &self,
         operation: F,
     ) -> Result<T, RpcError<TransportErrorKind>>
@@ -197,28 +208,12 @@ impl<N: Network> SafeProvider<N> {
             .with_max_times(self.max_retries)
             .with_min_delay(self.retry_interval);
 
-        operation.retry(retry_strategy).sleep(tokio::time::sleep).await
-    }
-
-    /// Execute `operation` with exponential backoff and a true total timeout.
-    ///
-    /// Wraps the retry logic with `tokio::time::timeout(self.max_timeout, ...)` so
-    /// the entire operation (including time spent inside the RPC call) cannot exceed
-    /// `max_timeout`.
-    ///
-    /// # Errors
-    /// - Returns `RpcError<TransportErrorKind>` with message "total operation timeout exceeded" if
-    ///   the overall timeout elapses.
-    /// - Propagates any `RpcError<TransportErrorKind>` from the underlying retries.
-    async fn retry_with_total_timeout<T, F, Fut>(
-        &self,
-        operation: F,
-    ) -> Result<T, RpcError<TransportErrorKind>>
-    where
-        F: Fn() -> Fut,
-        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
-    {
-        match tokio::time::timeout(self.max_timeout, self.retry_with_timeout(operation)).await {
+        match tokio::time::timeout(
+            self.max_timeout,
+            operation.retry(retry_strategy).sleep(tokio::time::sleep),
+        )
+        .await
+        {
             Ok(res) => res,
             Err(_) => Err(TransportErrorKind::custom_str("total operation timeout exceeded")),
         }
@@ -254,7 +249,7 @@ mod tests {
         let call_count_clone = call_count.clone();
 
         let result = provider
-            .retry_with_timeout(move || {
+            .retry_with_total_timeout(move || {
                 let count = call_count_clone.clone();
                 async move {
                     let mut c = count.lock().unwrap();
@@ -278,7 +273,7 @@ mod tests {
         let call_count_clone = call_count.clone();
 
         let result = provider
-            .retry_with_timeout(move || {
+            .retry_with_total_timeout(move || {
                 let count = call_count_clone.clone();
                 async move {
                     let mut c = count.lock().unwrap();
@@ -306,7 +301,7 @@ mod tests {
         let call_count_clone = call_count.clone();
 
         let result = provider
-            .retry_with_timeout(move || {
+            .retry_with_total_timeout(move || {
                 let count = call_count_clone.clone();
                 async move {
                     let mut c = count.lock().unwrap();
