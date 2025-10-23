@@ -226,41 +226,34 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tokio::time::sleep;
 
-    fn create_test_provider(
-        timeout: Duration,
+    fn test_provider(
+        timeout: u64,
         max_retries: usize,
-        retry_interval: Duration,
+        retry_interval: u64,
     ) -> SafeProvider<Ethereum> {
         SafeProvider {
-            provider: RootProvider::<Ethereum>::new_http("http://localhost:8545".parse().unwrap()),
-            max_timeout: timeout,
+            provider: RootProvider::new_http("http://localhost:8545".parse().unwrap()),
+            max_timeout: Duration::from_millis(timeout),
             max_retries,
-            retry_interval,
+            retry_interval: Duration::from_millis(retry_interval),
         }
     }
 
     #[tokio::test]
     async fn test_retry_with_timeout_succeeds_on_first_attempt() {
-        let provider =
-            create_test_provider(Duration::from_millis(100), 3, Duration::from_millis(10));
+        let provider = test_provider(100, 3, 10);
 
-        let call_count = Arc::new(Mutex::new(0));
-        let call_count_clone = call_count.clone();
+        let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(move || {
-                let count = call_count_clone.clone();
-                async move {
-                    let mut c = count.lock().unwrap();
-                    *c += 1;
-                    Ok(42)
-                }
+            .retry_with_timeout(|| async {
+                call_count.fetch_add(1, Ordering::SeqCst);
+                Ok(42)
             })
             .await;
 
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 42);
-        assert_eq!(*call_count.lock().unwrap(), 1);
+        assert!(matches!(result, Ok(42)));
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
