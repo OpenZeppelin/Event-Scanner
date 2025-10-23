@@ -24,7 +24,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     let filter = EventFilter::new().contract_address(contract_address);
     let expected_event_count = 5;
 
-    let mut stream = scanner.create_event_stream(filter).take(expected_event_count);
+    let mut stream = scanner.subscribe(filter).take(expected_event_count);
 
     tokio::spawn(async move { scanner.start().await });
 
@@ -63,7 +63,7 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
 
     let mut scanner = setup.scanner;
 
-    let mut stream = scanner.create_event_stream(filter).take(expected_event_count);
+    let mut stream = scanner.subscribe(filter).take(expected_event_count);
 
     tokio::spawn(async move { scanner.start().await });
 
@@ -106,8 +106,8 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
     let mut scanner = setup.scanner;
 
     let mut specific_stream =
-        scanner.create_event_stream(specific_filter).take(expected_specific_count);
-    let mut all_stream = scanner.create_event_stream(all_events_filter).take(expected_all_count);
+        scanner.subscribe(specific_filter).take(expected_specific_count);
+    let mut all_stream = scanner.subscribe(all_events_filter).take(expected_all_count);
 
     tokio::spawn(async move { scanner.start().await });
 

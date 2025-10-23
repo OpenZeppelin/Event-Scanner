@@ -105,10 +105,8 @@ impl HistoricScannerBuilder {
 }
 
 impl<N: Network> HistoricEventScanner<N> {
-    pub fn create_event_stream(
-        &mut self,
-        filter: EventFilter,
-    ) -> ReceiverStream<EventScannerMessage> {
+    #[must_use]
+    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<EventScannerMessage> {
         let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
         self.listeners.push(EventListener { filter, sender });
         ReceiverStream::new(receiver)
@@ -190,10 +188,10 @@ mod tests {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let mut scanner = HistoricScannerBuilder::new().connect::<Ethereum>(provider);
         assert_eq!(scanner.listeners.len(), 0);
-        let _stream1 = scanner.create_event_stream(EventFilter::new());
+        let _stream1 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 1);
-        let _stream2 = scanner.create_event_stream(EventFilter::new());
-        let _stream3 = scanner.create_event_stream(EventFilter::new());
+        let _stream2 = scanner.subscribe(EventFilter::new());
+        let _stream3 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 3);
     }
 
@@ -201,7 +199,7 @@ mod tests {
     fn test_historic_event_stream_channel_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let mut scanner = HistoricScannerBuilder::new().connect::<Ethereum>(provider);
-        let _stream = scanner.create_event_stream(EventFilter::new());
+        let _stream = scanner.subscribe(EventFilter::new());
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
     }

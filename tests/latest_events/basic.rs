@@ -133,7 +133,7 @@ async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
         .to_block(end)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let mut stream_with_range = scanner_with_range.create_event_stream(default_filter);
+    let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
 
@@ -155,7 +155,7 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
     let filter2 = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountIncreased::SIGNATURE);
-    let mut stream2 = scanner.create_event_stream(filter2);
+    let mut stream2 = scanner.subscribe(filter2);
 
     // Produce 7 events
     _ = increase!(contract);
@@ -191,13 +191,13 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
     let filter_inc = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountIncreased::SIGNATURE);
-    let mut stream_inc = scanner.create_event_stream(filter_inc);
+    let mut stream_inc = scanner.subscribe(filter_inc);
 
     // Second listener for CountDecreased
     let filter_dec = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountDecreased::SIGNATURE);
-    let mut stream_dec = scanner.create_event_stream(filter_dec);
+    let mut stream_dec = scanner.subscribe(filter_dec);
 
     // Produce 5 increases, then 2 decreases
     _ = increase!(contract);
@@ -239,7 +239,7 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
     let filter_dec = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountDecreased::SIGNATURE);
-    let mut stream_dec = scanner.create_event_stream(filter_dec);
+    let mut stream_dec = scanner.subscribe(filter_dec);
 
     // Sequence: inc(1), inc(2), dec(1), inc(2), dec(1)
     let mut inc_log_meta = Vec::new();
@@ -286,7 +286,7 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
         .contract_address(*contract_a.address())
         .event(TestCounter::CountIncreased::SIGNATURE);
 
-    let mut stream_a = scanner.create_event_stream(filter_a);
+    let mut stream_a = scanner.subscribe(filter_a);
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
     let mut a_log_meta = Vec::new();
@@ -329,7 +329,7 @@ async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
         .to_block(end)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let mut stream_with_range = scanner_with_range.create_event_stream(default_filter);
+    let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
 
@@ -363,7 +363,7 @@ async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
         .to_block(end)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
-    let mut stream_with_range = scanner_with_range.create_event_stream(default_filter);
+    let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
 

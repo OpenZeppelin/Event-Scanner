@@ -79,7 +79,7 @@ async fn run_scanner(
         .with_contract_address(contract)
         .with_event(MyContract::SomeEvent::SIGNATURE);
 
-    let mut stream = scanner.create_event_stream(filter);
+    let mut stream = scanner.subscribe(filter);
 
     // Start the scanner
     tokio::spawn(async move { scanner.stream().await });
@@ -164,7 +164,7 @@ let all_contract_events_filter = EventFilter::new()
 let all_events_filter = EventFilter::new();
 ```
 
-Register multiple filters by invoking `create_event_stream` repeatedly.
+Register multiple filters by invoking `subscribe` repeatedly.
 
 The flexibility provided by `EventFilter` allows you to build sophisticated event monitoring systems that can track events at different granularities depending on your application's needs.
 
@@ -201,7 +201,7 @@ async fn latest_example(ws_url: alloy::transports::http::reqwest::Url, addr: all
     let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
 
     let filter = EventFilter::new().with_contract_address(addr);
-    let mut stream = client.create_event_stream(filter);
+    let mut stream = client.subscribe(filter);
 
     // Collect the latest 10 events across Earliest..=Latest
     client.scan_latest(10).await?;
@@ -230,7 +230,7 @@ The scanner periodically checks the tip to detect reorgs. On reorg, the scanner 
 
 Notes:
 
-- Ensure you create streams via `create_event_stream()` before calling `scan_latest*` so listeners are registered.
+- Ensure you create streams via `subscribe()` before calling `scan_latest*` so listeners are registered.
 <!-- TODO: uncomment once implemented - The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`. -->
 
 ---

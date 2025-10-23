@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut scanner = EventScanner::sync().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = scanner.create_event_stream(increase_filter);
+    let mut stream = scanner.subscribe(increase_filter);
 
     info!("Starting sync scanner...");
     tokio::spawn(async move {

@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = scanner.create_event_stream(increase_filter);
+    let mut stream = scanner.subscribe(increase_filter);
 
     let task_1 = tokio::spawn(async move {
         scanner.start().await.expect("failed to start scanner");

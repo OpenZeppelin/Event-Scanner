@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let mut scanner =
         EventScanner::latest().count(5).connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = scanner.create_event_stream(increase_filter);
+    let mut stream = scanner.subscribe(increase_filter);
 
     for _ in 0..8 {
         _ = counter_contract.increase().send().await?;

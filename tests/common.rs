@@ -97,7 +97,7 @@ pub async fn setup_live_scanner(
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
 
-    let stream = scanner.create_event_stream(filter);
+    let stream = scanner.subscribe(filter);
 
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
@@ -114,7 +114,7 @@ pub async fn setup_sync_scanner(
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
 
-    let stream = scanner.create_event_stream(filter);
+    let stream = scanner.subscribe(filter);
 
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
@@ -133,7 +133,7 @@ pub async fn setup_historic_scanner(
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
 
-    let stream = scanner.create_event_stream(filter);
+    let stream = scanner.subscribe(filter);
 
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
@@ -156,7 +156,7 @@ pub async fn setup_latest_scanner(
 
     let mut scanner = builder.connect_ws(anvil.ws_endpoint_url()).await?;
 
-    let stream = scanner.create_event_stream(filter);
+    let stream = scanner.subscribe(filter);
 
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
