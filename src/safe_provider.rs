@@ -18,9 +18,8 @@
 //!     let provider = RootProvider::<Ethereum>::new(
 //!         ClientBuilder::default().ws(WsConnect::new("wss://localhost:8000")).await?,
 //!     );
-//!     let safe_provider = SafeProvider::new(provider)
-//!         .with_max_timeout(Duration::from_secs(30))
-//!         .with_max_retries(5);
+//!     let safe_provider =
+//!         SafeProvider::new(provider).max_timeout(Duration::from_secs(30)).max_retries(5);
 //!
 //!     let block = safe_provider.get_block_by_number(12345.into()).await?;
 //!     Ok(())
