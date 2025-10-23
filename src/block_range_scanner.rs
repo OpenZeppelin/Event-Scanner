@@ -63,7 +63,7 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive};
+use std::{cmp::Ordering, ops::RangeInclusive, time::Duration};
 use tokio::{
     join,
     sync::{mpsc, oneshot},
@@ -72,6 +72,9 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
     error::ScannerError,
+    safe_provider::{
+        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL, SafeProvider,
+    },
     types::{ScannerMessage, ScannerStatus},
 };
 use alloy::{
@@ -79,7 +82,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    providers::{Provider, RootProvider},
+    providers::RootProvider,
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
@@ -115,6 +118,9 @@ impl PartialEq<RangeInclusive<BlockNumber>> for Message {
 #[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
+    pub max_timeout: Duration,
+    pub max_retries: usize,
+    pub retry_interval: Duration,
 }
 
 impl Default for BlockRangeScanner {
@@ -126,12 +132,35 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
+        Self {
+            max_block_range: DEFAULT_MAX_BLOCK_RANGE,
+            max_timeout: DEFAULT_MAX_TIMEOUT,
+            max_retries: DEFAULT_MAX_RETRIES,
+            retry_interval: DEFAULT_RETRY_INTERVAL,
+        }
     }
 
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.max_block_range = max_block_range;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_timeout(mut self, rpc_timeout: Duration) -> Self {
+        self.max_timeout = rpc_timeout;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_retries(mut self, rpc_max_retries: usize) -> Self {
+        self.max_retries = rpc_max_retries;
+        self
+    }
+
+    #[must_use]
+    pub fn with_retry_interval(mut self, rpc_retry_interval: Duration) -> Self {
+        self.retry_interval = rpc_retry_interval;
         self
     }
 
@@ -169,19 +198,26 @@ impl BlockRangeScanner {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
+        let safe_provider = SafeProvider::new(provider)
+            .max_timeout(self.max_timeout)
+            .max_retries(self.max_retries)
+            .retry_interval(self.retry_interval);
+        ConnectedBlockRangeScanner {
+            provider: safe_provider,
+            max_block_range: self.max_block_range,
+        }
     }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
-    provider: RootProvider<N>,
+    provider: SafeProvider<N>,
     max_block_range: u64,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
-    /// Returns the underlying Provider.
+    /// Returns the `SafeProvider`
     #[must_use]
-    pub fn provider(&self) -> &RootProvider<N> {
+    pub fn provider(&self) -> &SafeProvider<N> {
         &self.provider
     }
 
@@ -233,7 +269,7 @@ pub enum Command {
 }
 
 struct Service<N: Network> {
-    provider: RootProvider<N>,
+    provider: SafeProvider<N>,
     max_block_range: u64,
     subscriber: Option<mpsc::Sender<Message>>,
     websocket_connected: bool,
@@ -244,7 +280,7 @@ struct Service<N: Network> {
 }
 
 impl<N: Network> Service<N> {
-    pub fn new(provider: RootProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(provider: SafeProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
@@ -640,9 +676,9 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn stream_live_blocks<P: Provider<N>>(
+    async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        provider: P,
+        provider: SafeProvider<N>,
         sender: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
@@ -747,7 +783,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn get_block_subscription(
-        provider: &impl Provider<N>,
+        provider: &SafeProvider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, ScannerError> {
         let ws_stream = provider
             .subscribe_blocks()
@@ -966,6 +1002,7 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
 
+    use alloy::providers::{Provider, RootProvider};
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -981,8 +1018,9 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
 
-    fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
-        RootProvider::new(RpcClient::mocked(asserter))
+    fn mocked_provider(asserter: Asserter) -> SafeProvider<Ethereum> {
+        let root_provider = RootProvider::new(RpcClient::mocked(asserter));
+        SafeProvider::new(root_provider)
     }
 
     #[test]
