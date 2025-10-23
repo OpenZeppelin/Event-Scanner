@@ -239,12 +239,14 @@ impl<N: Network> ConnectedEventScanner<N> {
 
         self.spawn_log_consumers(&range_tx, ConsumerMode::Stream);
 
-        while let Some(message) = stream.next().await {
-            if let Err(err) = range_tx.send(message) {
-                error!(error = %err, "No receivers, stopping broadcast");
-                break;
+        tokio::spawn(async move {
+            while let Some(message) = stream.next().await {
+                if let Err(err) = range_tx.send(message) {
+                    error!(error = %err, "No receivers, stopping broadcast");
+                    break;
+                }
             }
-        }
+        });
 
         Ok(())
     }
