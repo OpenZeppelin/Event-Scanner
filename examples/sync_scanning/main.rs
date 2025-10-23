@@ -1,6 +1,9 @@
+use std::time::Duration;
+
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 use event_scanner::{EventFilter, EventScanner, Message};
+use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -36,7 +39,7 @@ bytecode="608080604052346015576101b0908161001a8239f35b5f80fdfe608080604052600436
 async fn main() -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env()).try_init();
 
-    let anvil = Anvil::new().block_time_f64(0.5).try_spawn()?;
+    let anvil = Anvil::new().block_time(1).try_spawn()?;
     let wallet = anvil.wallet();
     let provider =
         ProviderBuilder::new().wallet(wallet.unwrap()).connect(anvil.endpoint().as_str()).await?;
@@ -48,22 +51,43 @@ async fn main() -> anyhow::Result<()> {
         .contract_address(*contract_address)
         .event(Counter::CountIncreased::SIGNATURE);
 
-    let mut scanner =
-        EventScanner::latest().count(5).connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    info!("Creating historical events...");
+    for i in 0..3 {
+        let _ = counter_contract.increase().send().await?.get_receipt().await?;
+        info!("Historical event {} created", i + 1);
+    }
+
+    let mut scanner = EventScanner::sync().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut stream = scanner.subscribe(increase_filter);
 
-    for _ in 0..8 {
-        _ = counter_contract.increase().send().await?;
+    info!("Starting sync scanner...");
+    tokio::spawn(async move {
+        scanner.start().await.expect("failed to start scanner");
+    });
+
+    info!("Creating live events...");
+    for i in 0..2 {
+        let _ = counter_contract.increase().send().await?.get_receipt().await?;
+        info!("Live event {} created", i + 1);
+        sleep(Duration::from_secs(1)).await;
     }
 
-    scanner.start().await?;
+    let mut historical_processed = false;
+    let mut live_processed = false;
 
     while let Some(message) = stream.next().await {
         match message {
             Message::Data(logs) => {
                 for log in logs {
-                    info!("Received event: {:?}", log.inner.data);
+                    let Counter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
+                    if newCount <= 3 {
+                        info!("Processed historical event: count = {}", newCount);
+                        historical_processed = true;
+                    } else {
+                        info!("Processed live event: count = {}", newCount);
+                        live_processed = true;
+                    }
                 }
             }
             Message::Error(e) => {
@@ -72,6 +96,11 @@ async fn main() -> anyhow::Result<()> {
             Message::Status(info) => {
                 info!("Received status: {:?}", info);
             }
+        }
+
+        if historical_processed && live_processed {
+            info!("Both historical and live events processed successfully!");
+            break;
         }
     }
 

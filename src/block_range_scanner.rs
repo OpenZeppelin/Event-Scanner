@@ -6,8 +6,12 @@
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
 //! use alloy::transports::http::reqwest::Url;
-//! use event_scanner::block_range_scanner::{
-//!     BlockRangeMessage, BlockRangeScanner, BlockRangeScannerClient, BlockRangeScannerError,
+//! use event_scanner::{
+//!     ScannerError,
+//!     block_range_scanner::{
+//!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
+//!         DEFAULT_MAX_BLOCK_RANGE, Message,
+//!     },
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -19,40 +23,35 @@
 //!
 //!     // Configuration
 //!     let block_range_scanner = BlockRangeScanner::new()
-//!         .with_blocks_read_per_epoch(1000)
-//!         .with_block_confirmations(5)
 //!         .connect_ws::<Ethereum>(Url::parse("ws://localhost:8546").unwrap())
 //!         .await?;
 //!
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
 //!
-//!     let mut stream = client.stream_live().await?;
+//!     let mut stream =
+//!         client.stream_from(BlockNumberOrTag::Number(5), DEFAULT_BLOCK_CONFIRMATIONS).await?;
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
-//!             BlockRangeMessage::Data(range) => {
+//!             Message::Data(range) => {
 //!                 // process range
 //!             }
-//!             BlockRangeMessage::Error(e) => {
+//!             Message::Error(e) => {
 //!                 error!("Received error from subscription: {e}");
-//!
-//!                 // Decide whether to continue or break based on error type
 //!                 match e {
-//!                     BlockRangeScannerError::ServiceShutdown => break,
-//!                     BlockRangeScannerError::WebSocketConnectionFailed(_) => {
-//!                         // Maybe implement backoff and retry logic here
+//!                     ScannerError::ServiceShutdown => break,
+//!                     ScannerError::WebSocketConnectionFailed(_) => {
 //!                         error!(
 //!                             "WebSocket connection failed, continuing to listen for reconnection"
 //!                         );
 //!                     }
 //!                     _ => {
-//!                         // Continue processing for other errors
 //!                         error!("Non-fatal error, continuing: {e}");
 //!                     }
 //!                 }
 //!             }
-//!             BlockRangeMessage::Status(status) => {
+//!             Message::Status(status) => {
 //!                 info!("Received status message: {:?}", status);
 //!             }
 //!         }
@@ -64,15 +63,17 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
-
+use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     join,
     sync::{mpsc, oneshot},
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::types::{ScannerMessage, ScannerStatus};
+use crate::{
+    error::ScannerError,
+    types::{ScannerMessage, ScannerStatus},
+};
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
@@ -82,18 +83,14 @@ use alloy::{
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
-        RpcError, TransportErrorKind, TransportResult,
-        http::reqwest::{self, Url},
-        ws::WsConnect,
+        RpcError, TransportErrorKind, TransportResult, http::reqwest::Url, ws::WsConnect,
     },
 };
-use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-pub const DEFAULT_BLOCKS_READ_PER_EPOCH: usize = 1000;
+pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
-// const BACK_OFF_MAX_RETRIES: u64 = 5;
 
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 
@@ -101,138 +98,23 @@ pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 // is considered final)
 pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
 
-// // State sync aware retry settings
-// const STATE_SYNC_RETRY_INTERVAL: Duration = Duration::from_secs(30);
-// const STATE_SYNC_MAX_RETRIES: u64 = 12;
+pub type Message = ScannerMessage<RangeInclusive<BlockNumber>, ScannerError>;
 
-pub type BlockRangeMessage = ScannerMessage<RangeInclusive<BlockNumber>, BlockRangeScannerError>;
-
-impl From<Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>> for BlockRangeMessage {
-    fn from(logs: Result<RangeInclusive<BlockNumber>, BlockRangeScannerError>) -> Self {
-        match logs {
-            Ok(logs) => BlockRangeMessage::Data(logs),
-            Err(e) => BlockRangeMessage::Error(e),
-        }
-    }
-}
-
-impl From<RangeInclusive<BlockNumber>> for BlockRangeMessage {
+impl From<RangeInclusive<BlockNumber>> for Message {
     fn from(logs: RangeInclusive<BlockNumber>) -> Self {
-        BlockRangeMessage::Data(logs)
+        Message::Data(logs)
     }
 }
 
-impl PartialEq<RangeInclusive<BlockNumber>> for BlockRangeMessage {
+impl PartialEq<RangeInclusive<BlockNumber>> for Message {
     fn eq(&self, other: &RangeInclusive<BlockNumber>) -> bool {
-        if let BlockRangeMessage::Data(range) = self { range.eq(other) } else { false }
+        if let Message::Data(range) = self { range.eq(other) } else { false }
     }
 }
 
-#[derive(Error, Debug, Clone)]
-pub enum BlockRangeScannerError {
-    #[error("HTTP request failed: {0}")]
-    HttpError(Arc<reqwest::Error>),
-
-    // #[error("WebSocket error: {0}")]
-    // WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
-    #[error("Serialization error: {0}")]
-    SerializationError(Arc<serde_json::Error>),
-
-    #[error("RPC error: {0}")]
-    RpcError(Arc<RpcError<TransportErrorKind>>),
-
-    #[error("Channel send error")]
-    ChannelError,
-
-    #[error("Service is shutting down")]
-    ServiceShutdown,
-
-    #[error("Only one subscriber allowed at a time")]
-    MultipleSubscribers,
-
-    #[error("No subscriber set for streaming")]
-    NoSubscriber,
-
-    #[error("Historical sync failed: {0}")]
-    HistoricalSyncError(String),
-
-    #[error("WebSocket connection failed after {0} attempts")]
-    WebSocketConnectionFailed(usize),
-
-    #[error("Block not found, block number: {0}")]
-    BlockNotFound(BlockNumberOrTag),
-}
-
-impl From<reqwest::Error> for BlockRangeScannerError {
-    fn from(error: reqwest::Error) -> Self {
-        BlockRangeScannerError::HttpError(Arc::new(error))
-    }
-}
-
-impl From<serde_json::Error> for BlockRangeScannerError {
-    fn from(error: serde_json::Error) -> Self {
-        BlockRangeScannerError::SerializationError(Arc::new(error))
-    }
-}
-
-impl From<RpcError<TransportErrorKind>> for BlockRangeScannerError {
-    fn from(error: RpcError<TransportErrorKind>) -> Self {
-        BlockRangeScannerError::RpcError(Arc::new(error))
-    }
-}
-
-impl From<BlockRangeScannerError> for BlockRangeMessage {
-    fn from(error: BlockRangeScannerError) -> Self {
-        BlockRangeMessage::Error(error)
-    }
-}
-
-#[derive(Debug)]
-pub enum Command {
-    StreamLive {
-        sender: mpsc::Sender<BlockRangeMessage>,
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    StreamHistorical {
-        sender: mpsc::Sender<BlockRangeMessage>,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    StreamFrom {
-        sender: mpsc::Sender<BlockRangeMessage>,
-        start_height: BlockNumberOrTag,
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    Rewind {
-        sender: mpsc::Sender<BlockRangeMessage>,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    Unsubscribe {
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-    Shutdown {
-        response: oneshot::Sender<Result<(), BlockRangeScannerError>>,
-    },
-}
-
-#[derive(Clone)]
-struct Config {
-    blocks_read_per_epoch: usize,
-    #[allow(
-        dead_code,
-        reason = "Will be used in reorg mechanism: https://github.com/OpenZeppelin/Event-Scanner/issues/5"
-    )]
-    reorg_rewind_depth: u64,
-    block_confirmations: u64,
-}
-
+#[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
-    blocks_read_per_epoch: usize,
-    max_reorg_depth: u64,
-    block_confirmations: u64,
+    pub max_block_range: u64,
 }
 
 impl Default for BlockRangeScanner {
@@ -244,28 +126,12 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            blocks_read_per_epoch: DEFAULT_BLOCKS_READ_PER_EPOCH,
-            max_reorg_depth: DEFAULT_REORG_REWIND_DEPTH,
-            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-        }
+        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
     }
 
     #[must_use]
-    pub fn with_blocks_read_per_epoch(mut self, blocks_read_per_epoch: usize) -> Self {
-        self.blocks_read_per_epoch = blocks_read_per_epoch;
-        self
-    }
-
-    #[must_use]
-    pub fn with_reorg_rewind_depth(mut self, reorg_rewind_depth: u64) -> Self {
-        self.max_reorg_depth = reorg_rewind_depth;
-        self
-    }
-
-    #[must_use]
-    pub fn with_block_confirmations(mut self, block_confirmations: u64) -> Self {
-        self.block_confirmations = block_confirmations;
+    pub fn max_block_range(mut self, max_block_range: u64) -> Self {
+        self.max_block_range = max_block_range;
         self
     }
 
@@ -280,7 +146,7 @@ impl BlockRangeScanner {
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let provider =
             RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
-        self.connect_provider(provider)
+        Ok(self.connect(provider))
     }
 
     /// Connects to the provider via IPC
@@ -291,9 +157,9 @@ impl BlockRangeScanner {
     pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
-    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
+    ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
         let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-        self.connect_provider(provider)
+        Ok(self.connect(provider))
     }
 
     /// Connects to an existing provider
@@ -301,24 +167,15 @@ impl BlockRangeScanner {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub fn connect_provider<N: Network>(
-        self,
-        provider: RootProvider<N>,
-    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        Ok(ConnectedBlockRangeScanner {
-            provider,
-            config: Config {
-                blocks_read_per_epoch: self.blocks_read_per_epoch,
-                reorg_rewind_depth: self.max_reorg_depth,
-                block_confirmations: self.block_confirmations,
-            },
-        })
+    #[must_use]
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
+        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
     }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RootProvider<N>,
-    config: Config,
+    max_block_range: u64,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
@@ -333,8 +190,8 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     /// # Errors
     ///
     /// Returns an error if the subscription service fails to start.
-    pub fn run(&self) -> Result<BlockRangeScannerClient, BlockRangeScannerError> {
-        let (service, cmd_tx) = Service::new(self.config.clone(), self.provider.clone());
+    pub fn run(&self) -> Result<BlockRangeScannerClient, ScannerError> {
+        let (service, cmd_tx) = Service::new(self.provider.clone(), self.max_block_range);
         tokio::spawn(async move {
             service.run().await;
         });
@@ -342,10 +199,43 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     }
 }
 
+#[derive(Debug)]
+pub enum Command {
+    StreamLive {
+        sender: mpsc::Sender<Message>,
+        block_confirmations: u64,
+        response: oneshot::Sender<Result<(), ScannerError>>,
+    },
+    StreamHistorical {
+        sender: mpsc::Sender<Message>,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+        response: oneshot::Sender<Result<(), ScannerError>>,
+    },
+    StreamFrom {
+        sender: mpsc::Sender<Message>,
+        start_height: BlockNumberOrTag,
+        block_confirmations: u64,
+        response: oneshot::Sender<Result<(), ScannerError>>,
+    },
+    Rewind {
+        sender: mpsc::Sender<Message>,
+        start_height: BlockNumberOrTag,
+        end_height: BlockNumberOrTag,
+        response: oneshot::Sender<Result<(), ScannerError>>,
+    },
+    Unsubscribe {
+        response: oneshot::Sender<Result<(), ScannerError>>,
+    },
+    Shutdown {
+        response: oneshot::Sender<Result<(), ScannerError>>,
+    },
+}
+
 struct Service<N: Network> {
-    config: Config,
     provider: RootProvider<N>,
-    subscriber: Option<mpsc::Sender<BlockRangeMessage>>,
+    max_block_range: u64,
+    subscriber: Option<mpsc::Sender<Message>>,
     websocket_connected: bool,
     processed_count: u64,
     error_count: u64,
@@ -354,12 +244,12 @@ struct Service<N: Network> {
 }
 
 impl<N: Network> Service<N> {
-    pub fn new(config: Config, provider: RootProvider<N>) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(provider: RootProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
-            config,
             provider,
+            max_block_range,
             subscriber: None,
             websocket_connected: false,
             processed_count: 0,
@@ -393,13 +283,13 @@ impl<N: Network> Service<N> {
         info!("Subscription service stopped");
     }
 
-    async fn handle_command(&mut self, command: Command) -> Result<(), BlockRangeScannerError> {
+    async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
         match command {
-            Command::StreamLive { sender, response } => {
+            Command::StreamLive { sender, block_confirmations, response } => {
                 self.ensure_no_subscriber()?;
                 info!("Starting live stream");
                 self.subscriber = Some(sender);
-                let result = self.handle_live().await;
+                let result = self.handle_live(block_confirmations).await;
                 let _ = response.send(result);
             }
             Command::StreamHistorical { sender, start_height, end_height, response } => {
@@ -409,11 +299,11 @@ impl<N: Network> Service<N> {
                 let result = self.handle_historical(start_height, end_height).await;
                 let _ = response.send(result);
             }
-            Command::StreamFrom { sender, start_height, response } => {
+            Command::StreamFrom { sender, start_height, block_confirmations, response } => {
                 self.ensure_no_subscriber()?;
                 self.subscriber = Some(sender);
                 info!(start_height = ?start_height, "Starting streaming from");
-                let result = self.handle_sync(start_height).await;
+                let result = self.handle_sync(start_height, block_confirmations).await;
                 let _ = response.send(result);
             }
             Command::Rewind { sender, start_height, end_height, response } => {
@@ -436,11 +326,10 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn handle_live(&mut self) -> Result<(), BlockRangeScannerError> {
-        let sender =
-            self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
+    async fn handle_live(&mut self, block_confirmations: u64) -> Result<(), ScannerError> {
+        let sender = self.subscriber.clone().ok_or_else(|| ScannerError::ServiceShutdown)?;
 
-        let block_confirmations = self.config.block_confirmations;
+        let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
 
@@ -450,7 +339,14 @@ impl<N: Network> Service<N> {
         let range_start = (latest + 1).saturating_sub(block_confirmations);
 
         tokio::spawn(async move {
-            Self::stream_live_blocks(range_start, provider, sender, block_confirmations).await;
+            Self::stream_live_blocks(
+                range_start,
+                provider,
+                sender,
+                block_confirmations,
+                max_block_range,
+            )
+            .await;
         });
 
         Ok(())
@@ -460,20 +356,16 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-    ) -> Result<(), BlockRangeScannerError> {
+    ) -> Result<(), ScannerError> {
         let (start_block, end_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height)
         )?;
 
-        let start_block_num = start_block
-            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
-            .header()
-            .number();
-        let end_block_num = end_block
-            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(end_height))?
-            .header()
-            .number();
+        let start_block_num =
+            start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
+        let end_block_num =
+            end_block.ok_or_else(|| ScannerError::BlockNotFound(end_height))?.header().number();
 
         let (start_block_num, end_block_num) = match start_block_num.cmp(&end_block_num) {
             Ordering::Greater => (end_block_num, start_block_num),
@@ -482,17 +374,11 @@ impl<N: Network> Service<N> {
 
         info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
-        let sender =
-            self.subscriber.take().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
-        let blocks_read_per_epoch = self.config.blocks_read_per_epoch as u64;
+        let sender = self.subscriber.take().ok_or_else(|| ScannerError::ServiceShutdown)?;
+        let max_block_range = self.max_block_range;
 
-        Self::stream_historical_blocks(
-            start_block_num,
-            end_block_num,
-            blocks_read_per_epoch,
-            &sender,
-        )
-        .await?;
+        Self::stream_historical_blocks(start_block_num, end_block_num, max_block_range, &sender)
+            .await?;
 
         Ok(())
     }
@@ -500,11 +386,12 @@ impl<N: Network> Service<N> {
     async fn handle_sync(
         &mut self,
         start_height: BlockNumberOrTag,
-    ) -> Result<(), BlockRangeScannerError> {
-        let sender =
-            self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
+        block_confirmations: u64,
+    ) -> Result<(), ScannerError> {
+        let sender = self.subscriber.clone().ok_or_else(|| ScannerError::ServiceShutdown)?;
 
-        let block_confirmations = self.config.block_confirmations;
+        let max_block_range = self.max_block_range;
+
         // Step 1:
         // Fetches the starting block and end block for historical sync in parallel
         let (start_block, latest_block) = tokio::try_join!(
@@ -512,12 +399,10 @@ impl<N: Network> Service<N> {
             self.provider.get_block_by_number(BlockNumberOrTag::Latest)
         )?;
 
-        let start_block_num = start_block
-            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(start_height))?
-            .header()
-            .number();
+        let start_block_num =
+            start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
         let latest_block = latest_block
-            .ok_or_else(|| BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
+            .ok_or_else(|| ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
             .header()
             .number();
 
@@ -531,13 +416,18 @@ impl<N: Network> Service<N> {
                 "Start block is beyond confirmed tip, starting live stream"
             );
 
-            let sender =
-                self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
+            let sender = self.subscriber.clone().ok_or_else(|| ScannerError::ServiceShutdown)?;
 
             let provider = self.provider.clone();
             tokio::spawn(async move {
-                Self::stream_live_blocks(start_block_num, provider, sender, block_confirmations)
-                    .await;
+                Self::stream_live_blocks(
+                    start_block_num,
+                    provider,
+                    sender,
+                    block_confirmations,
+                    max_block_range,
+                )
+                .await;
             });
 
             return Ok(());
@@ -552,7 +442,7 @@ impl<N: Network> Service<N> {
         // Step 2: Setup the live streaming buffer
         // This channel will accumulate while historical sync is running
         let (live_block_buffer_sender, live_block_buffer_receiver) =
-            mpsc::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
+            mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
 
         let provider = self.provider.clone();
 
@@ -567,6 +457,7 @@ impl<N: Network> Service<N> {
                 provider,
                 live_block_buffer_sender,
                 block_confirmations,
+                max_block_range,
             )
             .await;
         });
@@ -577,14 +468,14 @@ impl<N: Network> Service<N> {
         if let Err(e) = Self::stream_historical_blocks(
             start_block_num,
             confirmed_tip_num,
-            self.config.blocks_read_per_epoch as u64,
+            self.max_block_range,
             &sender,
         )
         .await
         {
             warn!("aborting live_subscription_task");
             live_subscription_task.abort();
-            return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
+            return Err(ScannerError::HistoricalSyncError(e.to_string()));
         }
 
         self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
@@ -608,15 +499,14 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-    ) -> Result<(), BlockRangeScannerError> {
+    ) -> Result<(), ScannerError> {
         let (start_block, end_block) = join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height),
         );
 
-        let start_block =
-            start_block?.ok_or(BlockRangeScannerError::BlockNotFound(start_height))?;
-        let end_block = end_block?.ok_or(BlockRangeScannerError::BlockNotFound(end_height))?;
+        let start_block = start_block?.ok_or(ScannerError::BlockNotFound(start_height))?;
+        let end_block = end_block?.ok_or(ScannerError::BlockNotFound(end_height))?;
 
         // normalize block range
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
@@ -642,9 +532,9 @@ impl<N: Network> Service<N> {
         &mut self,
         from: N::BlockResponse,
         to: N::BlockResponse,
-    ) -> Result<(), BlockRangeScannerError> {
+    ) -> Result<(), ScannerError> {
         let mut batch_count = 0;
-        let blocks_read_per_epoch = self.config.blocks_read_per_epoch;
+        let max_block_range = self.max_block_range;
 
         // for checking whether reorg occurred
         let mut tip_hash = from.header().hash();
@@ -656,10 +546,10 @@ impl<N: Network> Service<N> {
         let mut batch_from = from;
 
         while batch_from >= to {
-            let batch_to = batch_from.saturating_sub(blocks_read_per_epoch as u64 - 1).max(to);
+            let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            self.send_to_subscriber(BlockRangeMessage::Data(batch_to..=batch_from)).await;
+            self.send_to_subscriber(Message::Data(batch_to..=batch_from)).await;
 
             batch_count += 1;
             if batch_count % 10 == 0 {
@@ -675,8 +565,7 @@ impl<N: Network> Service<N> {
             if self.reorg_detected(tip_hash).await? {
                 info!(block_number = %from, hash = %tip_hash, "Reorg detected");
 
-                self.send_to_subscriber(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
-                    .await;
+                self.send_to_subscriber(Message::Status(ScannerStatus::ReorgDetected)).await;
 
                 // restart rewind
                 batch_from = from;
@@ -700,16 +589,21 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn reorg_detected(&self, hash_to_check: B256) -> Result<bool, BlockRangeScannerError> {
-        Ok(self.provider.get_block_by_hash(hash_to_check).await?.is_none())
+    async fn reorg_detected(&self, hash_to_check: B256) -> Result<bool, ScannerError> {
+        Ok(self
+            .provider
+            .get_block_by_hash(hash_to_check)
+            .await
+            .map_err(ScannerError::from)?
+            .is_none())
     }
 
     async fn stream_historical_blocks(
         start: BlockNumber,
         end: BlockNumber,
-        blocks_read_per_epoch: u64,
-        sender: &mpsc::Sender<BlockRangeMessage>,
-    ) -> Result<(), BlockRangeScannerError> {
+        max_block_range: u64,
+        sender: &mpsc::Sender<Message>,
+    ) -> Result<(), ScannerError> {
         let mut batch_count = 0;
 
         let mut next_start_block = start;
@@ -718,13 +612,10 @@ impl<N: Network> Service<N> {
         // range)
         while next_start_block <= end {
             let batch_end_block_number =
-                next_start_block.saturating_add(blocks_read_per_epoch - 1).min(end);
+                next_start_block.saturating_add(max_block_range - 1).min(end);
 
-            if !Self::try_send(
-                sender,
-                BlockRangeMessage::Data(next_start_block..=batch_end_block_number),
-            )
-            .await
+            if !Self::try_send(sender, Message::Data(next_start_block..=batch_end_block_number))
+                .await
             {
                 break;
             }
@@ -752,8 +643,9 @@ impl<N: Network> Service<N> {
     async fn stream_live_blocks<P: Provider<N>>(
         mut range_start: BlockNumber,
         provider: P,
-        sender: mpsc::Sender<BlockRangeMessage>,
+        sender: mpsc::Sender<Message>,
         block_confirmations: u64,
+        max_block_range: u64,
     ) {
         match Self::get_block_subscription(&provider).await {
             Ok(ws_stream) => {
@@ -770,10 +662,7 @@ impl<N: Network> Service<N> {
 
                     if incoming_block_num < range_start {
                         warn!("Reorg detected: sending forked range");
-                        if sender
-                            .send(BlockRangeMessage::Status(ScannerStatus::ReorgDetected))
-                            .await
-                            .is_err()
+                        if sender.send(Message::Status(ScannerStatus::ReorgDetected)).await.is_err()
                         {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
@@ -789,22 +678,23 @@ impl<N: Network> Service<N> {
 
                     let confirmed = incoming_block_num.saturating_sub(block_confirmations);
                     if confirmed >= range_start {
-                        if sender
-                            .send(BlockRangeMessage::Data(range_start..=confirmed))
-                            .await
-                            .is_err()
-                        {
+                        // NOTE: Edge case when difference between range end and range start >= max
+                        // reads
+                        let range_end =
+                            confirmed.min(range_start.saturating_add(max_block_range - 1));
+
+                        if sender.send(Message::Data(range_start..=range_end)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
                         }
 
                         // Overflow can not realistically happen
-                        range_start = confirmed + 1;
+                        range_start = range_end + 1;
                     }
                 }
             }
             Err(e) => {
-                if sender.send(BlockRangeMessage::Error(e)).await.is_err() {
+                if sender.send(Message::Error(e)).await.is_err() {
                     warn!("Downstream channel closed, stopping live blocks task");
                 }
             }
@@ -812,8 +702,8 @@ impl<N: Network> Service<N> {
     }
 
     async fn process_live_block_buffer(
-        mut buffer_rx: mpsc::Receiver<BlockRangeMessage>,
-        sender: mpsc::Sender<BlockRangeMessage>,
+        mut buffer_rx: mpsc::Receiver<Message>,
+        sender: mpsc::Sender<Message>,
         cutoff: BlockNumber,
     ) {
         let mut processed = 0;
@@ -822,10 +712,10 @@ impl<N: Network> Service<N> {
         // Process all buffered messages
         while let Some(data) = buffer_rx.recv().await {
             match data {
-                BlockRangeMessage::Data(range) => {
+                Message::Data(range) => {
                     let (start, end) = (*range.start(), *range.end());
                     if start >= cutoff {
-                        if sender.send(BlockRangeMessage::Data(range)).await.is_err() {
+                        if sender.send(Message::Data(range)).await.is_err() {
                             warn!("Subscriber channel closed, cleaning up");
                             return;
                         }
@@ -834,7 +724,7 @@ impl<N: Network> Service<N> {
                         discarded += cutoff - start;
 
                         let start = cutoff;
-                        if sender.send(BlockRangeMessage::Data(start..=end)).await.is_err() {
+                        if sender.send(Message::Data(start..=end)).await.is_err() {
                             warn!("Subscriber channel closed, cleaning up");
                             return;
                         }
@@ -858,16 +748,16 @@ impl<N: Network> Service<N> {
 
     async fn get_block_subscription(
         provider: &impl Provider<N>,
-    ) -> Result<Subscription<N::HeaderResponse>, BlockRangeScannerError> {
+    ) -> Result<Subscription<N::HeaderResponse>, ScannerError> {
         let ws_stream = provider
             .subscribe_blocks()
             .await
-            .map_err(|_| BlockRangeScannerError::WebSocketConnectionFailed(1))?;
+            .map_err(|_| ScannerError::WebSocketConnectionFailed(1))?;
 
         Ok(ws_stream)
     }
 
-    async fn send_to_subscriber(&mut self, message: BlockRangeMessage) {
+    async fn send_to_subscriber(&mut self, message: Message) {
         if let Some(ref sender) = self.subscriber {
             if let Err(err) = sender.send(message).await {
                 warn!(error = %err, "Downstream channel closed, failed sending the message to subscriber");
@@ -879,10 +769,7 @@ impl<N: Network> Service<N> {
         }
     }
 
-    async fn try_send<T: Into<BlockRangeMessage>>(
-        sender: &mpsc::Sender<BlockRangeMessage>,
-        msg: T,
-    ) -> bool {
+    async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
         if let Err(err) = sender.send(msg.into()).await {
             warn!(error = %err, "Downstream channel closed, stopping stream");
             return false;
@@ -897,9 +784,9 @@ impl<N: Network> Service<N> {
         }
     }
 
-    fn ensure_no_subscriber(&self) -> Result<(), BlockRangeScannerError> {
+    fn ensure_no_subscriber(&self) -> Result<(), ScannerError> {
         if self.subscriber.is_some() {
-            return Err(BlockRangeScannerError::MultipleSubscribers);
+            return Err(ScannerError::MultipleSubscribers);
         }
         Ok(())
     }
@@ -922,23 +809,29 @@ impl BlockRangeScannerClient {
 
     /// Streams live blocks starting from the latest block.
     ///
+    /// # Arguments
+    ///
+    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    ///
     /// # Errors
     ///
-    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_live(
         &self,
-    ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
+        block_confirmations: u64,
+    ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
-        let command = Command::StreamLive { sender: blocks_sender, response: response_tx };
+        let command = Command::StreamLive {
+            sender: blocks_sender,
+            block_confirmations,
+            response: response_tx,
+        };
 
-        self.command_sender
-            .send(command)
-            .await
-            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
+        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
@@ -952,12 +845,12 @@ impl BlockRangeScannerClient {
     ///
     /// # Errors
     ///
-    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_historical<N: Into<BlockNumberOrTag>>(
         &self,
         start_height: N,
         end_height: N,
-    ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
+    ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -968,12 +861,9 @@ impl BlockRangeScannerClient {
             response: response_tx,
         };
 
-        self.command_sender
-            .send(command)
-            .await
-            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
+        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
@@ -983,29 +873,29 @@ impl BlockRangeScannerClient {
     /// # Arguments
     ///
     /// * `start_height` - The starting block number or tag.
+    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
     ///
     /// # Errors
     ///
-    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_from(
         &self,
-        start_height: impl Into<BlockNumberOrTag>,
-    ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
+        start_height: BlockNumberOrTag,
+        block_confirmations: u64,
+    ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamFrom {
             sender: blocks_sender,
-            start_height: start_height.into(),
+            start_height,
+            block_confirmations,
             response: response_tx,
         };
 
-        self.command_sender
-            .send(command)
-            .await
-            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
+        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
@@ -1019,12 +909,12 @@ impl BlockRangeScannerClient {
     ///
     /// # Errors
     ///
-    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn rewind<BN: Into<BlockNumberOrTag>>(
         &self,
         start_height: BN,
         end_height: BN,
-    ) -> Result<ReceiverStream<BlockRangeMessage>, BlockRangeScannerError> {
+    ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -1035,12 +925,9 @@ impl BlockRangeScannerClient {
             response: response_tx,
         };
 
-        self.command_sender
-            .send(command)
-            .await
-            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)??;
+        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
@@ -1049,36 +936,30 @@ impl BlockRangeScannerClient {
     ///
     /// # Errors
     ///
-    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn unsubscribe(&self) -> Result<(), BlockRangeScannerError> {
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn unsubscribe(&self) -> Result<(), ScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Unsubscribe { response: response_tx };
 
-        self.command_sender
-            .send(command)
-            .await
-            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)?
+        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)?
     }
 
     /// Shuts down the subscription service and unsubscribes the current subscriber.
     ///
     /// # Errors
     ///
-    /// * `BlockRangeScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn shutdown(&self) -> Result<(), BlockRangeScannerError> {
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
+    pub async fn shutdown(&self) -> Result<(), ScannerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Shutdown { response: response_tx };
 
-        self.command_sender
-            .send(command)
-            .await
-            .map_err(|_| BlockRangeScannerError::ServiceShutdown)?;
+        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
 
-        response_rx.await.map_err(|_| BlockRangeScannerError::ServiceShutdown)?
+        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)?
     }
 }
 
@@ -1100,10 +981,6 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
 
-    fn test_config() -> Config {
-        Config { blocks_read_per_epoch: 5, reorg_rewind_depth: 5, block_confirmations: 0 }
-    }
-
     fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
         RootProvider::new(RpcClient::mocked(asserter))
     }
@@ -1112,42 +989,34 @@ mod tests {
     fn block_range_scanner_defaults_match_constants() {
         let scanner = BlockRangeScanner::new();
 
-        assert_eq!(scanner.blocks_read_per_epoch, DEFAULT_BLOCKS_READ_PER_EPOCH);
-        assert_eq!(scanner.max_reorg_depth, DEFAULT_REORG_REWIND_DEPTH);
-        assert_eq!(scanner.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert_eq!(scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
     }
 
     #[test]
     fn builder_methods_update_configuration() {
-        let blocks_read_per_epoch = 42;
-        let reorg_rewind_depth = 12;
-        let block_confirmations = 7;
+        let max_block_range = 42;
 
-        let scanner = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(blocks_read_per_epoch)
-            .with_reorg_rewind_depth(reorg_rewind_depth)
-            .with_block_confirmations(block_confirmations);
+        let scanner = BlockRangeScanner::new().max_block_range(max_block_range);
 
-        assert_eq!(scanner.blocks_read_per_epoch, blocks_read_per_epoch);
-        assert_eq!(scanner.block_confirmations, block_confirmations);
+        assert_eq!(scanner.max_block_range, max_block_range);
     }
 
     #[tokio::test]
     async fn send_to_subscriber_increments_processed_count() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
 
         let expected_range = 10..=11;
-        service.send_to_subscriber(BlockRangeMessage::Data(expected_range.clone())).await;
+        service.send_to_subscriber(Message::Data(expected_range.clone())).await;
 
         assert_eq!(service.processed_count, 1);
         assert!(service.subscriber.is_some());
 
-        let BlockRangeMessage::Data(received) = rx.recv().await.expect("range received") else {
+        let Message::Data(received) = rx.recv().await.expect("range received") else {
             panic!("expected BlockRange message")
         };
         assert_eq!(received, expected_range);
@@ -1159,7 +1028,7 @@ mod tests {
     async fn send_to_subscriber_removes_closed_channel() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -1167,7 +1036,7 @@ mod tests {
         // channel is closed
         drop(rx);
 
-        service.send_to_subscriber(BlockRangeMessage::Data(15..=15)).await;
+        service.send_to_subscriber(Message::Data(15..=15)).await;
 
         assert!(service.subscriber.is_none());
         assert!(!service.websocket_connected);
@@ -1180,7 +1049,7 @@ mod tests {
     fn handle_unsubscribe_clears_subscriber() {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, _rx) = mpsc::channel(1);
         service.websocket_connected = true;
@@ -1197,18 +1066,18 @@ mod tests {
         let anvil = Anvil::new().block_time_f64(0.01).try_spawn()?;
 
         let client = BlockRangeScanner::new()
-            .with_block_confirmations(1)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
         let expected_blocks = 10;
 
-        let mut receiver = client.stream_live().await?.take(expected_blocks);
+        let mut receiver =
+            client.stream_live(DEFAULT_BLOCK_CONFIRMATIONS).await?.take(expected_blocks);
 
         let mut block_range_start = 0;
 
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+        while let Some(Message::Data(range)) = receiver.next().await {
             info!("Received block range: [{range:?}]");
             if block_range_start == 0 {
                 block_range_start = *range.start();
@@ -1232,21 +1101,22 @@ mod tests {
         let block_confirmations = 5;
 
         let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
         let expected_blocks = 10;
-        let mut receiver =
-            client.stream_from(BlockNumberOrTag::Latest).await?.take(expected_blocks);
+        let mut receiver = client
+            .stream_from(BlockNumberOrTag::Latest, block_confirmations)
+            .await?
+            .take(expected_blocks);
 
         let latest_head = provider.get_block_number().await?;
         provider.anvil_mine(Option::Some(20), Option::None).await?;
 
         let mut expected_range_start = latest_head;
 
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+        while let Some(Message::Data(range)) = receiver.next().await {
             assert_eq!(expected_range_start, *range.start());
             assert_eq!(range.end(), range.start());
             expected_range_start += 1;
@@ -1269,21 +1139,20 @@ mod tests {
         let block_confirmations = 5;
 
         let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
         let expected_blocks = 10;
 
-        let mut receiver = client.stream_live().await?.take(expected_blocks);
+        let mut receiver = client.stream_live(block_confirmations).await?.take(expected_blocks);
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         let latest_head = provider.get_block_number().await?;
         provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
 
         let mut expected_range_start = latest_head.saturating_sub(block_confirmations) + 1;
 
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+        while let Some(Message::Data(range)) = receiver.next().await {
             assert_eq!(expected_range_start, *range.start());
             assert_eq!(range.end(), range.start());
             expected_range_start += 1;
@@ -1308,17 +1177,16 @@ mod tests {
         let block_confirmations = 5;
 
         let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live().await?;
+        let mut receiver = client.stream_live(block_confirmations).await?;
 
         provider.anvil_mine(Option::Some(6), Option::None).await?;
 
         let next = receiver.next().await;
-        if let Some(BlockRangeMessage::Data(range)) = next {
+        if let Some(Message::Data(range)) = next {
             assert_eq!(0, *range.start());
             assert_eq!(0, *range.end());
         } else {
@@ -1326,7 +1194,7 @@ mod tests {
         }
 
         let next = receiver.next().await;
-        if let Some(BlockRangeMessage::Data(range)) = next {
+        if let Some(Message::Data(range)) = next {
             assert_eq!(1, *range.start());
             assert_eq!(1, *range.end());
         } else {
@@ -1351,12 +1219,11 @@ mod tests {
         let block_confirmations = 5;
 
         let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live().await?;
+        let mut receiver = client.stream_live(block_confirmations).await?;
 
         provider.anvil_mine(Option::Some(10), Option::None).await?;
 
@@ -1370,7 +1237,7 @@ mod tests {
 
         let end_loop = 20;
         let mut i = 0;
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
+        while let Some(Message::Data(range)) = receiver.next().await {
             if block_range_start == 0 {
                 block_range_start = *range.start();
             }
@@ -1396,12 +1263,11 @@ mod tests {
         let block_confirmations = 3;
 
         let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
-        let mut receiver = client.stream_live().await?;
+        let mut receiver = client.stream_live(block_confirmations).await?;
 
         provider.anvil_mine(Option::Some(10), Option::None).await?;
 
@@ -1418,7 +1284,7 @@ mod tests {
         let mut reorg_detected = false;
         while let Some(msg) = receiver.next().await {
             match msg {
-                BlockRangeMessage::Data(range) => {
+                Message::Data(range) => {
                     if block_range_start == 0 {
                         block_range_start = *range.start();
                     }
@@ -1427,7 +1293,7 @@ mod tests {
                         break;
                     }
                 }
-                BlockRangeMessage::Status(ScannerStatus::ReorgDetected) => {
+                Message::Status(ScannerStatus::ReorgDetected) => {
                     reorg_detected = true;
                 }
                 _ => {
@@ -1464,7 +1330,7 @@ mod tests {
         let end_num = 110;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(30)
+            .max_block_range(30)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1499,7 +1365,7 @@ mod tests {
         let end_num = 120;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(30)
+            .max_block_range(30)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1534,7 +1400,7 @@ mod tests {
         provider.anvil_mine(Option::Some(100), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(5)
+            .max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1565,7 +1431,7 @@ mod tests {
 
         // range where blocks per epoch is larger than the number of blocks on chain
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(200)
+            .max_block_range(200)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1589,7 +1455,7 @@ mod tests {
         provider.anvil_mine(Option::Some(11), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(5)
+            .max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1607,16 +1473,16 @@ mod tests {
     async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
         let cutoff = 50;
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(51..=55)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(56..=60)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(61..=70)).await.unwrap();
+        buffer_tx.send(Message::Data(51..=55)).await.unwrap();
+        buffer_tx.send(Message::Data(56..=60)).await.unwrap();
+        buffer_tx.send(Message::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+        while let Some(Message::Data(range)) = out_rx.recv().await {
             forwarded.push(range);
         }
 
@@ -1630,16 +1496,16 @@ mod tests {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(40..=50)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(51..=60)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(61..=70)).await.unwrap();
+        buffer_tx.send(Message::Data(40..=50)).await.unwrap();
+        buffer_tx.send(Message::Data(51..=60)).await.unwrap();
+        buffer_tx.send(Message::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+        while let Some(Message::Data(range)) = out_rx.recv().await {
             forwarded.push(range);
         }
 
@@ -1653,16 +1519,16 @@ mod tests {
         let cutoff = 75;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(70..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(60..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(74..=76)).await.unwrap();
+        buffer_tx.send(Message::Data(70..=80)).await.unwrap();
+        buffer_tx.send(Message::Data(60..=80)).await.unwrap();
+        buffer_tx.send(Message::Data(74..=76)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+        while let Some(Message::Data(range)) = out_rx.recv().await {
             forwarded.push(range);
         }
 
@@ -1676,19 +1542,19 @@ mod tests {
         let cutoff = 50;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(30..=45)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(BlockRangeMessage::Data(46..=55)).await.unwrap(); // Overlaps: trim to 50..=55
-        buffer_tx.send(BlockRangeMessage::Data(56..=65)).await.unwrap(); // After cutoff: forward as-is
-        buffer_tx.send(BlockRangeMessage::Data(40..=49)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(BlockRangeMessage::Data(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
-        buffer_tx.send(BlockRangeMessage::Data(51..=100)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(Message::Data(30..=45)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Message::Data(46..=55)).await.unwrap(); // Overlaps: trim to 50..=55
+        buffer_tx.send(Message::Data(56..=65)).await.unwrap(); // After cutoff: forward as-is
+        buffer_tx.send(Message::Data(40..=49)).await.unwrap(); // Before cutoff: discard
+        buffer_tx.send(Message::Data(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
+        buffer_tx.send(Message::Data(51..=100)).await.unwrap(); // After cutoff: forward as-is
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+        while let Some(Message::Data(range)) = out_rx.recv().await {
             forwarded.push(range);
         }
 
@@ -1701,17 +1567,17 @@ mod tests {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(99..=99)).await.unwrap(); // Just before: discard
-        buffer_tx.send(BlockRangeMessage::Data(100..=100)).await.unwrap(); // Exactly at: forward
-        buffer_tx.send(BlockRangeMessage::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
-        buffer_tx.send(BlockRangeMessage::Data(100..=101)).await.unwrap(); // Starts at cutoff: forward
+        buffer_tx.send(Message::Data(99..=99)).await.unwrap(); // Just before: discard
+        buffer_tx.send(Message::Data(100..=100)).await.unwrap(); // Exactly at: forward
+        buffer_tx.send(Message::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
+        buffer_tx.send(Message::Data(100..=101)).await.unwrap(); // Starts at cutoff: forward
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+        while let Some(Message::Data(range)) = out_rx.recv().await {
             forwarded.push(range);
         }
 
@@ -1725,16 +1591,16 @@ mod tests {
         let cutoff = 0;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(0..=5)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(6..=10)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(11..=25)).await.unwrap();
+        buffer_tx.send(Message::Data(0..=5)).await.unwrap();
+        buffer_tx.send(Message::Data(6..=10)).await.unwrap();
+        buffer_tx.send(Message::Data(11..=25)).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
         let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
+        while let Some(Message::Data(range)) = out_rx.recv().await {
             forwarded.push(range);
         }
 
@@ -1747,21 +1613,17 @@ mod tests {
     async fn forwards_errors_to_subscribers() -> anyhow::Result<()> {
         let asserter = Asserter::new();
         let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(test_config(), provider);
+        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
 
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
 
         service
-            .send_to_subscriber(BlockRangeMessage::Error(
-                BlockRangeScannerError::WebSocketConnectionFailed(4),
-            ))
+            .send_to_subscriber(Message::Error(ScannerError::WebSocketConnectionFailed(4)))
             .await;
 
         match rx.recv().await.expect("subscriber should stay open") {
-            BlockRangeMessage::Error(BlockRangeScannerError::WebSocketConnectionFailed(
-                attempts,
-            )) => {
+            Message::Error(ScannerError::WebSocketConnectionFailed(attempts)) => {
                 assert_eq!(attempts, 4);
             }
             other => panic!("unexpected message: {other:?}"),
@@ -1779,7 +1641,7 @@ mod tests {
         provider.anvil_mine(Option::Some(150), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(100)
+            .max_block_range(100)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1803,7 +1665,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(5)
+            .max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1828,7 +1690,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(4)
+            .max_block_range(4)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1853,7 +1715,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(5)
+            .max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1875,7 +1737,7 @@ mod tests {
         provider.anvil_mine(Option::Some(15), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(1)
+            .max_block_range(1)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1901,7 +1763,7 @@ mod tests {
         provider.anvil_mine(Option::Some(20), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(7)
+            .max_block_range(7)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1927,7 +1789,7 @@ mod tests {
         provider.anvil_mine(Option::Some(16), Option::None).await?;
 
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(5)
+            .max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1955,7 +1817,7 @@ mod tests {
 
         // Do not mine up to 999 so start won't exist
         let client = BlockRangeScanner::new()
-            .with_blocks_read_per_epoch(5)
+            .max_block_range(5)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
@@ -1963,7 +1825,7 @@ mod tests {
         let res = client.rewind(0, 999).await;
 
         match res {
-            Err(BlockRangeScannerError::BlockNotFound(_)) => {}
+            Err(ScannerError::BlockNotFound(_)) => {}
             other => panic!("unexpected result: {other:?}"),
         }
 
