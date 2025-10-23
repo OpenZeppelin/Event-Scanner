@@ -131,7 +131,7 @@ impl EventFilter {
     /// If neither event signature hashes nor events are set, all events from the specified
     /// contract(s) will be tracked.
     #[must_use]
-    pub fn with_event_signatures(
+    pub fn event_signatures(
         mut self,
         event_signatures: impl IntoIterator<Item = impl Into<Topic>>,
     ) -> Self {
@@ -286,9 +286,8 @@ mod tests {
         let address = address!("0x000000000000000000000000000000000000dEaD");
         let event_signatures =
             vec![SomeContract::EventOne::SIGNATURE_HASH, SomeContract::EventTwo::SIGNATURE_HASH];
-        let filter = EventFilter::new()
-            .contract_address(address)
-            .with_event_signatures(event_signatures.clone());
+        let filter =
+            EventFilter::new().contract_address(address).event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
         let expected_1 = "EventFilter(contracts: [0x000000000000000000000000000000000000dEaD], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
@@ -307,9 +306,8 @@ mod tests {
         let events = vec![SomeContract::EventOne::SIGNATURE, SomeContract::EventTwo::SIGNATURE];
         let event_signatures =
             vec![SomeContract::EventOne::SIGNATURE_HASH, SomeContract::EventTwo::SIGNATURE_HASH];
-        let filter = EventFilter::new()
-            .events(events.clone())
-            .with_event_signatures(event_signatures.clone());
+        let filter =
+            EventFilter::new().events(events.clone()).event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
         let expected_1 = "EventFilter(events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
@@ -335,7 +333,7 @@ mod tests {
         let filter = EventFilter::new()
             .contract_addresses(addresses)
             .events(events.clone())
-            .with_event_signatures(event_signatures.clone());
+            .event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
         let expected_1 = "EventFilter(contracts: [0x000000000000000000000000000000000000dEaD, 0x0000000000000000000000000000000000000001], events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
@@ -376,7 +374,7 @@ mod tests {
     #[test]
     fn display_with_empty_event_signatures_vector_noop() {
         // Providing an empty events vector should behave as if no events were set.
-        let filter = EventFilter::new().with_event_signatures(Vec::<Topic>::new());
+        let filter = EventFilter::new().event_signatures(Vec::<Topic>::new());
         let got = format!("{filter}");
         let expected = "EventFilter()";
         assert_eq!(got, expected);
