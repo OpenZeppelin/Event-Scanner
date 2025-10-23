@@ -38,7 +38,7 @@ pub struct LatestEventScanner<N: Network> {
 
 impl LatestScannerBuilder {
     #[must_use]
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             block_range_scanner: BlockRangeScanner::new(),
             count: 1,

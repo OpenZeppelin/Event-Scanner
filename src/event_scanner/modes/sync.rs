@@ -36,7 +36,7 @@ pub struct SyncEventScanner<N: Network> {
 
 impl SyncScannerBuilder {
     #[must_use]
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             block_range_scanner: BlockRangeScanner::new(),
             from_block: BlockNumberOrTag::Earliest,

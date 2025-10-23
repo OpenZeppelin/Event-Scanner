@@ -34,7 +34,7 @@ pub struct LiveEventScanner<N: Network> {
 
 impl LiveScannerBuilder {
     #[must_use]
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             block_range_scanner: BlockRangeScanner::new(),
             block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
