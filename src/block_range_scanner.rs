@@ -360,8 +360,7 @@ impl<N: Network> Service<N> {
         let (start_block, end_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height)
-        )
-        .map_err(ScannerError::from)?;
+        )?;
 
         let start_block_num =
             start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
@@ -398,8 +397,7 @@ impl<N: Network> Service<N> {
         let (start_block, latest_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(BlockNumberOrTag::Latest)
-        )
-        .map_err(ScannerError::from)?;
+        )?;
 
         let start_block_num =
             start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
