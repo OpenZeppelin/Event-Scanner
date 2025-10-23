@@ -1,26 +1,9 @@
-use std::sync::Arc;
-
 use alloy::{
     rpc::types::Log,
     transports::{RpcError, TransportErrorKind},
 };
-use thiserror::Error;
 
-use crate::{block_range_scanner::BlockRangeScannerError, event_scanner::message::Message};
-
-#[derive(Error, Debug, Clone)]
-pub enum EventScannerError {
-    #[error("Block range scanner error: {0}")]
-    BlockRangeScanner(#[from] BlockRangeScannerError),
-    #[error("Provider error: {0}")]
-    Provider(Arc<RpcError<TransportErrorKind>>),
-}
-
-impl From<RpcError<TransportErrorKind>> for EventScannerError {
-    fn from(e: RpcError<TransportErrorKind>) -> Self {
-        EventScannerError::Provider(Arc::new(e))
-    }
-}
+use crate::{Message, ScannerError};
 
 impl From<RpcError<TransportErrorKind>> for Message {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
@@ -28,9 +11,9 @@ impl From<RpcError<TransportErrorKind>> for Message {
     }
 }
 
-impl From<BlockRangeScannerError> for Message {
-    fn from(e: BlockRangeScannerError) -> Self {
-        Message::Error(e.into())
+impl From<ScannerError> for Message {
+    fn from(error: ScannerError) -> Self {
+        Message::Error(error)
     }
 }
 

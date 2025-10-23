@@ -1,8 +1,8 @@
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
-use crate::{EventScannerError, ScannerMessage};
+use crate::{ScannerError, ScannerMessage};
 
-pub type Message = ScannerMessage<Vec<Log>, EventScannerError>;
+pub type Message = ScannerMessage<Vec<Log>, ScannerError>;
 
 impl From<Vec<Log>> for Message {
     fn from(logs: Vec<Log>) -> Self {

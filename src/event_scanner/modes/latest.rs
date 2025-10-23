@@ -9,12 +9,12 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
+    ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES,
     },
     event_scanner::{
-        EventScannerError,
         filter::EventFilter,
         listener::EventListener,
         message::Message,
@@ -145,7 +145,7 @@ impl<N: Network> LatestEventScanner<N> {
     /// - Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
     ///
     /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
-    pub async fn start(self) -> Result<(), EventScannerError> {
+    pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.rewind(self.config.from_block, self.config.to_block).await?;
         handle_stream(

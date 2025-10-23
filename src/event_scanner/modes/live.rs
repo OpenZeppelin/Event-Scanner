@@ -8,12 +8,12 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
+    ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES,
     },
     event_scanner::{
-        EventScannerError,
         filter::EventFilter,
         listener::EventListener,
         message::Message,
@@ -115,7 +115,7 @@ impl<N: Network> LiveEventScanner<N> {
     /// # Errors
     ///
     /// - `EventScannerMessage::ServiceShutdown` if the service is already shutting down.
-    pub async fn start(self) -> Result<(), EventScannerError> {
+    pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_live(self.config.block_confirmations).await?;
         handle_stream(
