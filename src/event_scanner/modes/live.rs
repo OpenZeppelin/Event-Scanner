@@ -34,6 +34,7 @@ pub struct LiveEventScanner<N: Network> {
 }
 
 impl LiveScannerBuilder {
+    #[must_use]
     pub(super) fn new() -> Self {
         Self {
             block_range_scanner: BlockRangeScanner::new(),

@@ -34,6 +34,7 @@ pub struct HistoricEventScanner<N: Network> {
 }
 
 impl HistoricScannerBuilder {
+    #[must_use]
     pub(super) fn new() -> Self {
         Self {
             block_range_scanner: BlockRangeScanner::new(),
