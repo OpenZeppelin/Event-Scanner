@@ -82,6 +82,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
+    providers::RootProvider,
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
@@ -173,7 +174,7 @@ impl BlockRangeScanner {
         ws_url: Url,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let provider =
-            SafeProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
+            RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
         Ok(self.connect(provider))
     }
 
@@ -186,7 +187,7 @@ impl BlockRangeScanner {
         self,
         ipc_path: String,
     ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
-        let provider = SafeProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
+        let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
         Ok(self.connect(provider))
     }
 
@@ -196,8 +197,15 @@ impl BlockRangeScanner {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(self, provider: SafeProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
+        let safe_provider = SafeProvider::new(provider)
+            .max_timeout(self.max_timeout)
+            .max_retries(self.max_retries)
+            .retry_interval(self.retry_interval);
+        ConnectedBlockRangeScanner {
+            provider: safe_provider,
+            max_block_range: self.max_block_range,
+        }
     }
 }
 
