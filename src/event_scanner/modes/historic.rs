@@ -61,7 +61,7 @@ impl HistoricScannerBuilder {
 
     /// Connects to the provider via WebSocket.
     ///
-    /// Final builder method: consumes the builder and returns the actual `HistoricEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
     ///
     /// # Errors
     ///
@@ -76,7 +76,7 @@ impl HistoricScannerBuilder {
 
     /// Connects to the provider via IPC.
     ///
-    /// Final builder method: consumes the builder and returns the actual `HistoricEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
     ///
     /// # Errors
     ///
@@ -91,7 +91,7 @@ impl HistoricScannerBuilder {
 
     /// Connects to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the actual `HistoricEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
     ///
     /// # Errors
     ///

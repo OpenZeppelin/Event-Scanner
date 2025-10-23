@@ -55,7 +55,7 @@ impl LiveScannerBuilder {
 
     /// Connects to the provider via WebSocket.
     ///
-    /// Final builder method: consumes the builder and returns the actual `LiveEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`LiveEventScanner`].
     ///
     /// # Errors
     ///
@@ -67,7 +67,7 @@ impl LiveScannerBuilder {
 
     /// Connects to the provider via IPC.
     ///
-    /// Final builder method: consumes the builder and returns the actual `LiveEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`LiveEventScanner`].
     ///
     /// # Errors
     ///
@@ -82,7 +82,7 @@ impl LiveScannerBuilder {
 
     /// Connects to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the actual `LiveEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`LiveEventScanner`].
     ///
     /// # Errors
     ///

@@ -64,7 +64,7 @@ impl SyncScannerBuilder {
 
     /// Connects to the provider via WebSocket.
     ///
-    /// Final builder method: consumes the builder and returns the actual `SyncEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`SyncEventScanner`].
     ///
     /// # Errors
     ///
@@ -76,7 +76,7 @@ impl SyncScannerBuilder {
 
     /// Connects to the provider via IPC.
     ///
-    /// Final builder method: consumes the builder and returns the actual `SyncEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`SyncEventScanner`].
     ///
     /// # Errors
     ///
@@ -91,7 +91,7 @@ impl SyncScannerBuilder {
 
     /// Connects to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the actual `SyncEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`SyncEventScanner`].
     ///
     /// # Errors
     ///

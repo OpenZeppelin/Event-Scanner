@@ -80,7 +80,7 @@ impl LatestScannerBuilder {
 
     /// Connects to the provider via WebSocket.
     ///
-    /// Final builder method: consumes the builder and returns the actual `LatestEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`LatestEventScanner`].
     ///
     /// # Errors
     ///
@@ -95,7 +95,7 @@ impl LatestScannerBuilder {
 
     /// Connects to the provider via IPC.
     ///
-    /// Final builder method: consumes the builder and returns the actual `LatestEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`LatestEventScanner`].
     ///
     /// # Errors
     ///
@@ -110,7 +110,7 @@ impl LatestScannerBuilder {
 
     /// Connects to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the actual `LatestEventScanner`.
+    /// Final builder method: consumes the builder and returns the built [`LatestEventScanner`].
     ///
     /// # Errors
     ///
