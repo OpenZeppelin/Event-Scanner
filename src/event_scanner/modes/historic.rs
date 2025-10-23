@@ -21,9 +21,7 @@ use crate::{
 
 pub struct HistoricScannerBuilder {
     block_range_scanner: BlockRangeScanner,
-    // Defaults to Earliest
     from_block: BlockNumberOrTag,
-    // Defaults to Latest
     to_block: BlockNumberOrTag,
 }
 

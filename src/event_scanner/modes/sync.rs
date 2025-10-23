@@ -24,9 +24,7 @@ use crate::{
 
 pub struct SyncScannerBuilder {
     block_range_scanner: BlockRangeScanner,
-    // Defaults to Earliest
     from_block: BlockNumberOrTag,
-    // Defaults to DEFAULT_BLOCK_CONFIRMATIONS
     block_confirmations: u64,
 }
 

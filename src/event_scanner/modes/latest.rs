@@ -24,13 +24,9 @@ use crate::{
 
 pub struct LatestScannerBuilder {
     block_range_scanner: BlockRangeScanner,
-    // Defatuls to 1
     count: usize,
-    // Defaults to Latest
     from_block: BlockNumberOrTag,
-    // Defaults to Earliest
     to_block: BlockNumberOrTag,
-    // Defaults to 0
     block_confirmations: u64,
 }
 

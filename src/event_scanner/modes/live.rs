@@ -23,7 +23,6 @@ use crate::{
 
 pub struct LiveScannerBuilder {
     block_range_scanner: BlockRangeScanner,
-    // Defaults to DEFAULT_BLOCK_CONFIRMATIONS
     block_confirmations: u64,
 }
 
