@@ -1,7 +1,7 @@
 pub mod block_range_scanner;
 pub mod error;
 pub mod event_scanner;
-pub mod safe_provider;
+mod safe_provider;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 pub mod types;

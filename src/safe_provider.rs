@@ -100,7 +100,7 @@ impl<N: Network> SafeProvider<N> {
             .retry_with_total_timeout(|| async { provider.get_block_by_number(number).await })
             .await;
         if let Err(e) = &result {
-            error!("eth_getByBlockNumber failed: {}", e);
+            error!(error = %e, "eth_getByBlockNumber failed");
         }
         result
     }
@@ -116,7 +116,7 @@ impl<N: Network> SafeProvider<N> {
         let operation = || self.provider.get_block_number();
         let result = self.retry_with_total_timeout(operation).await;
         if let Err(e) = &result {
-            error!("eth_getBlockNumber failed: {}", e);
+            error!(error = %e, "eth_getBlockNumber failed");
         }
         result
     }
@@ -137,7 +137,7 @@ impl<N: Network> SafeProvider<N> {
             .retry_with_total_timeout(|| async { provider.get_block_by_hash(hash).await })
             .await;
         if let Err(e) = &result {
-            error!("eth_getBlockByHash failed: {}", e);
+            error!(error = %e, "eth_getBlockByHash failed");
         }
         result
     }
@@ -157,7 +157,7 @@ impl<N: Network> SafeProvider<N> {
         let result =
             self.retry_with_total_timeout(|| async { provider.get_logs(filter).await }).await;
         if let Err(e) = &result {
-            error!("eth_getLogs failed: {}", e);
+            error!(error = %e, "eth_getLogs failed");
         }
         result
     }
@@ -176,7 +176,7 @@ impl<N: Network> SafeProvider<N> {
         let result =
             self.retry_with_total_timeout(|| async { provider.subscribe_blocks().await }).await;
         if let Err(e) = &result {
-            error!("eth_subscribe failed: {}", e);
+            error!(error = %e, "eth_subscribe failed");
         }
         result
     }
