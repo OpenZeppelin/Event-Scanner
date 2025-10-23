@@ -38,7 +38,7 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
-use tracing::{debug, error};
+use tracing::{error, info};
 
 // RPC retry and timeout settings
 /// Default timeout used by `SafeProvider`
@@ -87,11 +87,6 @@ impl<N: Network> SafeProvider<N> {
         self
     }
 
-    #[must_use]
-    pub fn inner(&self) -> &RootProvider<N> {
-        &self.provider
-    }
-
     /// Fetch a block by number with retry and timeout.
     ///
     /// # Errors
@@ -101,13 +96,13 @@ impl<N: Network> SafeProvider<N> {
         &self,
         number: BlockNumberOrTag,
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
-        debug!("SafeProvider eth_getBlockByNumber called with number: {:?}", number);
+        info!("eth_getBlockByNumber called");
         let provider = self.provider.clone();
         let result = self
             .retry_with_total_timeout(|| async { provider.get_block_by_number(number).await })
             .await;
         if let Err(e) = &result {
-            error!("SafeProvider eth_getByBlockNumber failed: {}", e);
+            error!("eth_getByBlockNumber failed: {}", e);
         }
         result
     }
@@ -118,12 +113,12 @@ impl<N: Network> SafeProvider<N> {
     /// Returns `RpcError<TransportErrorKind>` if the RPC call fails
     /// after exhausting retries or times out.
     pub async fn get_block_number(&self) -> Result<u64, RpcError<TransportErrorKind>> {
-        debug!("SafeProvider eth_getBlockNumber called");
+        info!("eth_getBlockNumber called");
         let provider = self.provider.clone();
         let result =
             self.retry_with_total_timeout(|| async { provider.get_block_number().await }).await;
         if let Err(e) = &result {
-            error!("SafeProvider eth_getBlockNumber failed: {}", e);
+            error!("eth_getBlockNumber failed: {}", e);
         }
         result
     }
@@ -137,13 +132,13 @@ impl<N: Network> SafeProvider<N> {
         &self,
         hash: alloy::primitives::BlockHash,
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
-        debug!("SafeProvider eth_getBlockByHash called with hash: {:?}", hash);
+        info!("eth_getBlockByHash called");
         let provider = self.provider.clone();
         let result = self
             .retry_with_total_timeout(|| async { provider.get_block_by_hash(hash).await })
             .await;
         if let Err(e) = &result {
-            error!("SafeProvider eth_getBlockByHash failed: {}", e);
+            error!("eth_getBlockByHash failed: {}", e);
         }
         result
     }
@@ -157,12 +152,12 @@ impl<N: Network> SafeProvider<N> {
         &self,
         filter: &Filter,
     ) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
-        debug!("eth_getLogs called with filter: {:?}", filter);
+        info!("eth_getLogs called");
         let provider = self.provider.clone();
         let result =
             self.retry_with_total_timeout(|| async { provider.get_logs(filter).await }).await;
         if let Err(e) = &result {
-            error!("SafeProvider eth_getLogs failed: {}", e);
+            error!("eth_getLogs failed: {}", e);
         }
         result
     }
@@ -175,12 +170,12 @@ impl<N: Network> SafeProvider<N> {
     pub async fn subscribe_blocks(
         &self,
     ) -> Result<Subscription<N::HeaderResponse>, RpcError<TransportErrorKind>> {
-        debug!("eth_subscribe called");
+        info!("eth_subscribe called");
         let provider = self.provider.clone();
         let result =
             self.retry_with_total_timeout(|| async { provider.subscribe_blocks().await }).await;
         if let Err(e) = &result {
-            error!("SafeProvider eth_subscribe failed: {}", e);
+            error!("eth_subscribe failed: {}", e);
         }
         result
     }
