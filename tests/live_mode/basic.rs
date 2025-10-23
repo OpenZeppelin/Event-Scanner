@@ -8,7 +8,7 @@ use std::{
 
 use crate::common::{TestCounter, deploy_counter, setup_live_scanner};
 use alloy::sol_types::SolEvent;
-use event_scanner::{EventFilter, EventScannerMessage};
+use event_scanner::{EventFilter, Message};
 use tokio::time::timeout;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
@@ -33,7 +33,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         let mut expected_new_count = 1;
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {
@@ -43,10 +43,10 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
                         expected_new_count += 1;
                     }
                 }
-                EventScannerMessage::Error(e) => {
+                Message::Error(e) => {
                     panic!("panicked with error: {e}");
                 }
-                EventScannerMessage::Status(_) => {
+                Message::Status(_) => {
                     // Handle info if needed
                 }
             }
@@ -91,7 +91,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         b.increase().send().await?.watch().await?;
     }
 
-    let make_assertion = async |stream: ReceiverStream<EventScannerMessage>, expected_events| {
+    let make_assertion = async |stream: ReceiverStream<Message>, expected_events| {
         let mut stream = stream.take(expected_events);
 
         let count = Arc::new(AtomicUsize::new(0));
@@ -101,7 +101,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
             let mut expected_new_count = 1;
             while let Some(message) = stream.next().await {
                 match message {
-                    EventScannerMessage::Data(logs) => {
+                    Message::Data(logs) => {
                         count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                         for log in logs {
@@ -111,10 +111,10 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
                             expected_new_count += 1;
                         }
                     }
-                    EventScannerMessage::Error(e) => {
+                    Message::Error(e) => {
                         panic!("panicked with error: {e}");
                     }
-                    EventScannerMessage::Status(_) => {
+                    Message::Status(_) => {
                         // Handle info if needed
                     }
                 }
@@ -170,7 +170,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         let mut expected_new_count = 0;
 
         // process CountIncreased
-        while let Some(EventScannerMessage::Data(logs)) = incr_stream.next().await {
+        while let Some(Message::Data(logs)) = incr_stream.next().await {
             incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
             for log in logs {
@@ -183,7 +183,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         expected_new_count -= 1;
 
         // process CountDecreased
-        while let Some(EventScannerMessage::Data(logs)) = decr_stream.next().await {
+        while let Some(Message::Data(logs)) = decr_stream.next().await {
             decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
             for log in logs {

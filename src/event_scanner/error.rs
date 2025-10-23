@@ -6,9 +6,7 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::{
-    block_range_scanner::BlockRangeScannerError, event_scanner::message::EventScannerMessage,
-};
+use crate::{block_range_scanner::BlockRangeScannerError, event_scanner::message::Message};
 
 #[derive(Error, Debug, Clone)]
 pub enum EventScannerError {
@@ -24,23 +22,23 @@ impl From<RpcError<TransportErrorKind>> for EventScannerError {
     }
 }
 
-impl From<RpcError<TransportErrorKind>> for EventScannerMessage {
+impl From<RpcError<TransportErrorKind>> for Message {
     fn from(e: RpcError<TransportErrorKind>) -> Self {
-        EventScannerMessage::Error(e.into())
+        Message::Error(e.into())
     }
 }
 
-impl From<BlockRangeScannerError> for EventScannerMessage {
+impl From<BlockRangeScannerError> for Message {
     fn from(e: BlockRangeScannerError) -> Self {
-        EventScannerMessage::Error(e.into())
+        Message::Error(e.into())
     }
 }
 
-impl From<Result<Vec<Log>, RpcError<TransportErrorKind>>> for EventScannerMessage {
+impl From<Result<Vec<Log>, RpcError<TransportErrorKind>>> for Message {
     fn from(logs: Result<Vec<Log>, RpcError<TransportErrorKind>>) -> Self {
         match logs {
-            Ok(logs) => EventScannerMessage::Data(logs),
-            Err(e) => EventScannerMessage::Error(e.into()),
+            Ok(logs) => Message::Data(logs),
+            Err(e) => Message::Error(e.into()),
         }
     }
 }

@@ -16,7 +16,7 @@ use crate::{
         EventScannerError,
         filter::EventFilter,
         listener::EventListener,
-        message::EventScannerMessage,
+        message::Message,
         modes::common::{ConsumerMode, handle_stream},
     },
 };
@@ -96,8 +96,8 @@ impl LiveScannerBuilder {
 
 impl<N: Network> LiveEventScanner<N> {
     #[must_use]
-    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<EventScannerMessage> {
-        let (sender, receiver) = mpsc::channel::<EventScannerMessage>(MAX_BUFFERED_MESSAGES);
+    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
+        let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
         self.listeners.push(EventListener { filter, sender });
         ReceiverStream::new(receiver)
     }

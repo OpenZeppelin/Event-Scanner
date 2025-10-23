@@ -1,9 +1,8 @@
 use std::ops::RangeInclusive;
 
 use crate::{
-    block_range_scanner::{BlockRangeMessage, MAX_BUFFERED_MESSAGES},
-    event_scanner::{filter::EventFilter, listener::EventListener, message::EventScannerMessage},
-    types::ScannerMessage,
+    block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
+    event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
 };
 use alloy::{
     network::Network,
@@ -25,9 +24,7 @@ pub enum ConsumerMode {
 }
 
 pub async fn handle_stream<N: Network>(
-    mut stream: ReceiverStream<
-        ScannerMessage<RangeInclusive<u64>, crate::block_range_scanner::BlockRangeScannerError>,
-    >,
+    mut stream: ReceiverStream<BlockRangeMessage>,
     provider: &RootProvider<N>,
     listeners: &[EventListener],
     mode: ConsumerMode,
@@ -164,10 +161,7 @@ async fn get_logs<N: Network>(
     }
 }
 
-async fn try_send<T: Into<EventScannerMessage>>(
-    sender: &mpsc::Sender<EventScannerMessage>,
-    msg: T,
-) -> bool {
+async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
     if let Err(err) = sender.send(msg.into()).await {
         warn!(error = %err, "Downstream channel closed, stopping stream");
         return false;

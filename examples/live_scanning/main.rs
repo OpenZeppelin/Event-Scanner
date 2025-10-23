@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+use event_scanner::{EventFilter, EventScanner, Message};
 
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
@@ -72,15 +72,15 @@ async fn main() -> anyhow::Result<()> {
 
     while let Some(message) = stream.next().await {
         match message {
-            EventScannerMessage::Data(logs) => {
+            Message::Data(logs) => {
                 for log in logs {
                     info!("Callback successfully executed with event {:?}", log.inner.data);
                 }
             }
-            EventScannerMessage::Error(e) => {
+            Message::Error(e) => {
                 error!("Received error: {}", e);
             }
-            EventScannerMessage::Status(info) => {
+            Message::Status(info) => {
                 info!("Received info: {:?}", info);
             }
         }

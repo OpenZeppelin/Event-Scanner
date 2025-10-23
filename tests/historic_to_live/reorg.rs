@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::providers::ext::AnvilApi;
-use event_scanner::{EventScannerMessage, types::ScannerStatus};
+use event_scanner::{Message, types::ScannerStatus};
 use tokio::{sync::Mutex, time::timeout};
 use tokio_stream::StreamExt;
 
@@ -50,7 +50,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     let mut guard = observed_tx_hashes_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.transaction_hash {
@@ -58,8 +58,8 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => panic!("panic with error {e}"),
-                EventScannerMessage::Status(info) => {
+                Message::Error(e) => panic!("panic with error {e}"),
+                Message::Status(info) => {
                     if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }

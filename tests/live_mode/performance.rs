@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use event_scanner::EventScannerMessage;
+use event_scanner::Message;
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
@@ -33,7 +33,7 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
     let event_count_clone = Arc::clone(&event_count);
     let event_counting = async move {
         let mut expected_new_count = 1;
-        while let Some(EventScannerMessage::Data(logs)) = stream.next().await {
+        while let Some(Message::Data(logs)) = stream.next().await {
             event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
             for log in logs {

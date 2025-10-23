@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+use event_scanner::{EventFilter, EventScanner, Message};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
 
     while let Some(message) = stream.next().await {
         match message {
-            EventScannerMessage::Data(logs) => {
+            Message::Data(logs) => {
                 for log in logs {
                     let Counter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
                     if newCount <= 3 {
@@ -90,10 +90,10 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            EventScannerMessage::Error(e) => {
+            Message::Error(e) => {
                 error!("Received error: {}", e);
             }
-            EventScannerMessage::Status(info) => {
+            Message::Status(info) => {
                 info!("Received status: {:?}", info);
             }
         }

@@ -1,6 +1,6 @@
 use alloy::sol_types::SolEvent;
 
-use crate::EventScannerMessage;
+use crate::Message;
 
 #[derive(Debug)]
 pub struct LogMetadata<E: SolEvent> {
@@ -9,27 +9,27 @@ pub struct LogMetadata<E: SolEvent> {
     pub tx_hash: alloy::primitives::B256,
 }
 
-impl<E: SolEvent> PartialEq<Vec<LogMetadata<E>>> for EventScannerMessage {
+impl<E: SolEvent> PartialEq<Vec<LogMetadata<E>>> for Message {
     fn eq(&self, other: &Vec<LogMetadata<E>>) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<E: SolEvent> PartialEq<&Vec<LogMetadata<E>>> for EventScannerMessage {
+impl<E: SolEvent> PartialEq<&Vec<LogMetadata<E>>> for Message {
     fn eq(&self, other: &&Vec<LogMetadata<E>>) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<E: SolEvent, const N: usize> PartialEq<&[LogMetadata<E>; N]> for EventScannerMessage {
+impl<E: SolEvent, const N: usize> PartialEq<&[LogMetadata<E>; N]> for Message {
     fn eq(&self, other: &&[LogMetadata<E>; N]) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<E: SolEvent> PartialEq<&[LogMetadata<E>]> for EventScannerMessage {
+impl<E: SolEvent> PartialEq<&[LogMetadata<E>]> for Message {
     fn eq(&self, other: &&[LogMetadata<E>]) -> bool {
-        if let EventScannerMessage::Data(logs) = self {
+        if let Message::Data(logs) = self {
             let log_data = logs
                 .iter()
                 .map(|l| {

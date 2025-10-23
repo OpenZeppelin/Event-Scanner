@@ -13,8 +13,8 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
-    EventFilter, EventScanner, EventScannerMessage, HistoricEventScanner, LatestEventScanner,
-    LiveEventScanner, SyncEventScanner,
+    EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
+    SyncEventScanner,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -54,7 +54,7 @@ where
     pub provider: RootProvider,
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
     pub scanner: S,
-    pub stream: ReceiverStream<EventScannerMessage>,
+    pub stream: ReceiverStream<Message>,
     pub anvil: AnvilInstance,
 }
 
