@@ -331,9 +331,9 @@ impl BlockRangeScanner {
         provider: RootProvider<N>,
     ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let safe_provider = SafeProvider::new(provider)
-            .with_max_timeout(self.max_timeout)
-            .with_max_retries(self.max_retries)
-            .with_retry_interval(self.retry_interval);
+            .max_timeout(self.max_timeout)
+            .max_retries(self.max_retries)
+            .retry_interval(self.retry_interval);
 
         Ok(ConnectedBlockRangeScanner {
             provider: safe_provider,
@@ -1138,9 +1138,6 @@ mod tests {
     fn mocked_provider(asserter: Asserter) -> SafeProvider<Ethereum> {
         let root_provider = RootProvider::new(RpcClient::mocked(asserter));
         SafeProvider::new(root_provider)
-            .with_max_timeout(DEFAULT_MAX_TIMEOUT)
-            .with_max_retries(DEFAULT_MAX_RETRIES)
-            .with_retry_interval(DEFAULT_RETRY_INTERVAL)
     }
 
     #[test]

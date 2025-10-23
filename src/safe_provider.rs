@@ -70,19 +70,19 @@ impl<N: Network> SafeProvider<N> {
     }
 
     #[must_use]
-    pub fn with_max_timeout(mut self, timeout: Duration) -> Self {
+    pub fn max_timeout(mut self, timeout: Duration) -> Self {
         self.max_timeout = timeout;
         self
     }
 
     #[must_use]
-    pub fn with_max_retries(mut self, max_retries: usize) -> Self {
+    pub fn max_retries(mut self, max_retries: usize) -> Self {
         self.max_retries = max_retries;
         self
     }
 
     #[must_use]
-    pub fn with_retry_interval(mut self, retry_interval: Duration) -> Self {
+    pub fn retry_interval(mut self, retry_interval: Duration) -> Self {
         self.retry_interval = retry_interval;
         self
     }
