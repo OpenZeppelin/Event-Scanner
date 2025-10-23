@@ -1,31 +1,3 @@
-//! Safe provider wrapper with built-in retry and timeout mechanisms.
-//!
-//! This module provides a wrapper around Alloy providers that automatically
-//! handles retries, timeouts, and error logging for RPC calls.
-//!
-//! # Example
-//!
-//! ```rust,no_run
-//! use alloy::{
-//!     network::Ethereum,
-//!     providers::{RootProvider, WsConnect},
-//!     rpc::client::ClientBuilder,
-//! };
-//! use event_scanner::safe_provider::SafeProvider;
-//! use std::time::Duration;
-//!
-//! async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//!     let provider = RootProvider::<Ethereum>::new(
-//!         ClientBuilder::default().ws(WsConnect::new("wss://localhost:8000")).await?,
-//!     );
-//!     let safe_provider =
-//!         SafeProvider::new(provider).max_timeout(Duration::from_secs(30)).max_retries(5);
-//!
-//!     let block = safe_provider.get_block_by_number(12345.into()).await?;
-//!     Ok(())
-//! }
-//! ```
-
 use std::{future::Future, time::Duration};
 
 use alloy::{
@@ -39,15 +11,33 @@ use alloy::{
 use backon::{ExponentialBuilder, Retryable};
 use tracing::{error, info};
 
-// RPC retry and timeout settings
-/// Default timeout used by `SafeProvider`
-pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(30);
-/// Default maximum number of retry attempts.
-pub const DEFAULT_MAX_RETRIES: usize = 5;
-/// Default base delay between retries.
-pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-
-/// Provider wrapper adding retries and timeouts.
+/// Safe provider wrapper with built-in retry and timeout mechanisms.
+///
+/// This wrapper around Alloy providers automatically handles retries,
+/// timeouts, and error logging for RPC calls.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use alloy::{
+/// #     network::Ethereum,
+/// #     providers::{RootProvider, WsConnect},
+/// #     rpc::client::ClientBuilder,
+/// # };
+/// # use event_scanner::safe_provider::SafeProvider;
+/// # use std::time::Duration;
+///
+/// async fn create_safe_provider() -> Result<(), Box<dyn std::error::Error>> {
+///     let provider = RootProvider::<Ethereum>::new(
+///         ClientBuilder::default().ws(WsConnect::new("wss://localhost:8000")).await?,
+///     );
+///     let safe_provider =
+///         SafeProvider::new(provider).max_timeout(Duration::from_secs(30)).max_retries(5);
+///
+///     let block = safe_provider.get_block_by_number(12345.into()).await?;
+///     Ok(())
+/// }
+/// ```
 #[derive(Clone)]
 pub struct SafeProvider<N: Network> {
     provider: RootProvider<N>,
@@ -55,6 +45,14 @@ pub struct SafeProvider<N: Network> {
     max_retries: usize,
     retry_interval: Duration,
 }
+
+// RPC retry and timeout settings
+/// Default timeout used by `SafeProvider`
+pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default maximum number of retry attempts.
+pub const DEFAULT_MAX_RETRIES: usize = 5;
+/// Default base delay between retries.
+pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 impl<N: Network> SafeProvider<N> {
     /// Create a new `SafeProvider` with default settings.
