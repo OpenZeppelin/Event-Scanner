@@ -6,32 +6,22 @@ use std::{
     time::Duration,
 };
 
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, sol_types::SolEvent};
-use event_scanner::{
-    event_filter::EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
-};
+use crate::common::{TestCounter, deploy_counter, setup_live_scanner};
+use alloy::sol_types::SolEvent;
+use event_scanner::{EventFilter, Message};
 use tokio::time::timeout;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 #[tokio::test]
 async fn basic_single_event_scanning() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider.clone()).await?;
-    let contract_address = *contract.address();
-
-    let filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
-
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
     let expected_event_count = 5;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-    let mut stream = client.create_event_stream(filter).take(expected_event_count);
+    let scanner = setup.scanner;
+    let mut stream = setup.stream.take(expected_event_count);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
@@ -43,7 +33,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
         let mut expected_new_count = 1;
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                     for log in logs {
@@ -53,10 +43,10 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
                         expected_new_count += 1;
                     }
                 }
-                EventScannerMessage::Error(e) => {
+                Message::Error(e) => {
                     panic!("panicked with error: {e}");
                 }
-                EventScannerMessage::Status(_) => {
+                Message::Status(_) => {
                     // Handle info if needed
                 }
             }
@@ -72,26 +62,26 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let a = deploy_counter(provider.clone()).await?;
-    let b = deploy_counter(provider.clone()).await?;
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let provider = setup.provider.clone();
+    let a = setup.contract.clone();
+    let b = deploy_counter(Arc::new(provider.clone())).await?;
 
     let a_filter = EventFilter::new()
-        .with_contract_address(*a.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE.to_owned());
+        .contract_address(*a.address())
+        .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
     let b_filter = EventFilter::new()
-        .with_contract_address(*b.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE.to_owned());
+        .contract_address(*b.address())
+        .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
     let expected_events_a = 3;
     let expected_events_b = 2;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = setup.scanner;
 
-    let a_stream = client.create_event_stream(a_filter);
-    let b_stream = client.create_event_stream(b_filter);
+    let a_stream = scanner.subscribe(a_filter);
+    let b_stream = scanner.subscribe(b_filter);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..expected_events_a {
         a.increase().send().await?.watch().await?;
@@ -101,7 +91,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         b.increase().send().await?.watch().await?;
     }
 
-    let make_assertion = async |stream: ReceiverStream<EventScannerMessage>, expected_events| {
+    let make_assertion = async |stream: ReceiverStream<Message>, expected_events| {
         let mut stream = stream.take(expected_events);
 
         let count = Arc::new(AtomicUsize::new(0));
@@ -111,7 +101,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
             let mut expected_new_count = 1;
             while let Some(message) = stream.next().await {
                 match message {
-                    EventScannerMessage::Data(logs) => {
+                    Message::Data(logs) => {
                         count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
                         for log in logs {
@@ -121,10 +111,10 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
                             expected_new_count += 1;
                         }
                     }
-                    EventScannerMessage::Error(e) => {
+                    Message::Error(e) => {
                         panic!("panicked with error: {e}");
                     }
-                    EventScannerMessage::Status(_) => {
+                    Message::Status(_) => {
                         // Handle info if needed
                     }
                 }
@@ -143,27 +133,26 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
 
 #[tokio::test]
 async fn multiple_events_same_contract() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider).await?;
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
     let contract_address = *contract.address();
 
     let increase_filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountIncreased::SIGNATURE.to_owned());
+        .contract_address(contract_address)
+        .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
     let decrease_filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountDecreased::SIGNATURE.to_owned());
+        .contract_address(contract_address)
+        .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
 
     let expected_incr_events = 6;
     let expected_decr_events = 2;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = setup.scanner;
 
-    let mut incr_stream = client.create_event_stream(increase_filter).take(expected_incr_events);
-    let mut decr_stream = client.create_event_stream(decrease_filter).take(expected_decr_events);
+    let mut incr_stream = scanner.subscribe(increase_filter).take(expected_incr_events);
+    let mut decr_stream = scanner.subscribe(decrease_filter).take(expected_decr_events);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..expected_incr_events {
         contract.increase().send().await?.watch().await?;
@@ -181,7 +170,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         let mut expected_new_count = 0;
 
         // process CountIncreased
-        while let Some(EventScannerMessage::Data(logs)) = incr_stream.next().await {
+        while let Some(Message::Data(logs)) = incr_stream.next().await {
             incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
             for log in logs {
@@ -194,7 +183,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         expected_new_count -= 1;
 
         // process CountDecreased
-        while let Some(EventScannerMessage::Data(logs)) = decr_stream.next().await {
+        while let Some(Message::Data(logs)) = decr_stream.next().await {
             decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
 
             for log in logs {
@@ -215,22 +204,21 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider).await?;
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
 
     // Subscribe to CountDecreased but only emit CountIncreased
     let filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountDecreased::SIGNATURE.to_owned());
+        .contract_address(*contract.address())
+        .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
 
     let num_of_events = 3;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = setup.scanner;
 
-    let mut stream = client.create_event_stream(filter).take(num_of_events);
+    let mut stream = scanner.subscribe(filter).take(num_of_events);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
@@ -249,21 +237,19 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider).await?;
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let contract = setup.contract.clone();
 
-    let filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event("invalid-sig".to_string());
+    let filter =
+        EventFilter::new().contract_address(*contract.address()).event("invalid-sig".to_string());
 
     let num_of_events = 3;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = setup.scanner;
 
-    let mut stream = client.create_event_stream(filter).take(num_of_events);
+    let mut stream = scanner.subscribe(filter).take(num_of_events);
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
