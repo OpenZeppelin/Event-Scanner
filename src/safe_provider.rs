@@ -292,7 +292,8 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("permanent error"),);
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
@@ -308,6 +309,7 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("total operation timeout exceeded"),);
     }
 }
