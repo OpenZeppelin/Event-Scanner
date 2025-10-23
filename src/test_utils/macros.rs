@@ -13,3 +13,12 @@ macro_rules! assert_next {
         }
     };
 }
+
+#[macro_export]
+macro_rules! assert_empty {
+    ($stream: expr) => {{
+        let inner = $stream.into_inner();
+        assert!(inner.is_empty(), "Stream should have no pending messages");
+        tokio_stream::wrappers::ReceiverStream::new(inner)
+    }};
+}

@@ -1155,8 +1155,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_mode_processes_all_blocks() -> anyhow::Result<()> {
-        let anvil = Anvil::new().block_time_f64(0.01).try_spawn()?;
+    async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
         let client = BlockRangeScanner::new()
             .with_block_confirmations(1)
@@ -1164,22 +1165,21 @@ mod tests {
             .await?
             .run()?;
 
-        let expected_blocks = 10;
+        let mut stream = client.stream_live().await?;
 
-        let mut receiver = client.stream_live().await?.take(expected_blocks);
+        provider.anvil_mine(Some(5), None).await?;
 
-        let mut block_range_start = 0;
+        assert_next!(stream, 0..=0);
+        assert_next!(stream, 1..=1);
+        assert_next!(stream, 2..=2);
+        assert_next!(stream, 3..=3);
+        assert_next!(stream, 4..=4);
+        let mut stream = assert_empty!(stream);
 
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            info!("Received block range: [{range:?}]");
-            if block_range_start == 0 {
-                block_range_start = *range.start();
-            }
+        provider.anvil_mine(Some(1), None).await?;
 
-            assert_eq!(block_range_start, *range.start());
-            assert!(range.end() >= range.start());
-            block_range_start = *range.end() + 1;
-        }
+        assert_next!(stream, 5..=5);
+        assert_empty!(stream);
 
         Ok(())
     }
@@ -1189,7 +1189,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         let block_confirmations = 5;
 
@@ -1201,7 +1201,7 @@ mod tests {
 
         let mut stream = client.stream_from(BlockNumberOrTag::Latest).await?;
 
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         assert_next!(stream, 20..=20);
         assert_next!(stream, 21..=21);
@@ -1215,7 +1215,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         let block_confirmations = 5;
 
@@ -1230,7 +1230,7 @@ mod tests {
         let mut receiver = client.stream_live().await?.take(expected_blocks);
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         let latest_head = provider.get_block_number().await?;
-        provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
+        provider.anvil_mine(Some(expected_blocks as u64), None).await?;
 
         let mut expected_range_start = latest_head.saturating_sub(block_confirmations) + 1;
 
@@ -1266,7 +1266,7 @@ mod tests {
 
         let mut receiver = client.stream_live().await?;
 
-        provider.anvil_mine(Option::Some(6), Option::None).await?;
+        provider.anvil_mine(Some(6), None).await?;
 
         let next = receiver.next().await;
         if let Some(BlockRangeMessage::Data(range)) = next {
@@ -1309,13 +1309,13 @@ mod tests {
 
         let mut receiver = client.stream_live().await?;
 
-        provider.anvil_mine(Option::Some(10), Option::None).await?;
+        provider.anvil_mine(Some(10), None).await?;
 
         provider
             .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
             .await?;
 
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         let mut block_range_start = 0;
 
@@ -1354,13 +1354,13 @@ mod tests {
 
         let mut receiver = client.stream_live().await?;
 
-        provider.anvil_mine(Option::Some(10), Option::None).await?;
+        provider.anvil_mine(Some(10), None).await?;
 
         provider
             .anvil_reorg(ReorgOptions { depth: block_confirmations + 5, tx_block_pairs: vec![] })
             .await?;
 
-        provider.anvil_mine(Option::Some(30), Option::None).await?;
+        provider.anvil_mine(Some(30), None).await?;
         receiver.close();
 
         let mut block_range_start = 0;
@@ -1410,7 +1410,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(120), Option::None).await?;
+        provider.anvil_mine(Some(120), None).await?;
 
         let end_num = 110;
 
@@ -1426,7 +1426,7 @@ mod tests {
 
         let depth = 15;
         _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
-        _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+        _ = provider.anvil_mine(Some(20), None).await;
 
         assert_next!(stream, 0..=29);
         assert_next!(stream, 30..=59);
@@ -1445,7 +1445,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(120), Option::None).await?;
+        provider.anvil_mine(Some(120), None).await?;
 
         let end_num = 120;
 
@@ -1460,10 +1460,10 @@ mod tests {
             .await?;
 
         let pre_reorg_mine = 20;
-        _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
+        _ = provider.anvil_mine(Some(pre_reorg_mine), None).await;
         let depth = pre_reorg_mine + 1;
         _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
-        _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+        _ = provider.anvil_mine(Some(20), None).await;
 
         assert_next!(stream, 0..=29);
         assert_next!(stream, 30..=59);
@@ -1482,7 +1482,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(100), Option::None).await?;
+        provider.anvil_mine(Some(100), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(5)
@@ -1537,7 +1537,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Option::Some(11), Option::None).await?;
+        provider.anvil_mine(Some(11), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(5)
@@ -1712,7 +1712,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(150), Option::None).await?;
+        provider.anvil_mine(Some(150), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(100)
@@ -1736,7 +1736,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(5)
@@ -1761,7 +1761,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(4)
@@ -1786,7 +1786,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(5)
@@ -1808,7 +1808,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(1)
@@ -1834,7 +1834,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(7)
@@ -1860,7 +1860,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         // Ensure blocks at 3 and 15 exist
-        provider.anvil_mine(Option::Some(16), Option::None).await?;
+        provider.anvil_mine(Some(16), None).await?;
 
         let client = BlockRangeScanner::new()
             .with_blocks_read_per_epoch(5)
