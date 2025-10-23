@@ -9,7 +9,6 @@ pub use error::ScannerError;
 pub use types::{ScannerMessage, ScannerStatus};
 
 pub use event_scanner::{
-    EventFilter, EventScanner, HistoricEventScanner, HistoricScannerBuilder, LatestEventScanner,
-    LatestScannerBuilder, LiveEventScanner, LiveScannerBuilder, Message, SyncEventScanner,
-    SyncScannerBuilder,
+    EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
+    SyncEventScanner,
 };

@@ -8,7 +8,5 @@ pub mod modes;
 pub use filter::EventFilter;
 pub use message::Message;
 pub use modes::{
-    EventScanner, HistoricEventScanner, HistoricScannerBuilder, LatestEventScanner,
-    LatestScannerBuilder, LiveEventScanner, LiveScannerBuilder, SyncEventScanner,
-    SyncScannerBuilder,
+    EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, SyncEventScanner,
 };
