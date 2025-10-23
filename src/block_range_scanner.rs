@@ -315,12 +315,12 @@ impl<N: Network> Service<N> {
             }
             Command::Unsubscribe { response } => {
                 self.handle_unsubscribe();
-                let _ = response.send(Ok::<(), ScannerError>(()));
+                let _ = response.send(Ok(()));
             }
             Command::Shutdown { response } => {
                 self.shutdown = true;
                 self.handle_unsubscribe();
-                let _ = response.send(Ok::<(), ScannerError>(()));
+                let _ = response.send(Ok(()));
             }
         }
         Ok(())
