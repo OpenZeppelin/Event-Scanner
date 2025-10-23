@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_scanner_builder_pattern_random_order_chaining() {
+    fn test_sync_scanner_builder_pattern() {
         let config = SyncScannerBuilder::new()
             .max_block_range(25)
             .block_confirmations(5)

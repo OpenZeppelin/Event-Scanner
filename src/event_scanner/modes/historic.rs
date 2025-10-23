@@ -147,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn test_historic_scanner_builder_pattern_random_order_chaining() {
+    fn test_historic_scanner_builder_pattern() {
         let config =
             HistoricScannerBuilder::new().to_block(200).max_block_range(50).from_block(100);
 

@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn test_live_scanner_builder_pattern_random_order_chaining() {
+    fn test_live_scanner_builder_pattern() {
         let config = LiveScannerBuilder::new().max_block_range(25).block_confirmations(5);
 
         assert_eq!(config.block_range_scanner.max_block_range, 25);
