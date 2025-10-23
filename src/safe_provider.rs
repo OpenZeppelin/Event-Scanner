@@ -116,9 +116,8 @@ impl<N: Network> SafeProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn get_block_number(&self) -> Result<u64, RpcError<TransportErrorKind>> {
         info!("eth_getBlockNumber called");
-        let provider = self.provider.clone();
-        let result =
-            self.retry_with_total_timeout(|| async { provider.get_block_number().await }).await;
+        let operation = || self.provider.get_block_number();
+        let result = self.retry_with_total_timeout(operation).await;
         if let Err(e) = &result {
             error!("eth_getBlockNumber failed: {}", e);
         }
