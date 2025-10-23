@@ -50,7 +50,7 @@ pub fn spawn_log_consumers<N: Network>(
     range_tx: &Sender<BlockRangeMessage>,
     mode: ConsumerMode,
 ) {
-    for listener in listeners.iter().cloned() {
+    for listener in listeners {
         let provider = provider.clone();
         let filter = listener.filter.clone();
         let base_filter = Filter::from(&filter);
