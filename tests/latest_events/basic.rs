@@ -38,7 +38,7 @@ macro_rules! decrease {
 }
 
 #[tokio::test]
-async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
+async fn latest_scanner_exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
@@ -68,7 +68,7 @@ async fn scan_latest_exact_count_returns_last_events_in_order() -> anyhow::Resul
 }
 
 #[tokio::test]
-async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<()> {
+async fn latest_scanner_fewer_available_than_count_returns_all() -> anyhow::Result<()> {
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
@@ -90,7 +90,7 @@ async fn scan_latest_fewer_available_than_count_returns_all() -> anyhow::Result<
 }
 
 #[tokio::test]
-async fn scan_latest_no_events_returns_empty() -> anyhow::Result<()> {
+async fn latest_scanner_no_events_returns_empty() -> anyhow::Result<()> {
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let scanner = setup.scanner;
@@ -107,7 +107,7 @@ async fn scan_latest_no_events_returns_empty() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
+async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
     // Mine 6 events, one per tx (auto-mined), then manually mint 2 empty blocks to widen range
     _ = increase!(contract);
@@ -144,7 +144,8 @@ async fn scan_latest_respects_range_subset() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> anyhow::Result<()> {
+async fn latest_scanner_multiple_listeners_to_same_event_receive_same_results() -> anyhow::Result<()>
+{
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
@@ -181,7 +182,7 @@ async fn scan_latest_multiple_listeners_to_same_event_receive_same_results() -> 
 }
 
 #[tokio::test]
-async fn scan_latest_different_filters_receive_different_results() -> anyhow::Result<()> {
+async fn latest_scanner_different_filters_receive_different_results() -> anyhow::Result<()> {
     let count = 3;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
@@ -228,7 +229,7 @@ async fn scan_latest_different_filters_receive_different_results() -> anyhow::Re
 }
 
 #[tokio::test]
-async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()> {
+async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()> {
     let count = 2;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
@@ -271,7 +272,7 @@ async fn scan_latest_mixed_events_and_filters_return_correct_streams() -> anyhow
 }
 
 #[tokio::test]
-async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
+async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
     // Manual setup to deploy two contracts
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
@@ -305,7 +306,7 @@ async fn scan_latest_cross_contract_filtering() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
+async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     // Manual setup to mine empty blocks
     let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
@@ -340,7 +341,7 @@ async fn scan_latest_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn scan_latest_boundary_range_single_block() -> anyhow::Result<()> {
+async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     _ = increase!(contract);

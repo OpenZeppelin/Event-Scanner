@@ -11,7 +11,6 @@
 Event Scanner is a Rust library for streaming EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters; the scanner takes care of fetching historical ranges, bridging into live streaming mode, all whilst delivering the events as streams of data.
 
 ---
- 
 
 ## Table of Contents
 
@@ -76,8 +75,8 @@ async fn run_scanner(
         .connect_ws::<Ethereum>(ws_url).await?;
 
     let filter = EventFilter::new()
-        .with_contract_address(contract)
-        .with_event(MyContract::SomeEvent::SIGNATURE);
+        .contract_address(contract)
+        .event(MyContract::SomeEvent::SIGNATURE);
 
     let mut stream = scanner.subscribe(filter);
 
@@ -118,6 +117,7 @@ let scanner = EventScanner::sync()
 
 // Latest mode (recent blocks only)
 let scanner = EventScanner::latest()
+    .count(100)
     .block_read_limit(500)
     .connect_ws::<Ethereum>(ws_url).await?;
 ```
@@ -142,23 +142,23 @@ Create an `EventFilter` for each event stream you wish to process. The filter sp
 ```rust
 // Track a SPECIFIC event from a SPECIFIC contract
 let specific_filter = EventFilter::new()
-    .with_contract_address(*counter_contract.address())
-    .with_event(Counter::CountIncreased::SIGNATURE);
+    .contract_address(*counter_contract.address())
+    .event(Counter::CountIncreased::SIGNATURE);
 
 // Track a multiple events from a SPECIFIC contract
 let specific_filter = EventFilter::new()
-    .with_contract_address(*counter_contract.address())
-    .with_event(Counter::CountIncreased::SIGNATURE)
-    .with_event(Counter::CountDecreased::SIGNATURE);
+    .contract_address(*counter_contract.address())
+    .event(Counter::CountIncreased::SIGNATURE)
+    .event(Counter::CountDecreased::SIGNATURE);
 
 // Track a SPECIFIC event from a ALL contracts
 let specific_filter = EventFilter::new()
-    .with_event(Counter::CountIncreased::SIGNATURE);
+    .event(Counter::CountIncreased::SIGNATURE);
 
 // Track ALL events from a SPECIFIC contracts
 let all_contract_events_filter = EventFilter::new()
-    .with_contract_address(*counter_contract.address())
-    .with_contract_address(*other_counter_contract.address());
+    .contract_address(*counter_contract.address())
+    .contract_address(*other_counter_contract.address());
 
 // Track ALL events from ALL contracts in the block range
 let all_events_filter = EventFilter::new();
@@ -185,7 +185,7 @@ See integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests
 
 ### Scanning Latest Events
 
-`scan_latest` collects the most recent matching events for each registered stream.
+Scanner mode that collects a specified number of the most recent matching events for each registered stream.
 
 - It does not enter live mode; it scans a block range and then returns.
 - Each registered stream receives at most `count` logs in a single message, chronologically ordered.
@@ -193,24 +193,23 @@ See integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests
 Basic usage:
 
 ```rust
-use alloy::{eips::BlockNumberOrTag, network::Ethereum};
-use event_scanner::{EventFilter, event_scanner::{EventScanner, EventScannerMessage}};
+use alloy::{network::Ethereum, primitives::Address, transports::http::reqwest::Url};
+use event_scanner::{EventFilter, EventScanner, Message};
 use tokio_stream::StreamExt;
 
-async fn latest_example(ws_url: alloy::transports::http::reqwest::Url, addr: alloy::primitives::Address) -> eyre::Result<()> {
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
+async fn latest_events(ws_url: Url, addr: Address) -> anyhow::Result<()> {
+    let mut scanner = EventScanner::latest().count(10).connect_ws::<Ethereum>(ws_url).await?;
 
-    let filter = EventFilter::new().with_contract_address(addr);
-    let mut stream = client.subscribe(filter);
+    let filter = EventFilter::new().contract_address(addr);
+
+    let mut stream = scanner.subscribe(filter);
 
     // Collect the latest 10 events across Earliest..=Latest
-    client.scan_latest(10).await?;
+    scanner.start().await?;
 
     // Expect a single message with up to 10 logs, then the stream ends
-    while let Some(msg) = stream.next().await {
-        if let EventScannerMessage::Data(logs) = msg {
-            println!("Latest logs: {}", logs.len());
-        }
+    while let Some(Message::Data(logs)) = stream.next().await {
+        println!("Latest logs: {}", logs.len());
     }
 
     Ok(())
@@ -221,8 +220,11 @@ Restricting to a specific block range:
 
 ```rust
 // Collect the latest 5 events between blocks [1_000_000, 1_100_000]
-client
-    .scan_latest_in_range(5, BlockNumberOrTag::Number(1_000_000), BlockNumberOrTag::Number(1_100_000))
+let mut scanner = EventScanner::latest()
+    .count(5)
+    .from_block(1_000_000)
+    .to_block(1_100_000)
+    .connect_ws::<Ethereum>(ws_url).await?;
     .await?;
 ```
 
@@ -230,21 +232,21 @@ The scanner periodically checks the tip to detect reorgs. On reorg, the scanner 
 
 Notes:
 
-- Ensure you create streams via `subscribe()` before calling `scan_latest*` so listeners are registered.
+- Ensure you create streams via `subscribe()` before calling `start` so listeners are registered.
 <!-- TODO: uncomment once implemented - The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`. -->
 
 ---
 
 ## Examples
 
-- `examples/simple_counter` – minimal live-mode scanner using `EventScanner::live()`
+- `examples/live_scanning` – minimal live-mode scanner using `EventScanner::live()`
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScanner::historic()`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScanner::latest()`
 
 Run an example with:
 
 ```bash
-RUST_LOG=info cargo run -p simple_counter
+RUST_LOG=info cargo run -p live_scanning    
 # or
 RUST_LOG=info cargo run -p historical_scanning
 ```
