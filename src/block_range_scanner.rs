@@ -486,13 +486,15 @@ impl<N: Network> Service<N> {
             self.subscriber.take().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
         let blocks_read_per_epoch = self.config.blocks_read_per_epoch as u64;
 
-        Self::stream_historical_blocks(
-            start_block_num,
-            end_block_num,
-            blocks_read_per_epoch,
-            &sender,
-        )
-        .await?;
+        tokio::spawn(async move {
+            Self::stream_historical_blocks(
+                start_block_num,
+                end_block_num,
+                blocks_read_per_epoch,
+                &sender,
+            )
+            .await
+        });
 
         Ok(())
     }
@@ -504,7 +506,9 @@ impl<N: Network> Service<N> {
         let sender =
             self.subscriber.clone().ok_or_else(|| BlockRangeScannerError::ServiceShutdown)?;
 
+        let blocks_read_per_epoch = self.config.blocks_read_per_epoch as u64;
         let block_confirmations = self.config.block_confirmations;
+
         // Step 1:
         // Fetches the starting block and end block for historical sync in parallel
         let (start_block, latest_block) = tokio::try_join!(
@@ -561,7 +565,7 @@ impl<N: Network> Service<N> {
         let cutoff = confirmed_tip_num;
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
-        let live_subscription_task = tokio::spawn(async move {
+        tokio::spawn(async move {
             Self::stream_live_blocks(
                 cutoff + 1,
                 provider,
@@ -571,36 +575,35 @@ impl<N: Network> Service<N> {
             .await;
         });
 
-        // Step 4: Perform historical synchronization
-        // This processes blocks from start_block to end_block (cutoff)
-        // If this fails, we need to abort the live streaming task
-        if let Err(e) = Self::stream_historical_blocks(
-            start_block_num,
-            confirmed_tip_num,
-            self.config.blocks_read_per_epoch as u64,
-            &sender,
-        )
-        .await
-        {
-            warn!("aborting live_subscription_task");
-            live_subscription_task.abort();
-            return Err(BlockRangeScannerError::HistoricalSyncError(e.to_string()));
-        }
-
-        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
-
-        // Step 5:
-        // Spawn the buffer processor task
-        // This will:
-        // 1. Process all buffered blocks, filtering out any ≤ cutoff
-        // 2. Forward blocks > cutoff to the user
-        // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
-        //    stream)
         tokio::spawn(async move {
+            // Step 4: Perform historical synchronization
+            // This processes blocks from start_block to end_block (cutoff)
+            // If this fails, we need to abort the live streaming task
+            Self::stream_historical_blocks(
+                start_block_num,
+                confirmed_tip_num,
+                blocks_read_per_epoch,
+                &sender,
+            )
+            .await;
+
+            info!("Chain tip reached, switching to live");
+            if !Self::try_send(&sender, ScannerStatus::ChainTipReached).await {
+                return;
+            }
+
+            // Step 5:
+            // Spawn the buffer processor task
+            // This will:
+            // 1. Process all buffered blocks, filtering out any ≤ cutoff
+            // 2. Forward blocks > cutoff to the user
+            // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
+            //    stream)
             Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
         });
 
         info!("Successfully transitioned from historical to live data");
+
         Ok(())
     }
 
@@ -709,7 +712,7 @@ impl<N: Network> Service<N> {
         end: BlockNumber,
         blocks_read_per_epoch: u64,
         sender: &mpsc::Sender<BlockRangeMessage>,
-    ) -> Result<(), BlockRangeScannerError> {
+    ) {
         let mut batch_count = 0;
 
         let mut next_start_block = start;
@@ -720,12 +723,7 @@ impl<N: Network> Service<N> {
             let batch_end_block_number =
                 next_start_block.saturating_add(blocks_read_per_epoch - 1).min(end);
 
-            if !Self::try_send(
-                sender,
-                BlockRangeMessage::Data(next_start_block..=batch_end_block_number),
-            )
-            .await
-            {
+            if !Self::try_send(sender, next_start_block..=batch_end_block_number).await {
                 break;
             }
 
@@ -745,8 +743,6 @@ impl<N: Network> Service<N> {
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
-
-        Ok(())
     }
 
     async fn stream_live_blocks<P: Provider<N>>(
