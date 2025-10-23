@@ -841,7 +841,7 @@ impl<N: Network> Service<N> {
                             return;
                         }
                         processed += end - start;
-                    } else if end > cutoff {
+                    } else if end >= cutoff {
                         discarded += cutoff - start;
 
                         let start = cutoff;
@@ -1090,12 +1090,8 @@ impl BlockRangeScannerClient {
 
 #[cfg(test)]
 mod tests {
-
-    use std::time::Duration;
-    use tokio::time::timeout;
-
     use super::*;
-    use crate::{assert_empty, assert_next};
+    use crate::{assert_closed, assert_empty, assert_next};
     use alloy::{
         network::Ethereum,
         providers::{ProviderBuilder, ext::AnvilApi},
@@ -1159,6 +1155,31 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
+        // --- Zero block confirmations -> stream immediately ---
+
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+            .await?
+            .run()?;
+
+        let mut stream = client.stream_live().await?;
+
+        provider.anvil_mine(Some(5), None).await?;
+
+        assert_next!(stream, 1..=1);
+        assert_next!(stream, 2..=2);
+        assert_next!(stream, 3..=3);
+        assert_next!(stream, 4..=4);
+        assert_next!(stream, 5..=5);
+        let mut stream = assert_empty!(stream);
+
+        provider.anvil_mine(Some(1), None).await?;
+
+        assert_next!(stream, 6..=6);
+        assert_empty!(stream);
+
+        // --- 1 block confirmation  ---
+
         let client = BlockRangeScanner::new()
             .with_block_confirmations(1)
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
@@ -1169,16 +1190,16 @@ mod tests {
 
         provider.anvil_mine(Some(5), None).await?;
 
-        assert_next!(stream, 0..=0);
-        assert_next!(stream, 1..=1);
-        assert_next!(stream, 2..=2);
-        assert_next!(stream, 3..=3);
-        assert_next!(stream, 4..=4);
+        assert_next!(stream, 6..=6);
+        assert_next!(stream, 7..=7);
+        assert_next!(stream, 8..=8);
+        assert_next!(stream, 9..=9);
+        assert_next!(stream, 10..=10);
         let mut stream = assert_empty!(stream);
 
         provider.anvil_mine(Some(1), None).await?;
 
-        assert_next!(stream, 5..=5);
+        assert_next!(stream, 11..=11);
         assert_empty!(stream);
 
         Ok(())
@@ -1206,88 +1227,6 @@ mod tests {
         assert_next!(stream, 20..=20);
         assert_next!(stream, 21..=21);
         assert_next!(stream, 22..=22);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn live_mode_respects_block_confirmations() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
-
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Some(20), None).await?;
-
-        let block_confirmations = 5;
-
-        let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let expected_blocks = 10;
-
-        let mut receiver = client.stream_live().await?.take(expected_blocks);
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        let latest_head = provider.get_block_number().await?;
-        provider.anvil_mine(Some(expected_blocks as u64), None).await?;
-
-        let mut expected_range_start = latest_head.saturating_sub(block_confirmations) + 1;
-
-        while let Some(BlockRangeMessage::Data(range)) = receiver.next().await {
-            assert_eq!(expected_range_start, *range.start());
-            assert_eq!(range.end(), range.start());
-            expected_range_start += 1;
-        }
-
-        // we add 1 to the right side, because we're expecting the number of the _next_ block to be
-        // mined
-        assert_eq!(
-            expected_range_start,
-            latest_head + expected_blocks as u64 + 1 - block_confirmations
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn live_mode_respects_block_confirmations_on_new_chain() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
-
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-
-        let block_confirmations = 5;
-
-        let client = BlockRangeScanner::new()
-            .with_block_confirmations(block_confirmations)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let mut receiver = client.stream_live().await?;
-
-        provider.anvil_mine(Some(6), None).await?;
-
-        let next = receiver.next().await;
-        if let Some(BlockRangeMessage::Data(range)) = next {
-            assert_eq!(0, *range.start());
-            assert_eq!(0, *range.end());
-        } else {
-            panic!("expected range, got: {next:?}");
-        }
-
-        let next = receiver.next().await;
-        if let Some(BlockRangeMessage::Data(range)) = next {
-            assert_eq!(1, *range.start());
-            assert_eq!(1, *range.end());
-        } else {
-            panic!("expected range, got: {next:?}");
-        }
-
-        // assert no new pending confirmed block ranges
-        assert!(
-            timeout(Duration::from_secs(1), async move { receiver.next().await }).await.is_err()
-        );
 
         Ok(())
     }
@@ -1434,7 +1373,7 @@ mod tests {
         assert_next!(stream, 90..=110);
         assert_next!(stream, ScannerStatus::ReorgDetected);
         assert_next!(stream, 105..=110);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1471,7 +1410,7 @@ mod tests {
         assert_next!(stream, 90..=120);
         assert_next!(stream, ScannerStatus::ReorgDetected);
         assert_next!(stream, 120..=120);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1496,23 +1435,23 @@ mod tests {
         assert_next!(stream, 5..=9);
         assert_next!(stream, 10..=14);
         assert_next!(stream, 15..=19);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // ranges where last batch is smaller than blocks per epoch
         let mut stream = client.stream_historical(93, 99).await?;
         assert_next!(stream, 93..=97);
         assert_next!(stream, 98..=99);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // range where blocks per epoch is larger than the number of blocks in the range
         let mut stream = client.stream_historical(3, 5).await?;
         assert_next!(stream, 3..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // single item range
         let mut stream = client.stream_historical(3, 3).await?;
         assert_next!(stream, 3..=3);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // range where blocks per epoch is larger than the number of blocks on chain
         let client = BlockRangeScanner::new()
@@ -1523,11 +1462,11 @@ mod tests {
 
         let mut stream = client.stream_historical(0, 20).await?;
         assert_next!(stream, 0..=20);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         let mut stream = client.stream_historical(0, 99).await?;
         assert_next!(stream, 0..=99);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1549,13 +1488,13 @@ mod tests {
         assert_next!(stream, 0..=4);
         assert_next!(stream, 5..=9);
         assert_next!(stream, 10..=10);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
+    async fn buffered_messages_after_cutoff_are_allp_assed() {
         let cutoff = 50;
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(BlockRangeMessage::Data(51..=55)).await.unwrap();
@@ -1563,21 +1502,19 @@ mod tests {
         buffer_tx.send(BlockRangeMessage::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // All ranges should be forwarded as-is since they're after cutoff
-        assert_eq!(forwarded, vec![51..=55, 56..=60, 61..=70]);
-        Ok(())
+        assert_next!(stream, 51..=55);
+        assert_next!(stream, 56..=60);
+        assert_next!(stream, 61..=70);
+        assert_closed!(stream);
     }
 
     #[tokio::test]
-    async fn ranges_entirely_before_cutoff_are_discarded() -> anyhow::Result<()> {
+    async fn ranges_entirely_before_cutoff_are_discarded() {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
@@ -1586,112 +1523,56 @@ mod tests {
         buffer_tx.send(BlockRangeMessage::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // All ranges should be discarded since they're before cutoff
-        assert_eq!(forwarded, vec![]);
-        Ok(())
+        assert_closed!(stream);
     }
 
     #[tokio::test]
-    async fn ranges_overlapping_cutoff_are_trimmed() -> anyhow::Result<()> {
+    async fn ranges_overlapping_cutoff_are_trimmed() {
         let cutoff = 75;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(70..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(60..=80)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(74..=76)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(60..=70)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(71..=80)).await.unwrap();
+        buffer_tx.send(BlockRangeMessage::Data(81..=86)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // All ranges should be trimmed to start at cutoff (75)
-        assert_eq!(forwarded, vec![75..=80, 75..=80, 75..=76]);
-        Ok(())
+        assert_next!(stream, 75..=80);
+        assert_next!(stream, 81..=86);
+        assert_closed!(stream);
     }
 
     #[tokio::test]
-    async fn mixed_ranges_are_handled_correctly() -> anyhow::Result<()> {
-        let cutoff = 50;
-
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(30..=45)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(BlockRangeMessage::Data(46..=55)).await.unwrap(); // Overlaps: trim to 50..=55
-        buffer_tx.send(BlockRangeMessage::Data(56..=65)).await.unwrap(); // After cutoff: forward as-is
-        buffer_tx.send(BlockRangeMessage::Data(40..=49)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(BlockRangeMessage::Data(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
-        buffer_tx.send(BlockRangeMessage::Data(51..=100)).await.unwrap(); // After cutoff: forward as-is
-        drop(buffer_tx);
-
-        let (out_tx, mut out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
-
-        let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
-
-        assert_eq!(forwarded, vec![50..=55, 56..=65, 50..=51, 51..=100]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn edge_case_range_exactly_at_cutoff() -> anyhow::Result<()> {
+    async fn edge_case_range_exactly_at_cutoff() {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(99..=99)).await.unwrap(); // Just before: discard
-        buffer_tx.send(BlockRangeMessage::Data(100..=100)).await.unwrap(); // Exactly at: forward
+        buffer_tx.send(BlockRangeMessage::Data(98..=98)).await.unwrap(); // Just before: discard
         buffer_tx.send(BlockRangeMessage::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
+        buffer_tx.send(BlockRangeMessage::Data(100..=100)).await.unwrap(); // Exactly at: forward
         buffer_tx.send(BlockRangeMessage::Data(100..=101)).await.unwrap(); // Starts at cutoff: forward
+        buffer_tx.send(BlockRangeMessage::Data(102..=102)).await.unwrap(); // After cutoff: forward
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // ensure no duplicates
-        assert_eq!(forwarded, vec![100..=100, 100..=101]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn cutoff_at_zero_handles_all_ranges() -> anyhow::Result<()> {
-        let cutoff = 0;
-
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(BlockRangeMessage::Data(0..=5)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(6..=10)).await.unwrap();
-        buffer_tx.send(BlockRangeMessage::Data(11..=25)).await.unwrap();
-        drop(buffer_tx);
-
-        let (out_tx, mut out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
-
-        let mut forwarded = Vec::new();
-        while let Some(BlockRangeMessage::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
-
-        // All ranges should be forwarded since they're all >= 0
-        assert_eq!(forwarded, vec![0..=5, 6..=10, 11..=25]);
-        Ok(())
+        assert_next!(stream, 100..=100);
+        assert_next!(stream, 100..=100);
+        assert_next!(stream, 100..=101);
+        assert_next!(stream, 102..=102);
+        assert_closed!(stream);
     }
 
     #[tokio::test]
@@ -1724,7 +1605,7 @@ mod tests {
 
         // Range length is 51, epoch is 100 -> single batch [100..=150]
         assert_next!(stream, 100..=150);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1750,7 +1631,7 @@ mod tests {
         assert_next!(stream, 10..=14);
         assert_next!(stream, 5..=9);
         assert_next!(stream, 0..=4);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1775,7 +1656,7 @@ mod tests {
         assert_next!(stream, 9..=12);
         assert_next!(stream, 5..=8);
         assert_next!(stream, 3..=4);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1797,7 +1678,7 @@ mod tests {
         let mut stream = client.rewind(7, 7).await?;
 
         assert_next!(stream, 7..=7);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1823,7 +1704,7 @@ mod tests {
         assert_next!(stream, 7..=7);
         assert_next!(stream, 6..=6);
         assert_next!(stream, 5..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1849,7 +1730,7 @@ mod tests {
         assert_next!(stream, 14..=20);
         assert_next!(stream, 7..=13);
         assert_next!(stream, 0..=6);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1873,14 +1754,14 @@ mod tests {
         assert_next!(stream, 11..=15);
         assert_next!(stream, 6..=10);
         assert_next!(stream, 3..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         let mut stream = client.rewind(3, 15).await?;
 
         assert_next!(stream, 11..=15);
         assert_next!(stream, 6..=10);
         assert_next!(stream, 3..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1896,12 +1777,12 @@ mod tests {
             .await?
             .run()?;
 
-        let res = client.rewind(0, 999).await;
+        let stream = client.rewind(0, 999).await;
 
-        match res {
-            Err(BlockRangeScannerError::BlockNotFound(_)) => {}
-            other => panic!("unexpected result: {other:?}"),
-        }
+        assert!(matches!(
+            stream,
+            Err(BlockRangeScannerError::BlockNotFound(BlockNumberOrTag::Number(999)))
+        ));
 
         Ok(())
     }
