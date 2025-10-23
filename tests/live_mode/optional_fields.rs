@@ -105,8 +105,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
 
     let mut scanner = setup.scanner;
 
-    let mut specific_stream =
-        scanner.subscribe(specific_filter).take(expected_specific_count);
+    let mut specific_stream = scanner.subscribe(specific_filter).take(expected_specific_count);
     let mut all_stream = scanner.subscribe(all_events_filter).take(expected_all_count);
 
     tokio::spawn(async move { scanner.start().await });
