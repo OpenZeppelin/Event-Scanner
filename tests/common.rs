@@ -15,16 +15,15 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
-    EventFilter,
-    block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
-    event_scanner::{Client, EventScanner, EventScannerMessage},
-    test_utils::LogMetadata,
+    EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
+    SyncEventScanner, SyncFromLatestEventScanner, test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
 // Shared test contract used across integration tests
 sol! {
-    #[sol(rpc, bytecode="608080604052346015576101b0908161001a8239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c90816306661abd1461016157508063a87d942c14610145578063d732d955146100ad5763e8927fbc14610048575f80fd5b346100a9575f3660031901126100a9575f5460018101809111610095576020817f7ca2ca9527391044455246730762df008a6b47bbdb5d37a890ef78394535c040925f55604051908152a1005b634e487b7160e01b5f52601160045260245ffd5b5f80fd5b346100a9575f3660031901126100a9575f548015610100575f198101908111610095576020817f53a71f16f53e57416424d0d18ccbd98504d42a6f98fe47b09772d8f357c620ce925f55604051908152a1005b60405162461bcd60e51b815260206004820152601860248201527f436f756e742063616e6e6f74206265206e6567617469766500000000000000006044820152606490fd5b346100a9575f3660031901126100a95760205f54604051908152f35b346100a9575f3660031901126100a9576020905f548152f3fea2646970667358221220b846b706f79f5ae1fc4a4238319e723a092f47ce4051404186424739164ab02264736f6c634300081e0033")]
+    // Built directly with solc 0.8.30+commit.73712a01.Darwin.appleclang
+    #[sol(rpc, bytecode="608080604052346015576101b0908161001a8239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c90816306661abd1461016157508063a87d942c14610145578063d732d955146100ad5763e8927fbc14610048575f80fd5b346100a9575f3660031901126100a9575f5460018101809111610095576020817f7ca2ca9527391044455246730762df008a6b47bbdb5d37a890ef78394535c040925f55604051908152a1005b634e487b7160e01b5f52601160045260245ffd5b5f80fd5b346100a9575f3660031901126100a9575f548015610100575f198101908111610095576020817f53a71f16f53e57416424d0d18ccbd98504d42a6f98fe47b09772d8f357c620ce925f55604051908152a1005b60405162461bcd60e51b815260206004820152601860248201527f436f756e742063616e6e6f74206265206e6567617469766500000000000000006044820152606490fd5b346100a9575f3660031901126100a95760205f54604051908152f35b346100a9575f3660031901126100a9576020905f548152f3fea2646970667358221220471585b420a1ad0093820ff10129ec863f6df4bec186546249391fbc3cdbaa7c64736f6c634300081e0033")]
     contract TestCounter {
         uint256 public count;
 
@@ -50,41 +49,140 @@ sol! {
     }
 }
 
-pub struct TestSetup<P>
+pub struct ScannerSetup<S, P>
 where
     P: Provider<Ethereum> + Clone,
 {
     pub provider: RootProvider,
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
-    pub client: Client<Ethereum>,
-    pub stream: ReceiverStream<EventScannerMessage>,
+    pub scanner: S,
+    pub stream: ReceiverStream<Message>,
     pub anvil: AnvilInstance,
 }
 
-pub async fn setup_scanner(
+pub type LiveScannerSetup<P> = ScannerSetup<LiveEventScanner<Ethereum>, P>;
+pub type HistoricScannerSetup<P> = ScannerSetup<HistoricEventScanner<Ethereum>, P>;
+pub type SyncScannerSetup<P> = ScannerSetup<SyncEventScanner<Ethereum>, P>;
+pub type SyncFromLatestScannerSetup<P> = ScannerSetup<SyncFromLatestEventScanner<Ethereum>, P>;
+pub type LatestScannerSetup<P> = ScannerSetup<LatestEventScanner<Ethereum>, P>;
+
+pub async fn setup_common(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
-    confirmations: Option<u64>,
-) -> anyhow::Result<TestSetup<impl Provider<Ethereum> + Clone>> {
+) -> anyhow::Result<(
+    AnvilInstance,
+    RootProvider,
+    TestCounter::TestCounterInstance<Arc<RootProvider>>,
+    EventFilter,
+)> {
     let anvil = spawn_anvil(block_interval)?;
     let provider = build_provider(&anvil).await?;
     let contract = deploy_counter(Arc::new(provider.clone())).await?;
 
     let default_filter = EventFilter::new()
-        .with_contract_address(*contract.address())
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+        .contract_address(*contract.address())
+        .event(TestCounter::CountIncreased::SIGNATURE);
 
     let filter = filter.unwrap_or(default_filter);
 
-    let mut client = EventScanner::new()
-        .with_block_confirmations(confirmations.unwrap_or(DEFAULT_BLOCK_CONFIRMATIONS))
+    Ok((anvil, provider, contract, filter))
+}
+
+pub async fn setup_live_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    confirmations: u64,
+) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScanner::live()
+        .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
 
-    let stream = client.create_event_stream(filter);
+    let stream = scanner.subscribe(filter);
 
-    // return anvil otherwise it doesnt live long enough...
-    Ok(TestSetup { provider, contract, client, stream, anvil })
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+pub async fn setup_sync_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    from: impl Into<BlockNumberOrTag>,
+    confirmations: u64,
+) -> anyhow::Result<SyncScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScanner::sync()
+        .from_block(from)
+        .block_confirmations(confirmations)
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = scanner.subscribe(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+pub async fn setup_sync_from_latest_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    latest: usize,
+    confirmations: u64,
+) -> anyhow::Result<SyncFromLatestScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScanner::sync()
+        .from_latest(latest)
+        .block_confirmations(confirmations)
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = scanner.subscribe(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+pub async fn setup_historic_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    from: BlockNumberOrTag,
+    to: BlockNumberOrTag,
+) -> anyhow::Result<HistoricScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScanner::historic()
+        .from_block(from)
+        .to_block(to)
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = scanner.subscribe(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+pub async fn setup_latest_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    count: usize,
+    from: Option<BlockNumberOrTag>,
+    to: Option<BlockNumberOrTag>,
+) -> anyhow::Result<LatestScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+    let mut builder = EventScanner::latest().count(count);
+    if let Some(f) = from {
+        builder = builder.from_block(f);
+    }
+    if let Some(t) = to {
+        builder = builder.to_block(t);
+    }
+
+    let mut scanner = builder.connect_ws(anvil.ws_endpoint_url()).await?;
+
+    let stream = scanner.subscribe(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
 }
 
 pub async fn reorg_with_new_count_incr_txs<P>(

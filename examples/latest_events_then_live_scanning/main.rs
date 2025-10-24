@@ -2,7 +2,7 @@ use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEv
 use alloy_node_bindings::Anvil;
 use event_scanner::{
     EventFilter,
-    event_scanner::{EventScanner, EventScannerMessage},
+    event_scanner::{EventScanner, Message},
 };
 
 use tokio_stream::StreamExt;
@@ -48,18 +48,19 @@ async fn main() -> anyhow::Result<()> {
     let contract_address = counter_contract.address();
 
     let increase_filter = EventFilter::new()
-        .with_contract_address(*contract_address)
-        .with_event(Counter::CountIncreased::SIGNATURE);
+        .contract_address(*contract_address)
+        .event(Counter::CountIncreased::SIGNATURE);
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client =
+        EventScanner::sync().from_latest(5).connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
-    let mut stream = client.create_event_stream(increase_filter);
+    let mut stream = client.subscribe(increase_filter);
 
     for _ in 0..10 {
         _ = counter_contract.increase().send().await?;
     }
 
-    client.scan_latest_then_live(5).await.expect("failed to start scanner");
+    client.start().await.expect("failed to start scanner");
 
     // emit some events for live mode to pick up
     _ = counter_contract.increase().send().await?;
@@ -69,15 +70,15 @@ async fn main() -> anyhow::Result<()> {
     // only the last 5 events will be streamed before switching to live mode
     while let Some(message) = stream.next().await {
         match message {
-            EventScannerMessage::Data(logs) => {
+            Message::Data(logs) => {
                 for log in logs {
                     info!("Callback successfully executed with event {:?}", log.inner.data);
                 }
             }
-            EventScannerMessage::Error(e) => {
+            Message::Error(e) => {
                 error!("Received error: {}", e);
             }
-            EventScannerMessage::Status(info) => {
+            Message::Status(info) => {
                 info!("Received info: {:?}", info);
             }
         }

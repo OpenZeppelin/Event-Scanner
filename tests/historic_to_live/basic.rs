@@ -1,39 +1,24 @@
-use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::U256, sol_types::SolEvent};
-use event_scanner::{
-    assert_next, event_filter::EventFilter, event_scanner::EventScanner, types::ScannerStatus,
-};
+use alloy::{eips::BlockNumberOrTag, primitives::U256};
+use event_scanner::{assert_next, types::ScannerStatus};
 
-use crate::common::{TestCounter, build_provider, deploy_counter, spawn_anvil};
+use crate::common::{TestCounter, setup_sync_scanner};
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
-    let anvil = spawn_anvil(Some(0.1))?;
-    let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider).await?;
-    let contract_address = *contract.address();
+    let setup = setup_sync_scanner(Some(0.1), None, BlockNumberOrTag::Earliest, 0).await?;
+    let contract = setup.contract.clone();
 
     let historical_events = 3;
     let live_events = 2;
 
-    let receipt = contract.increase().send().await?.get_receipt().await?;
-    let first_historical_block =
-        receipt.block_number.expect("historical receipt should contain block number");
-
-    for _ in 1..historical_events {
+    for _ in 0..historical_events {
         contract.increase().send().await?.watch().await?;
     }
 
-    let filter = EventFilter::new()
-        .with_contract_address(contract_address)
-        .with_event(TestCounter::CountIncreased::SIGNATURE);
+    let scanner = setup.scanner;
+    let mut stream = setup.stream;
 
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
-
-    let mut stream = client.create_event_stream(filter);
-
-    tokio::spawn(async move {
-        client.start_scanner(BlockNumberOrTag::Number(first_historical_block), None).await
-    });
+    tokio::spawn(async move { scanner.start().await });
 
     for _ in 0..live_events {
         contract.increase().send().await?.watch().await?;

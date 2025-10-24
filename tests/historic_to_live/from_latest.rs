@@ -1,13 +1,13 @@
 use alloy::providers::ext::AnvilApi;
 
-use crate::common::{TestCounter, increase, setup_scanner};
+use crate::common::{TestCounter, increase, setup_sync_from_latest_scanner};
 use event_scanner::{assert_next, test_utils::LogMetadata, types::ScannerStatus};
 
 #[tokio::test]
 async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
     // Historical: produce 6 events total
@@ -21,7 +21,9 @@ async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> 
     expected_latest.push(increase(&contract).await?);
 
     // Ask for the latest 3, then live
-    client.scan_latest_then_live(3).await?;
+    scanner.start().await?;
+
+    println!("asserting...");
 
     // Latest phase
     assert_next!(stream, expected_latest);
@@ -40,9 +42,9 @@ async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> 
 
 #[tokio::test]
 async fn scan_latest_then_live_fewer_historical_then_continues_live() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let setup = setup_sync_from_latest_scanner(None, None, 5, 0).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
     // Historical: only 2 available
@@ -50,7 +52,7 @@ async fn scan_latest_then_live_fewer_historical_then_continues_live() -> anyhow:
     expected_latest.push(increase(&contract).await?);
     expected_latest.push(increase(&contract).await?);
 
-    client.scan_latest_then_live(5).await?;
+    scanner.start().await?;
 
     // Latest phase returns all available
     assert_next!(stream, &expected_latest);
@@ -67,9 +69,9 @@ async fn scan_latest_then_live_fewer_historical_then_continues_live() -> anyhow:
 
 #[tokio::test]
 async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let setup = setup_sync_from_latest_scanner(None, None, 4, 0).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
     // Historical: produce exactly 4 events
@@ -79,7 +81,7 @@ async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Res
     expected_latest.push(increase(&contract).await?);
     expected_latest.push(increase(&contract).await?);
 
-    client.scan_latest_then_live(4).await?;
+    scanner.start().await?;
 
     assert_next!(stream, expected_latest);
     assert_next!(stream, ScannerStatus::SwitchingToLive);
@@ -93,12 +95,12 @@ async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Res
 
 #[tokio::test]
 async fn scan_latest_then_live_no_historical_only_live_streams() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let setup = setup_sync_from_latest_scanner(None, None, 5, 0).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
-    client.scan_latest_then_live(5).await?;
+    scanner.start().await?;
 
     // Latest is empty
     let expected: &[LogMetadata<TestCounter::CountIncreased>] = &[];
@@ -116,10 +118,10 @@ async fn scan_latest_then_live_no_historical_only_live_streams() -> anyhow::Resu
 
 #[tokio::test]
 async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let provider = setup.provider;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
     // Historical: emit 3, mine 1 empty block to form a clear boundary
@@ -133,7 +135,7 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
 
     provider.anvil_mine(Some(1), None).await?;
 
-    client.scan_latest_then_live(3).await?;
+    scanner.start().await?;
 
     // Latest phase
     assert_next!(stream, &expected_latest);
@@ -148,9 +150,9 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn scan_latest_then_live_waiting_on_live_logs_arriving() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
     // Historical: emit 3, mine 1 empty block to form a clear boundary
@@ -159,7 +161,7 @@ async fn scan_latest_then_live_waiting_on_live_logs_arriving() -> anyhow::Result
     expected_latest.push(increase(&contract).await?);
     expected_latest.push(increase(&contract).await?);
 
-    client.scan_latest_then_live(3).await?;
+    scanner.start().await?;
 
     // Latest phase
     assert_next!(stream, &expected_latest);

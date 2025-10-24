@@ -2,9 +2,10 @@
 members = [
     ".",
     "examples/historical_scanning",
-    "examples/simple_counter",
+    "examples/live_scanning",
     "examples/latest_events_scanning",
     "examples/latest_events_then_live_scanning",
+    "examples/sync_scanning",
 ]
 resolver = "2"
 
@@ -76,8 +77,3 @@ workspace = true
 
 [features]
 test-utils = []
-
-[[test]]
-# see tests/mod.rs
-name = "mod"
-required-features = ["test-utils"]

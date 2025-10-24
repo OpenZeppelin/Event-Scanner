@@ -16,12 +16,13 @@ use alloy::{
 /// pub async fn create_event_filter() -> EventFilter {
 ///     let contract_address = address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
 ///     let filter = EventFilter::new()
-///         .with_contract_address(contract_address)
-///         .with_event("Transfer(address,address,uint256)");
+///         .contract_address(contract_address)
+///         .event("Transfer(address,address,uint256)");
 ///
 ///     filter
 /// }
 /// ```
+
 #[derive(Clone, Default)]
 pub struct EventFilter {
     /// Contract addresses to filter events from. If empty, events from all contracts will be
@@ -80,7 +81,7 @@ impl EventFilter {
     /// Sets the contract address to filter events from.
     /// If not set, events from all contracts will be tracked.
     #[must_use]
-    pub fn with_contract_address(mut self, contract_address: impl Into<Address>) -> Self {
+    pub fn contract_address(mut self, contract_address: impl Into<Address>) -> Self {
         self.contract_addresses.push(contract_address.into());
         self
     }
@@ -88,7 +89,7 @@ impl EventFilter {
     /// Sets the contract address to filter events from.
     /// If not set, events from all contracts will be tracked.
     #[must_use]
-    pub fn with_contract_addresses(
+    pub fn contract_addresses(
         mut self,
         contract_addresses: impl IntoIterator<Item = impl Into<Address>>,
     ) -> Self {
@@ -100,7 +101,7 @@ impl EventFilter {
     /// If neither events nor event signature hashes are set, all events from the specified
     /// contract(s) will be tracked.
     #[must_use]
-    pub fn with_event(mut self, event: impl Into<String>) -> Self {
+    pub fn event(mut self, event: impl Into<String>) -> Self {
         let event = event.into();
         if !event.is_empty() {
             self.events.push(event);
@@ -112,7 +113,7 @@ impl EventFilter {
     /// If neither events nor event signature hashes are set, all events from the specified
     /// contract(s) will be tracked.
     #[must_use]
-    pub fn with_events(mut self, events: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn events(mut self, events: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.events.extend(events.into_iter().map(Into::into));
         self
     }
@@ -121,7 +122,7 @@ impl EventFilter {
     /// If neither event signature hashes nor events are set, all events from the specified
     /// contract(s) will be tracked.
     #[must_use]
-    pub fn with_event_signature(mut self, event_signature: impl Into<Topic>) -> Self {
+    pub fn event_signature(mut self, event_signature: impl Into<Topic>) -> Self {
         self.event_signatures = self.event_signatures.extend(event_signature.into());
         self
     }
@@ -130,7 +131,7 @@ impl EventFilter {
     /// If neither event signature hashes nor events are set, all events from the specified
     /// contract(s) will be tracked.
     #[must_use]
-    pub fn with_event_signatures(
+    pub fn event_signatures(
         mut self,
         event_signatures: impl IntoIterator<Item = impl Into<Topic>>,
     ) -> Self {
@@ -209,13 +210,13 @@ mod tests {
     #[test]
     fn display_with_address() {
         let address = address!("0x000000000000000000000000000000000000dEaD");
-        let filter = EventFilter::new().with_contract_address(address);
+        let filter = EventFilter::new().contract_address(address);
         let got = format!("{filter}");
         let expected = "EventFilter(contracts: [0x000000000000000000000000000000000000dEaD])";
         assert_eq!(got, expected);
 
         // verify batch address addition works the same
-        let filter = EventFilter::new().with_contract_addresses(vec![address]);
+        let filter = EventFilter::new().contract_addresses(vec![address]);
         let got = format!("{filter}");
         assert_eq!(got, expected);
 
@@ -227,15 +228,14 @@ mod tests {
     fn display_with_multiple_addresses() {
         let address_1 = address!("0x000000000000000000000000000000000000dEaD");
         let address_2 = address!("0x0000000000000000000000000000000000000001");
-        let filter =
-            EventFilter::new().with_contract_address(address_1).with_contract_address(address_2);
+        let filter = EventFilter::new().contract_address(address_1).contract_address(address_2);
 
         let got = format!("{filter}");
         let expected = "EventFilter(contracts: [0x000000000000000000000000000000000000dEaD, 0x0000000000000000000000000000000000000001])";
         assert_eq!(got, expected);
 
         // verify batch address addition works the same
-        let filter = EventFilter::new().with_contract_addresses(vec![address_1, address_2]);
+        let filter = EventFilter::new().contract_addresses(vec![address_1, address_2]);
         let got = format!("{filter}");
         assert_eq!(got, expected);
 
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn display_single_event() {
         let event = SomeContract::EventOne::SIGNATURE;
-        let filter = EventFilter::new().with_event(event);
+        let filter = EventFilter::new().event(event);
         let got = format!("{filter}");
         let expected = "EventFilter(events: [EventOne()])";
         assert_eq!(got, expected);
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn display_single_event_signature() {
         let event_signature = SomeContract::EventOne::SIGNATURE_HASH;
-        let filter = EventFilter::new().with_event_signature(event_signature);
+        let filter = EventFilter::new().event_signature(event_signature);
         let got = format!("{filter}");
         let expected = "EventFilter(event_signatures: [0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
         assert_eq!(got, expected);
@@ -271,7 +271,7 @@ mod tests {
     fn display_multiple_events_with_address() {
         let address = address!("0x000000000000000000000000000000000000dEaD");
         let events = vec![SomeContract::EventOne::SIGNATURE, SomeContract::EventTwo::SIGNATURE];
-        let filter = EventFilter::new().with_contract_address(address).with_events(events.clone());
+        let filter = EventFilter::new().contract_address(address).events(events.clone());
 
         let got = format!("{filter}");
         let expected = "EventFilter(contracts: [0x000000000000000000000000000000000000dEaD], events: [EventOne(), EventTwo()])";
@@ -286,9 +286,8 @@ mod tests {
         let address = address!("0x000000000000000000000000000000000000dEaD");
         let event_signatures =
             vec![SomeContract::EventOne::SIGNATURE_HASH, SomeContract::EventTwo::SIGNATURE_HASH];
-        let filter = EventFilter::new()
-            .with_contract_address(address)
-            .with_event_signatures(event_signatures.clone());
+        let filter =
+            EventFilter::new().contract_address(address).event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
         let expected_1 = "EventFilter(contracts: [0x000000000000000000000000000000000000dEaD], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
@@ -307,9 +306,8 @@ mod tests {
         let events = vec![SomeContract::EventOne::SIGNATURE, SomeContract::EventTwo::SIGNATURE];
         let event_signatures =
             vec![SomeContract::EventOne::SIGNATURE_HASH, SomeContract::EventTwo::SIGNATURE_HASH];
-        let filter = EventFilter::new()
-            .with_events(events.clone())
-            .with_event_signatures(event_signatures.clone());
+        let filter =
+            EventFilter::new().events(events.clone()).event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
         let expected_1 = "EventFilter(events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
@@ -333,9 +331,9 @@ mod tests {
         let event_signatures =
             vec![SomeContract::EventOne::SIGNATURE_HASH, SomeContract::EventTwo::SIGNATURE_HASH];
         let filter = EventFilter::new()
-            .with_contract_addresses(addresses)
-            .with_events(events.clone())
-            .with_event_signatures(event_signatures.clone());
+            .contract_addresses(addresses)
+            .events(events.clone())
+            .event_signatures(event_signatures.clone());
 
         let got = format!("{filter}");
         let expected_1 = "EventFilter(contracts: [0x000000000000000000000000000000000000dEaD, 0x0000000000000000000000000000000000000001], events: [EventOne(), EventTwo()], event_signatures: [0x16eb4fc7651e068f1c31303645026f82d5fced11a8d5209bbf272072be23ddff, 0xa08dd6fd0d644da5df33d075cb9256203802f6948ab81b87079960711810dc91])";
@@ -352,7 +350,7 @@ mod tests {
     #[test]
     fn display_with_empty_address_vector_noop() {
         // Providing an empty events vector should behave as if no events were set.
-        let filter = EventFilter::new().with_contract_addresses(Vec::<Address>::new());
+        let filter = EventFilter::new().contract_addresses(Vec::<Address>::new());
         let got = format!("{filter}");
         let expected = "EventFilter()";
         assert_eq!(got, expected);
@@ -364,7 +362,7 @@ mod tests {
     #[test]
     fn display_with_empty_events_vector_noop() {
         // Providing an empty events vector should behave as if no events were set.
-        let filter = EventFilter::new().with_events(Vec::<String>::new());
+        let filter = EventFilter::new().events(Vec::<String>::new());
         let got = format!("{filter}");
         let expected = "EventFilter()";
         assert_eq!(got, expected);
@@ -376,7 +374,7 @@ mod tests {
     #[test]
     fn display_with_empty_event_signatures_vector_noop() {
         // Providing an empty events vector should behave as if no events were set.
-        let filter = EventFilter::new().with_event_signatures(Vec::<Topic>::new());
+        let filter = EventFilter::new().event_signatures(Vec::<Topic>::new());
         let got = format!("{filter}");
         let expected = "EventFilter()";
         assert_eq!(got, expected);

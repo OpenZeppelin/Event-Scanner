@@ -1,23 +1,16 @@
-use crate::common::{increase, setup_scanner};
-use alloy::{eips::BlockNumberOrTag, providers::Provider};
+use crate::common::{increase, setup_sync_scanner};
 use event_scanner::assert_next;
 use tokio_stream::wrappers::ReceiverStream;
 
 #[tokio::test]
 async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let future_start_block = 4;
+    let setup = setup_sync_scanner(None, None, future_start_block, 0).await?;
     let contract = setup.contract;
-    let provider = setup.provider;
-    let client = setup.client;
-
-    // Determine a start height in the future
-    let latest = provider.get_block_number().await?;
-    let future_start = latest + 3;
+    let scanner = setup.scanner;
 
     // Start the scanner in sync mode from the future block
-    tokio::spawn(
-        async move { client.start_scanner(BlockNumberOrTag::from(future_start), None).await },
-    );
+    scanner.start().await?;
 
     // Send 2 transactions that should not appear in the stream
     _ = increase(&contract).await?;

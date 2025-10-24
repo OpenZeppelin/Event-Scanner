@@ -1,17 +1,20 @@
-use alloy::{eips::BlockNumberOrTag, providers::Provider};
+use alloy::eips::BlockNumberOrTag;
 use event_scanner::assert_next;
 
-use crate::common::{increase, setup_scanner};
+use crate::common::{increase, setup_historic_scanner};
 
 #[tokio::test]
 async fn processes_events_within_specified_historical_range() -> anyhow::Result<()> {
-    let setup = setup_scanner(Some(0.1), None, None).await?;
+    let setup = setup_historic_scanner(
+        Some(0.1),
+        None,
+        BlockNumberOrTag::Earliest,
+        BlockNumberOrTag::Latest,
+    )
+    .await?;
     let contract = setup.contract;
-    let client = setup.client;
-    let provider = setup.provider;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
-
-    let start_block = provider.get_block_number().await?;
 
     let expected = &[
         increase(&contract).await?,
@@ -21,11 +24,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
         increase(&contract).await?,
     ];
 
-    tokio::spawn(async move {
-        client
-            .start_scanner(BlockNumberOrTag::Number(start_block), Some(BlockNumberOrTag::Latest))
-            .await
-    });
+    tokio::spawn(async move { scanner.start().await });
 
     assert_next!(stream, expected);
     assert_next!(stream, None);

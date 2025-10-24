@@ -4,16 +4,16 @@ use tokio_stream::StreamExt;
 
 use tokio::{sync::Mutex, time::timeout};
 
-use crate::common::{TestSetup, reorg_with_new_count_incr_txs, setup_scanner};
-use alloy::{eips::BlockNumberOrTag, providers::ext::AnvilApi};
-use event_scanner::{event_scanner::EventScannerMessage, types::ScannerStatus};
+use crate::common::{LiveScannerSetup, reorg_with_new_count_incr_txs, setup_live_scanner};
+use alloy::providers::ext::AnvilApi;
+use event_scanner::{Message, ScannerStatus};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
-    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+        setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     let num_initial_events = 5;
     let num_new_events = 3;
@@ -39,7 +39,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.transaction_hash {
@@ -47,10 +47,10 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => {
+                Message::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Status(status) => {
+                Message::Status(status) => {
                     if matches!(status, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
@@ -71,10 +71,10 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
-    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+        setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     let num_initial_events = 5;
 
@@ -102,7 +102,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.transaction_hash {
@@ -110,10 +110,10 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => {
+                Message::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Status(status) => {
+                Message::Status(status) => {
                     if matches!(status, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
@@ -134,10 +134,10 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_depth_one() -> anyhow::Result<()> {
-    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+        setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     let num_initial_events = 4;
 
@@ -164,7 +164,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.transaction_hash {
@@ -172,10 +172,10 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => {
+                Message::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Status(info) => {
+                Message::Status(info) => {
                     if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
@@ -196,10 +196,10 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_depth_two() -> anyhow::Result<()> {
-    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(0.1), Option::None, Option::None).await?;
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+        setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     let num_initial_events = 4;
 
@@ -226,7 +226,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     let mut guard = event_block_count_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.transaction_hash {
@@ -234,10 +234,10 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => {
+                Message::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Status(info) => {
+                Message::Status(info) => {
                     if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }
@@ -260,10 +260,10 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
-    let TestSetup { provider, contract, client, mut stream, anvil: _anvil } =
-        setup_scanner(Option::Some(1.0), Option::None, Option::Some(block_confirmations)).await?;
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+        setup_live_scanner(Option::Some(1.0), Option::None, block_confirmations).await?;
 
-    tokio::spawn(async move { client.start_scanner(BlockNumberOrTag::Latest, None).await });
+    tokio::spawn(async move { scanner.start().await });
 
     provider.anvil_mine(Some(10), None).await?;
 
@@ -295,7 +295,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let event_counting = async move {
         while let Some(message) = stream.next().await {
             match message {
-                EventScannerMessage::Data(logs) => {
+                Message::Data(logs) => {
                     let mut guard = observed_tx_hashes_clone.lock().await;
                     for log in logs {
                         if let Some(n) = log.transaction_hash {
@@ -303,10 +303,10 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
                         }
                     }
                 }
-                EventScannerMessage::Error(e) => {
+                Message::Error(e) => {
                     panic!("panic with error {e}");
                 }
-                EventScannerMessage::Status(info) => {
+                Message::Status(info) => {
                     if matches!(info, ScannerStatus::ReorgDetected) {
                         *reorg_detected_clone.lock().await = true;
                     }

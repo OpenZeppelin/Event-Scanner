@@ -1,14 +1,14 @@
 pub mod block_range_scanner;
-pub mod event_filter;
-pub mod event_listener;
+pub mod error;
 pub mod event_scanner;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 pub mod types;
 
-pub use block_range_scanner::{
-    BlockRangeMessage, BlockRangeScanner, BlockRangeScannerClient, BlockRangeScannerError,
-    DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_BLOCKS_READ_PER_EPOCH,
+pub use error::ScannerError;
+pub use types::{ScannerMessage, ScannerStatus};
+
+pub use event_scanner::{
+    EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
+    SyncEventScanner, SyncFromLatestEventScanner,
 };
-pub use event_filter::EventFilter;
-pub use event_scanner::{EventScanner, EventScannerError, EventScannerMessage};
