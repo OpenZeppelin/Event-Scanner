@@ -23,8 +23,6 @@ async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> 
     // Ask for the latest 3, then live
     scanner.start().await?;
 
-    println!("asserting...");
-
     // Latest phase
     assert_next!(stream, expected_latest);
     // Transition to live

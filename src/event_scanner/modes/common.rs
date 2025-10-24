@@ -37,8 +37,7 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unp
     let consumers = spawn_log_consumers(provider, listeners, &range_tx, mode);
 
     while let Some(message) = stream.next().await {
-        println!("Received block range message: {message:?}");
-        if let Err(err) = range_tx.send(message.into()) {
+        if let Err(err) = range_tx.send(message) {
             warn!(error = %err, "No log consumers, stopping stream");
             break;
         }
@@ -46,11 +45,9 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unp
 
     // Close the channel sender to signal to the log consumers that streaming is done.
     drop(range_tx);
-    println!("Dropped range_tx for mode; {mode:?}");
 
     // ensure all consumers finish before they're dropped
     consumers.join_all().await;
-    println!("All consumers finished for mode; {mode:?}");
 }
 
 #[must_use]
