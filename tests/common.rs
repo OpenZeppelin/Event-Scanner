@@ -1,11 +1,13 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::FixedBytes,
+    primitives::{FixedBytes, U256},
     providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
     rpc::types::anvil::{ReorgOptions, TransactionData},
     sol,
@@ -14,7 +16,7 @@ use alloy::{
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
     EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
-    SyncEventScanner,
+    SyncFromBlockEventScanner, SyncFromLatestEventScanner, test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -60,7 +62,8 @@ where
 
 pub type LiveScannerSetup<P> = ScannerSetup<LiveEventScanner<Ethereum>, P>;
 pub type HistoricScannerSetup<P> = ScannerSetup<HistoricEventScanner<Ethereum>, P>;
-pub type SyncScannerSetup<P> = ScannerSetup<SyncEventScanner<Ethereum>, P>;
+pub type SyncScannerSetup<P> = ScannerSetup<SyncFromBlockEventScanner<Ethereum>, P>;
+pub type SyncFromLatestScannerSetup<P> = ScannerSetup<SyncFromLatestEventScanner<Ethereum>, P>;
 pub type LatestScannerSetup<P> = ScannerSetup<LatestEventScanner<Ethereum>, P>;
 
 pub async fn setup_common(
@@ -105,11 +108,32 @@ pub async fn setup_live_scanner(
 pub async fn setup_sync_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
+    from: impl Into<BlockNumberOrTag>,
     confirmations: u64,
 ) -> anyhow::Result<SyncScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
     let mut scanner = EventScanner::sync()
+        .from_block(from)
+        .block_confirmations(confirmations)
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = scanner.subscribe(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+pub async fn setup_sync_from_latest_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    latest: usize,
+    confirmations: u64,
+) -> anyhow::Result<SyncFromLatestScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScanner::sync()
+        .from_latest(latest)
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
@@ -241,11 +265,23 @@ pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RootProvide
     Ok(provider.root().to_owned())
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn deploy_counter<P>(provider: P) -> anyhow::Result<TestCounter::TestCounterInstance<P>>
 where
     P: alloy::providers::Provider<Ethereum> + Clone,
 {
     let contract = TestCounter::deploy(provider).await?;
     Ok(contract)
+}
+
+pub async fn increase(
+    contract: &TestCounter::TestCounterInstance<Arc<impl Provider + Clone>>,
+) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>> {
+    let receipt = contract.increase().send().await?.get_receipt().await?;
+    let tx_hash = receipt.transaction_hash;
+    let new_count = receipt.decoded_log::<TestCounter::CountIncreased>().unwrap().data.newCount;
+    Ok(LogMetadata {
+        event: TestCounter::CountIncreased { newCount: U256::from(new_count) },
+        address: *contract.address(),
+        tx_hash,
+    })
 }

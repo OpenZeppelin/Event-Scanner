@@ -22,6 +22,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
   - [Scanning Latest Events](#scanning-latest-events)
+  - [Scanning Latest Events Then Live](#scanning-latest-events-then-live)
 - [Examples](#examples)
 - [Testing](#testing)
 
@@ -97,7 +98,14 @@ async fn run_scanner(
 
 ### Building a Scanner
 
-`EventScanner` provides mode-specific constructors and a builder pattern to configure settings before connecting:
+`EventScanner` provides mode-specific constructors and a builder pattern to configure settings before connecting.
+Once configured, connect using one of:
+
+- `connect_ws::<Ethereum>(ws_url)`
+- `connect_ipc::<Ethereum>(path)`
+- `connect::<Ethereum>(provider)`
+
+This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ```rust
 // Live streaming mode
@@ -122,17 +130,6 @@ let scanner = EventScanner::latest()
     .connect_ws::<Ethereum>(ws_url).await?;
 ```
 
-**Available Modes:**
-- `EventScanner::live()` – Streams new blocks as they arrive
-- `EventScanner::historic()` – Processes historical block ranges
-- `EventScanner::sync()` – Processes historical data then transitions to live streaming
-- `EventScanner::latest()` – Processes a specific number of events then optionally switches to live scanning mode
-
-**Global Configuration Options:**
-- `block_read_limit(usize)` – Sets the maximum number of blocks to process per read operation. This prevents RPC provider errors from overly large block range queries.
-- Connect with `connect_ws::<Ethereum>(url)`, `connect_ipc::<Ethereum>(path)`, or `connect(provider)`.
-
-**Starting the Scanner:**
 Invoking `scanner.start()` starts the scanner in the specified mode.
 
 ### Defining Event Filters
@@ -168,20 +165,41 @@ Register multiple filters by invoking `subscribe` repeatedly.
 
 The flexibility provided by `EventFilter` allows you to build sophisticated event monitoring systems that can track events at different granularities depending on your application's needs.
 
+Batch builder examples:
+
+```rust
+// Multiple contract addresses at once
+let multi_addr = EventFilter::new()
+    .with_contract_addresses([*counter_contract.address(), *other_counter_contract.address()]);
+
+// Multiple event names at once
+let multi_events = EventFilter::new()
+    .with_events([Counter::CountIncreased::SIGNATURE, Counter::CountDecreased::SIGNATURE]);
+
+// Multiple event signature hashes at once
+let multi_sigs = EventFilter::new()
+    .with_event_signatures([
+        Counter::CountIncreased::SIGNATURE_HASH,
+        Counter::CountDecreased::SIGNATURE_HASH,
+    ]);
+```
+
 ### Scanning Modes
 
-- **Live mode** – `EventScanner::live()` creates a scanner that subscribes to new blocks as they arrive.
-- **Historical mode** – `EventScanner::historic()` creates a scanner for processing historical block ranges.
-- **Sync mode** – `EventScanner::sync()` creates a scanner that processes historical data then automatically transitions to live streaming.
-- **Latest mode** – `EventScanner::latest()` creates a scanner that processes a set number of events.
+- **Live** – `EventScanner::live()` creates a scanner that streams new blocks as they arrive. On detecting a reorg, the scanner emits `ScannerStatus::ReorgDetected` and recalculates the confirmed window, streaming logs from the corrected confirmed block range.
+- **Historic** – `EventScanner::historic()` creates a scanner for streaming events from a past block range. Currently no reorg logic has been implemented (NOTE ⚠️: still WIP).
+- **Latest Events** – `EventScanner::latest()` creates a scanner that streams the specified number of recently emitted events. On detecting a reorg, the scanner re-fetches all of the events in the specified block range (default: Earliest..=Latest).
+- **Sync from Block** – `EventScanner::sync().from_block(start)` creates a scanner that streams events from a given start block, and then automatically transitions to live streaming. Reorgs are handled as per the particular mode phase the scanner is in (historic or live).
+- **Sync from Latest** - `EventScanner::sync().from_latest(count)` creates a scanner that streams the most recent `count` events, then automatically transitions to live streaming. Reorgs are handled as per the particular mode phase the scanner is in (latest events or live).
 
-**Configuration Tips:**
+#### Configuration Tips
+
 - Set `block_read_limit` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks)
 - For live mode, if the WebSocket subscription lags significantly (e.g., >2000 blocks), ranges are automatically capped to prevent RPC errors
-- Each mode has its own configuration options for start block, end block, confirmations, etc. where it makes sense
-- The modes come with sensible defaults for example not specify a start block for historic mode automatically sets the start block to the earliest one
+- Each mode has its own appropriate configuration options for start block, end block, confirmations
+- The modes come with sensible defaults; for example not specifying a start block for historic mode automatically sets the start block to the genesis block.
 
-See integration tests under `tests/live_mode`, `tests/historic_mode`, and `tests/historic_to_live` for concrete examples.
+See the integration tests under `tests/` for concrete examples.
 
 ### Scanning Latest Events
 
@@ -233,7 +251,74 @@ The scanner periodically checks the tip to detect reorgs. On reorg, the scanner 
 Notes:
 
 - Ensure you create streams via `subscribe()` before calling `start` so listeners are registered.
-<!-- TODO: uncomment once implemented - The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`. -->
+- The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`.
+
+### Scanning Latest Events Then Live
+
+`EventScanner::sync().from_latest(count)` combines the best of both worlds: it fetches recent historical events and then seamlessly transitions to live streaming mode for continuous monitoring.
+
+**What it does:**
+
+1. **Historical rewind phase**: Scans backwards from the current chain tip to collect up to `count` most recent matching events
+2. **Automatic transition**: Emits `ScannerStatus::SwitchingToLive` to signal the mode change
+3. **Live streaming phase**: Continuously monitors and streams new events as they arrive on-chain
+
+**How it works:**
+
+The scanner captures the latest block number before starting to establish a clear boundary between phases. The historical phase scans from `Earliest` to `latest_block`, while the live phase starts from `latest_block + 1`. This design prevents duplicate events and handles race conditions where new blocks arrive during setup.
+
+**Key behaviors:**
+
+- **No duplicates**: Events are not delivered twice across the phase transition
+- **Flexible count**: If fewer than `count` events exist, returns all available events
+- **Reorg handling**: Both phases handle reorgs appropriately:
+  - Historical phase: resets and rescans on reorg detection
+  - Live phase: resets stream to the first post-reorg block that satisfies the block confirmations set via `with_block_confirmations`
+- **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
+
+**Example:**
+
+```rust
+use alloy::{network::Ethereum, sol_types::SolEvent};
+use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+use tokio_stream::StreamExt;
+
+async fn latest_then_live_example(
+    ws_url: alloy::transports::http::reqwest::Url,
+    addr: alloy::primitives::Address,
+) -> eyre::Result<()> {
+    let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
+
+    let filter = EventFilter::new().with_contract_address(addr);
+    let mut stream = client.create_event_stream(filter);
+
+    // Fetch the latest 10 events, then stream new events continuously
+    client.scan_latest_then_live(10).await?;
+
+    while let Some(msg) = stream.next().await {
+        match msg {
+            EventScannerMessage::Data(logs) => {
+                println!("Received {} events", logs.len());
+            }
+            EventScannerMessage::Status(status) => {
+                println!("Status update: {:?}", status);
+                // You'll see ScannerStatus::SwitchingToLive when transitioning
+            }
+            EventScannerMessage::Error(e) => {
+                eprintln!("Error: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+**Important notes:**
+
+- Create event streams via `create_event_stream()` **before** calling `scan_latest_then_live`
+- The method returns immediately; events are delivered asynchronously
+- The live phase continues indefinitely until the scanner is dropped or encounters an error
 
 ---
 
@@ -241,17 +326,17 @@ Notes:
 
 - `examples/live_scanning` – minimal live-mode scanner using `EventScanner::live()`
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScanner::historic()`
+- `examples/sync_scanning` – demonstrates replaying from genesis (block 0) before continuing streaming latest blocks using `EventScanner::sync().from_block(0)`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScanner::latest()`
+- `examples/latest_events_then_live_scanning` – demonstrates scanning the latest events before switching to live mode using `EventScanner::sync().from_latest(count)`.
 
 Run an example with:
 
 ```bash
-RUST_LOG=info cargo run -p live_scanning    
-# or
-RUST_LOG=info cargo run -p historical_scanning
+RUST_LOG=info cargo run -p live_scanning
 ```
 
-Both examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
+All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
 
 ---
 
@@ -264,4 +349,18 @@ Integration tests cover all modes:
 ```bash
 cargo nextest run --features test-utils
 ```
+
+---
+
+## Errors
+
+The scanner surfaces errors via `EventScannerError`:
+
+- `EventScannerError::BlockRangeScanner(BlockRangeScannerError)` – issues from the underlying block range service (e.g., subscription/channel constraints, historical/sync failures).
+- `EventScannerError::Provider(RpcError<TransportErrorKind>)` – transport/provider-level failures (e.g., connection problems, RPC errors).
+
+Status notifications are emitted as `EventScannerMessage::Status(ScannerStatus)`, including:
+
+- `ScannerStatus::ReorgDetected`
+- `ScannerStatus::SwitchingToLive`
 

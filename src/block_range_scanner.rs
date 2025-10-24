@@ -237,7 +237,6 @@ struct Service<N: Network> {
     max_block_range: u64,
     subscriber: Option<mpsc::Sender<Message>>,
     websocket_connected: bool,
-    processed_count: u64,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
     shutdown: bool,
@@ -252,7 +251,6 @@ impl<N: Network> Service<N> {
             max_block_range,
             subscriber: None,
             websocket_connected: false,
-            processed_count: 0,
             error_count: 0,
             command_receiver: cmd_rx,
             shutdown: false,
@@ -390,38 +388,49 @@ impl<N: Network> Service<N> {
     ) -> Result<(), ScannerError> {
         let sender = self.subscriber.clone().ok_or_else(|| ScannerError::ServiceShutdown)?;
 
+        let provider = self.provider.clone();
         let max_block_range = self.max_block_range;
+
+        let get_start_block = async || -> Result<BlockNumber, ScannerError> {
+            let block = match start_height {
+                BlockNumberOrTag::Number(num) => num,
+                block_tag => provider
+                    .get_block_by_number(block_tag)
+                    .await?
+                    .ok_or_else(|| ScannerError::BlockNotFound(block_tag))?
+                    .header()
+                    .number(),
+            };
+            Ok(block)
+        };
+
+        let get_latest_block = async || -> Result<BlockNumber, ScannerError> {
+            let block = provider
+                .get_block_by_number(BlockNumberOrTag::Latest)
+                .await?
+                .ok_or_else(|| ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
+                .header()
+                .number();
+            Ok(block)
+        };
 
         // Step 1:
         // Fetches the starting block and end block for historical sync in parallel
-        let (start_block, latest_block) = tokio::try_join!(
-            self.provider.get_block_by_number(start_height),
-            self.provider.get_block_by_number(BlockNumberOrTag::Latest)
-        )?;
+        let (start_block, latest_block) = tokio::try_join!(get_start_block(), get_latest_block())?;
 
-        let start_block_num =
-            start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
-        let latest_block = latest_block
-            .ok_or_else(|| ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
-            .header()
-            .number();
-
-        let confirmed_tip_num = latest_block.saturating_sub(block_confirmations);
+        let confirmed_tip = latest_block.saturating_sub(block_confirmations);
 
         // If start is beyond confirmed tip, skip historical and go straight to live
-        if start_block_num > confirmed_tip_num {
+        if start_block > confirmed_tip {
             info!(
-                start_block = start_block_num,
-                confirmed_tip = confirmed_tip_num,
+                start_block = start_block,
+                confirmed_tip = confirmed_tip,
                 "Start block is beyond confirmed tip, starting live stream"
             );
 
-            let sender = self.subscriber.clone().ok_or_else(|| ScannerError::ServiceShutdown)?;
-
-            let provider = self.provider.clone();
             tokio::spawn(async move {
                 Self::stream_live_blocks(
-                    start_block_num,
+                    start_block,
                     provider,
                     sender,
                     block_confirmations,
@@ -433,22 +442,16 @@ impl<N: Network> Service<N> {
             return Ok(());
         }
 
-        info!(
-            start_block = start_block_num,
-            end_block = confirmed_tip_num,
-            "Syncing historical data"
-        );
+        info!(start_block = start_block, end_block = confirmed_tip, "Syncing historical data");
 
         // Step 2: Setup the live streaming buffer
         // This channel will accumulate while historical sync is running
         let (live_block_buffer_sender, live_block_buffer_receiver) =
             mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
 
-        let provider = self.provider.clone();
-
         // The cutoff is the last block we have synced historically
         // Any block > cutoff will come from the live stream
-        let cutoff = confirmed_tip_num;
+        let cutoff = confirmed_tip;
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         let live_subscription_task = tokio::spawn(async move {
@@ -462,36 +465,35 @@ impl<N: Network> Service<N> {
             .await;
         });
 
-        // Step 4: Perform historical synchronization
-        // This processes blocks from start_block to end_block (cutoff)
-        // If this fails, we need to abort the live streaming task
-        if let Err(e) = Self::stream_historical_blocks(
-            start_block_num,
-            confirmed_tip_num,
-            self.max_block_range,
-            &sender,
-        )
-        .await
-        {
-            warn!("aborting live_subscription_task");
-            live_subscription_task.abort();
-            return Err(ScannerError::HistoricalSyncError(e.to_string()));
-        }
-
-        self.send_to_subscriber(ScannerMessage::Status(ScannerStatus::ChainTipReached)).await;
-
-        // Step 5:
-        // Spawn the buffer processor task
-        // This will:
-        // 1. Process all buffered blocks, filtering out any ≤ cutoff
-        // 2. Forward blocks > cutoff to the user
-        // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
-        //    stream)
         tokio::spawn(async move {
+            // Step 4: Perform historical synchronization
+            // This processes blocks from start_block to end_block (cutoff)
+            // If this fails, we need to abort the live streaming task
+            if Self::stream_historical_blocks(start_block, confirmed_tip, max_block_range, &sender)
+                .await
+                .is_err()
+            {
+                error!("Error during syncing past blocks, stopping stream");
+                live_subscription_task.abort();
+                return;
+            }
+
+            if !Self::try_send(&sender, ScannerStatus::SwitchingToLive).await {
+                return;
+            }
+
+            info!("Successfully transitioned from historical to live data");
+
+            // Step 5:
+            // Spawn the buffer processor task
+            // This will:
+            // 1. Process all buffered blocks, filtering out any ≤ cutoff
+            // 2. Forward blocks > cutoff to the user
+            // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
+            //    stream)
             Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
         });
 
-        info!("Successfully transitioned from historical to live data");
         Ok(())
     }
 
@@ -500,6 +502,11 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), ScannerError> {
+        let sender = self.subscriber.take().ok_or_else(|| ScannerError::NoSubscriber)?;
+
+        let provider = self.provider.clone();
+        let max_block_range = self.max_block_range;
+
         let (start_block, end_block) = join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height),
@@ -514,9 +521,9 @@ impl<N: Network> Service<N> {
             _ => (end_block, start_block),
         };
 
-        self.stream_rewind(from, to).await?;
-
-        _ = self.subscriber.take();
+        tokio::spawn(async move {
+            Self::stream_rewind(sender, provider, from, to, max_block_range).await
+        });
 
         Ok(())
     }
@@ -529,12 +536,13 @@ impl<N: Network> Service<N> {
     ///
     /// Returns an error if the stream fails
     async fn stream_rewind(
-        &mut self,
+        sender: mpsc::Sender<Message>,
+        provider: RootProvider<N>,
         from: N::BlockResponse,
         to: N::BlockResponse,
+        max_block_range: u64,
     ) -> Result<(), ScannerError> {
         let mut batch_count = 0;
-        let max_block_range = self.max_block_range;
 
         // for checking whether reorg occurred
         let mut tip_hash = from.header().hash();
@@ -549,7 +557,9 @@ impl<N: Network> Service<N> {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            self.send_to_subscriber(Message::Data(batch_to..=batch_from)).await;
+            if !Self::try_send(&sender, batch_to..=batch_from).await {
+                break;
+            }
 
             batch_count += 1;
             if batch_count % 10 == 0 {
@@ -562,16 +572,27 @@ impl<N: Network> Service<N> {
                 break;
             }
 
-            if self.reorg_detected(tip_hash).await? {
-                info!(block_number = %from, hash = %tip_hash, "Reorg detected");
+            let reorg_detected = match Self::reorg_detected(&provider, tip_hash).await {
+                Ok(reorg_detected) => {
+                    info!(block_number = %from, hash = %tip_hash, "Reorg detected");
+                    reorg_detected
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed the reorg check");
+                    _ = Self::try_send(&sender, e).await;
+                    break;
+                }
+            };
 
-                self.send_to_subscriber(Message::Status(ScannerStatus::ReorgDetected)).await;
+            if reorg_detected {
+                if !Self::try_send(&sender, ScannerStatus::ReorgDetected).await {
+                    break;
+                }
 
                 // restart rewind
                 batch_from = from;
                 // store the updated end block hash
-                tip_hash = self
-                    .provider
+                tip_hash = provider
                     .get_block_by_number(from.into())
                     .await?
                     .expect("Chain should have the same height post-reorg")
@@ -589,13 +610,11 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn reorg_detected(&self, hash_to_check: B256) -> Result<bool, ScannerError> {
-        Ok(self
-            .provider
-            .get_block_by_hash(hash_to_check)
-            .await
-            .map_err(ScannerError::from)?
-            .is_none())
+    async fn reorg_detected(
+        provider: &RootProvider<N>,
+        hash_to_check: B256,
+    ) -> Result<bool, ScannerError> {
+        Ok(provider.get_block_by_hash(hash_to_check).await?.is_none())
     }
 
     async fn stream_historical_blocks(
@@ -683,6 +702,12 @@ impl<N: Network> Service<N> {
                         let range_end =
                             confirmed.min(range_start.saturating_add(max_block_range - 1));
 
+                        info!(
+                            range_start = range_start,
+                            range_end = range_end,
+                            "Sending live block range"
+                        );
+
                         if sender.send(Message::Data(range_start..=range_end)).await.is_err() {
                             warn!("Downstream channel closed, stopping live blocks task");
                             return;
@@ -755,18 +780,6 @@ impl<N: Network> Service<N> {
             .map_err(|_| ScannerError::WebSocketConnectionFailed(1))?;
 
         Ok(ws_stream)
-    }
-
-    async fn send_to_subscriber(&mut self, message: Message) {
-        if let Some(ref sender) = self.subscriber {
-            if let Err(err) = sender.send(message).await {
-                warn!(error = %err, "Downstream channel closed, failed sending the message to subscriber");
-                self.subscriber = None;
-                self.websocket_connected = false;
-            } else {
-                self.processed_count += 1;
-            }
-        }
     }
 
     async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
@@ -846,10 +859,10 @@ impl BlockRangeScannerClient {
     /// # Errors
     ///
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_historical<N: Into<BlockNumberOrTag>>(
+    pub async fn stream_historical(
         &self,
-        start_height: N,
-        end_height: N,
+        start_height: impl Into<BlockNumberOrTag>,
+        end_height: impl Into<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -880,7 +893,7 @@ impl BlockRangeScannerClient {
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_from(
         &self,
-        start_height: BlockNumberOrTag,
+        start_height: impl Into<BlockNumberOrTag>,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
@@ -888,7 +901,7 @@ impl BlockRangeScannerClient {
 
         let command = Command::StreamFrom {
             sender: blocks_sender,
-            start_height,
+            start_height: start_height.into(),
             block_confirmations,
             response: response_tx,
         };
@@ -910,10 +923,10 @@ impl BlockRangeScannerClient {
     /// # Errors
     ///
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn rewind<BN: Into<BlockNumberOrTag>>(
+    pub async fn rewind(
         &self,
-        start_height: BN,
-        end_height: BN,
+        start_height: impl Into<BlockNumberOrTag>,
+        end_height: impl Into<BlockNumberOrTag>,
     ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -999,50 +1012,6 @@ mod tests {
         let scanner = BlockRangeScanner::new().max_block_range(max_block_range);
 
         assert_eq!(scanner.max_block_range, max_block_range);
-    }
-
-    #[tokio::test]
-    async fn send_to_subscriber_increments_processed_count() -> anyhow::Result<()> {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
-
-        let (tx, mut rx) = mpsc::channel(1);
-        service.subscriber = Some(tx);
-
-        let expected_range = 10..=11;
-        service.send_to_subscriber(Message::Data(expected_range.clone())).await;
-
-        assert_eq!(service.processed_count, 1);
-        assert!(service.subscriber.is_some());
-
-        let Message::Data(received) = rx.recv().await.expect("range received") else {
-            panic!("expected BlockRange message")
-        };
-        assert_eq!(received, expected_range);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn send_to_subscriber_removes_closed_channel() -> anyhow::Result<()> {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
-
-        let (tx, rx) = mpsc::channel(1);
-        service.websocket_connected = true;
-        service.subscriber = Some(tx);
-        // channel is closed
-        drop(rx);
-
-        service.send_to_subscriber(Message::Data(15..=15)).await;
-
-        assert!(service.subscriber.is_none());
-        assert!(!service.websocket_connected);
-        assert_eq!(service.processed_count, 0);
-
-        Ok(())
     }
 
     #[test]
@@ -1611,16 +1580,12 @@ mod tests {
 
     #[tokio::test]
     async fn forwards_errors_to_subscribers() -> anyhow::Result<()> {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
-
         let (tx, mut rx) = mpsc::channel(1);
-        service.subscriber = Some(tx);
 
-        service
-            .send_to_subscriber(Message::Error(ScannerError::WebSocketConnectionFailed(4)))
-            .await;
+        let sent =
+            Service::<Ethereum>::try_send(&tx, ScannerError::WebSocketConnectionFailed(4)).await;
+
+        assert!(sent);
 
         match rx.recv().await.expect("subscriber should stay open") {
             Message::Error(ScannerError::WebSocketConnectionFailed(attempts)) => {
@@ -1768,9 +1733,8 @@ mod tests {
             .await?
             .run()?;
 
-        let mut stream = client
-            .rewind::<BlockNumberOrTag>(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest)
-            .await?;
+        let mut stream =
+            client.rewind(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
 
         assert_next!(stream, 14..=20);
         assert_next!(stream, 7..=13);

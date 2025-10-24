@@ -10,51 +10,61 @@ use alloy::{
     rpc::types::{Filter, Log},
     transports::{RpcError, TransportErrorKind},
 };
-use tokio::sync::{
-    broadcast::{self, Sender, error::RecvError},
-    mpsc,
+use tokio::{
+    sync::{
+        broadcast::{self, Sender, error::RecvError},
+        mpsc,
+    },
+    task::JoinSet,
 };
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio_stream::{Stream, StreamExt};
 use tracing::{error, info, warn};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum ConsumerMode {
     Stream,
     CollectLatest { count: usize },
 }
 
-pub async fn handle_stream<N: Network>(
-    mut stream: ReceiverStream<BlockRangeMessage>,
+pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unpin>(
+    mut stream: S,
     provider: &RootProvider<N>,
     listeners: &[EventListener],
     mode: ConsumerMode,
 ) {
     let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
 
-    spawn_log_consumers(provider, listeners, &range_tx, mode);
+    let consumers = spawn_log_consumers(provider, listeners, &range_tx, mode);
 
     while let Some(message) = stream.next().await {
         if let Err(err) = range_tx.send(message) {
-            error!(error = %err, "No receivers, stopping broadcast");
+            warn!(error = %err, "No log consumers, stopping stream");
             break;
         }
     }
+
+    // Close the channel sender to signal to the log consumers that streaming is done.
+    drop(range_tx);
+
+    // ensure all consumers finish before they're dropped
+    consumers.join_all().await;
 }
 
+#[must_use]
 pub fn spawn_log_consumers<N: Network>(
     provider: &RootProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockRangeMessage>,
     mode: ConsumerMode,
-) {
-    for listener in listeners {
+) -> JoinSet<()> {
+    listeners.iter().fold(JoinSet::new(), |mut set, listener| {
         let provider = provider.clone();
         let filter = listener.filter.clone();
         let base_filter = Filter::from(&filter);
         let sender = listener.sender.clone();
         let mut sub = range_tx.subscribe();
 
-        tokio::spawn(async move {
+        set.spawn(async move {
             // Only used for CollectLatest
             let mut collected: Vec<Log> = match mode {
                 ConsumerMode::CollectLatest { count } => Vec::with_capacity(count),
@@ -78,11 +88,13 @@ pub fn spawn_log_consumers<N: Network>(
                                     }
                                     ConsumerMode::CollectLatest { count } => {
                                         let take = count.saturating_sub(collected.len());
+                                        // if we have enough logs, break
                                         if take == 0 {
                                             break;
                                         }
                                         // take latest within this range
                                         collected.extend(logs.into_iter().rev().take(take));
+                                        // if we have enough logs, break
                                         if collected.len() == count {
                                             break;
                                         }
@@ -97,11 +109,13 @@ pub fn spawn_log_consumers<N: Network>(
                         }
                     }
                     Ok(BlockRangeMessage::Error(e)) => {
+                        error!(error = ?e, "Received error message");
                         if !try_send(&sender, e).await {
                             break;
                         }
                     }
                     Ok(BlockRangeMessage::Status(status)) => {
+                        info!(status = ?status, "Received status message");
                         if !try_send(&sender, status).await {
                             break;
                         }
@@ -119,10 +133,13 @@ pub fn spawn_log_consumers<N: Network>(
                     collected.reverse(); // restore chronological order
                 }
 
+                info!("Sending collected logs to consumer");
                 _ = try_send(&sender, collected).await;
             }
         });
-    }
+
+        set
+    })
 }
 
 async fn get_logs<N: Network>(
@@ -166,5 +183,6 @@ async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> b
         warn!(error = %err, "Downstream channel closed, stopping stream");
         return false;
     }
+    info!("Sent message to consumer");
     true
 }
