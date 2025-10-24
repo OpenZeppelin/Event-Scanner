@@ -8,7 +8,8 @@ pub use historic::{HistoricEventScanner, HistoricScannerBuilder};
 pub use latest::{LatestEventScanner, LatestScannerBuilder};
 pub use live::{LiveEventScanner, LiveScannerBuilder};
 pub use sync::{
-    SyncEventScanner, SyncScannerBuilder,
+    SyncScannerBuilder,
+    from_block::{SyncFromBlockEventScanner, SyncFromBlockEventScannerBuilder},
     from_latest::{SyncFromLatestEventScanner, SyncFromLatestScannerBuilder},
 };
 
