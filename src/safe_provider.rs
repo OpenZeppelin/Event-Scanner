@@ -9,6 +9,7 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
+use tokio::time::timeout;
 use tracing::{error, info};
 
 /// Safe provider wrapper with built-in retry and timeout mechanisms.
@@ -256,7 +257,7 @@ impl<N: Network> SafeProvider<N> {
             .with_max_times(self.max_retries)
             .with_min_delay(self.retry_interval);
 
-        match tokio::time::timeout(
+        match timeout(
             self.max_timeout,
             (|| operation(provider.clone())).retry(retry_strategy).sleep(tokio::time::sleep),
         )
