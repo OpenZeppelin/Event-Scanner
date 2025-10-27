@@ -145,7 +145,7 @@ mod tests {
     use alloy::{network::Ethereum, rpc::client::RpcClient, transports::mock::Asserter};
 
     #[test]
-    fn test_sync_scanner_config_defaults() {
+    fn sync_scanner_config_defaults() {
         let config = SyncFromBlockEventScannerBuilder::new(BlockNumberOrTag::Earliest);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_scanner_builder_pattern() {
+    fn sync_scanner_builder_pattern() {
         let config =
             SyncFromBlockEventScannerBuilder::new(50).max_block_range(25).block_confirmations(5);
 
@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_scanner_builder_with_different_block_types() {
+    fn sync_scanner_builder_with_different_block_types() {
         let config = SyncFromBlockEventScannerBuilder::new(BlockNumberOrTag::Earliest)
             .block_confirmations(20)
             .max_block_range(100);
@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_scanner_builder_with_zero_confirmations() {
+    fn sync_scanner_builder_with_zero_confirmations() {
         let config =
             SyncFromBlockEventScannerBuilder::new(0).block_confirmations(0).max_block_range(75);
 
@@ -184,8 +184,8 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_scanner_builder_last_call_wins() {
-        let config = SyncFromBlockEventScannerBuilder::new(1)
+    fn sync_scanner_builder_last_call_wins() {
+        let config = SyncFromBlockEventScannerBuilder::new(2)
             .max_block_range(25)
             .max_block_range(55)
             .max_block_range(105)
@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_event_stream_listeners_vector_updates() {
+    fn sync_event_stream_listeners_vector_updates() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let mut scanner = SyncFromBlockEventScannerBuilder::new(BlockNumberOrTag::Earliest)
             .connect::<Ethereum>(provider);
@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_event_stream_channel_capacity() {
+    fn sync_event_stream_channel_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let mut scanner = SyncFromBlockEventScannerBuilder::new(BlockNumberOrTag::Earliest)
             .connect::<Ethereum>(provider);
