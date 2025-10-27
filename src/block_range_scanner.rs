@@ -286,34 +286,24 @@ impl<N: Network> Service<N> {
 
     async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
         match command {
-            Command::StreamLive { subscriber: sender, block_confirmations, response } => {
+            Command::StreamLive { subscriber, block_confirmations, response } => {
                 info!("Starting live stream");
-                let result = self.handle_live(block_confirmations, sender).await;
+                let result = self.handle_live(block_confirmations, subscriber).await;
                 let _ = response.send(result);
             }
-            Command::StreamHistorical {
-                subscriber: sender,
-                start_height,
-                end_height,
-                response,
-            } => {
+            Command::StreamHistorical { subscriber, start_height, end_height, response } => {
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting historical stream");
-                let result = self.handle_historical(start_height, end_height, sender).await;
+                let result = self.handle_historical(start_height, end_height, subscriber).await;
                 let _ = response.send(result);
             }
-            Command::StreamFrom {
-                subscriber: sender,
-                start_height,
-                block_confirmations,
-                response,
-            } => {
+            Command::StreamFrom { subscriber, start_height, block_confirmations, response } => {
                 info!(start_height = ?start_height, "Starting streaming from");
-                let result = self.handle_sync(start_height, block_confirmations, sender).await;
+                let result = self.handle_sync(start_height, block_confirmations, subscriber).await;
                 let _ = response.send(result);
             }
-            Command::Rewind { subscriber: sender, start_height, end_height, response } => {
+            Command::Rewind { subscriber, start_height, end_height, response } => {
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
-                let result = self.handle_rewind(start_height, end_height, sender).await;
+                let result = self.handle_rewind(start_height, end_height, subscriber).await;
                 let _ = response.send(result);
             }
         }
