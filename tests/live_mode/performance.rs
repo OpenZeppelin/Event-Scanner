@@ -23,7 +23,7 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
 
     let mut stream = setup.stream.take(expected_event_count);
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
