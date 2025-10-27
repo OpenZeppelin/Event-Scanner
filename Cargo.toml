@@ -70,6 +70,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true
+# used when debugging tests
 test-log.workspace = true
 
 [lints]
