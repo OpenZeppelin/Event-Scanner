@@ -107,7 +107,7 @@ impl<N: Network> HistoricEventScanner<N> {
     #[must_use]
     pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
         let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
-        self.listeners.push(EventListener { filter, sender: sender });
+        self.listeners.push(EventListener { filter, sender });
         ReceiverStream::new(receiver)
     }
 
