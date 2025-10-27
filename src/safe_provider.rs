@@ -162,9 +162,8 @@ impl<N: Network> SafeProvider<N> {
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, SafeProviderError> {
         info!("eth_getLogs called");
         let result = self
-            .retry_with_total_timeout(move |provider| {
-                let filter = filter.clone();
-                async move { provider.get_logs(&filter).await.map_err(SafeProviderError::from) }
+            .retry_with_total_timeout(move |provider| async move {
+                provider.get_logs(filter).await.map_err(SafeProviderError::from)
             })
             .await;
         if let Err(e) = &result {
