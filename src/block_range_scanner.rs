@@ -63,17 +63,14 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive};
+use std::cmp::Ordering;
 use tokio::{
     join,
     sync::{mpsc, oneshot},
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::{
-    error::ScannerError,
-    types::{ScannerMessage, ScannerStatus},
-};
+use crate::{error::ScannerError, types::ScannerStatus};
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
@@ -88,6 +85,11 @@ use alloy::{
 };
 use tracing::{debug, error, info, warn};
 
+mod message;
+
+pub use message::Message;
+use message::TryStream;
+
 pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
@@ -97,32 +99,6 @@ pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 // Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
 // is considered final)
 pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
-
-pub type Message = ScannerMessage<RangeInclusive<BlockNumber>, ScannerError>;
-
-impl From<RangeInclusive<BlockNumber>> for Message {
-    fn from(logs: RangeInclusive<BlockNumber>) -> Self {
-        Message::Data(logs)
-    }
-}
-
-impl PartialEq<RangeInclusive<BlockNumber>> for Message {
-    fn eq(&self, other: &RangeInclusive<BlockNumber>) -> bool {
-        if let Message::Data(range) = self { range.eq(other) } else { false }
-    }
-}
-
-impl From<RpcError<TransportErrorKind>> for Message {
-    fn from(error: RpcError<TransportErrorKind>) -> Self {
-        Message::Error(error.into())
-    }
-}
-
-impl From<ScannerError> for Message {
-    fn from(error: ScannerError) -> Self {
-        Message::Error(error)
-    }
-}
 
 #[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
@@ -214,24 +190,24 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
 #[derive(Debug)]
 pub enum Command {
     StreamLive {
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
         block_confirmations: u64,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     StreamHistorical {
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     StreamFrom {
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
         start_height: BlockNumberOrTag,
         block_confirmations: u64,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     Rewind {
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), ScannerError>>,
@@ -285,22 +261,32 @@ impl<N: Network> Service<N> {
 
     async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
         match command {
-            Command::StreamLive { sender, block_confirmations, response } => {
+            Command::StreamLive { subscriber: sender, block_confirmations, response } => {
                 info!("Starting live stream");
                 let result = self.handle_live(block_confirmations, sender).await;
                 let _ = response.send(result);
             }
-            Command::StreamHistorical { sender, start_height, end_height, response } => {
+            Command::StreamHistorical {
+                subscriber: sender,
+                start_height,
+                end_height,
+                response,
+            } => {
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting historical stream");
                 let result = self.handle_historical(start_height, end_height, sender).await;
                 let _ = response.send(result);
             }
-            Command::StreamFrom { sender, start_height, block_confirmations, response } => {
+            Command::StreamFrom {
+                subscriber: sender,
+                start_height,
+                block_confirmations,
+                response,
+            } => {
                 info!(start_height = ?start_height, "Starting streaming from");
                 let result = self.handle_sync(start_height, block_confirmations, sender).await;
                 let _ = response.send(result);
             }
-            Command::Rewind { sender, start_height, end_height, response } => {
+            Command::Rewind { subscriber: sender, start_height, end_height, response } => {
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
                 let result = self.handle_rewind(start_height, end_height, sender).await;
                 let _ = response.send(result);
@@ -312,7 +298,7 @@ impl<N: Network> Service<N> {
     async fn handle_live(
         &mut self,
         block_confirmations: u64,
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
@@ -327,7 +313,7 @@ impl<N: Network> Service<N> {
             Self::stream_live_blocks(
                 range_start,
                 provider,
-                sender,
+                subscriber,
                 block_confirmations,
                 max_block_range,
             )
@@ -341,7 +327,7 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
 
@@ -367,7 +353,7 @@ impl<N: Network> Service<N> {
                 start_block_num,
                 end_block_num,
                 max_block_range,
-                &sender,
+                &subscriber,
             )
             .await;
         });
@@ -379,7 +365,7 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         block_confirmations: u64,
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
 
@@ -412,7 +398,7 @@ impl<N: Network> Service<N> {
                 Self::stream_live_blocks(
                     start_block_num,
                     provider,
-                    sender,
+                    subscriber,
                     block_confirmations,
                     max_block_range,
                 )
@@ -459,12 +445,12 @@ impl<N: Network> Service<N> {
                 start_block_num,
                 confirmed_tip_num,
                 max_block_range,
-                &sender,
+                &subscriber,
             )
             .await;
 
             info!("Chain tip reached, switching to live");
-            if !sender.try_stream(ScannerStatus::ChainTipReached).await {
+            if !subscriber.try_stream(ScannerStatus::ChainTipReached).await {
                 return;
             }
 
@@ -475,7 +461,7 @@ impl<N: Network> Service<N> {
             // 2. Forward blocks > cutoff to the user
             // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
             //    stream)
-            Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
+            Self::process_live_block_buffer(live_block_buffer_receiver, subscriber, cutoff).await;
         });
 
         info!("Successfully transitioned from historical to live data");
@@ -487,7 +473,7 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
@@ -507,7 +493,7 @@ impl<N: Network> Service<N> {
         };
 
         tokio::spawn(async move {
-            Self::stream_rewind(from, to, max_block_range, &sender, &provider).await;
+            Self::stream_rewind(from, to, max_block_range, &subscriber, &provider).await;
         });
 
         Ok(())
@@ -524,7 +510,7 @@ impl<N: Network> Service<N> {
         from: N::BlockResponse,
         to: N::BlockResponse,
         max_block_range: u64,
-        sender: &mpsc::Sender<Message>,
+        subscriber: &mpsc::Sender<Message>,
         provider: &RootProvider<N>,
     ) {
         let mut batch_count = 0;
@@ -542,7 +528,7 @@ impl<N: Network> Service<N> {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(batch_to..=batch_from).await {
+            if !subscriber.try_stream(batch_to..=batch_from).await {
                 break;
             }
 
@@ -561,7 +547,7 @@ impl<N: Network> Service<N> {
                 Ok(detected) => detected,
                 Err(e) => {
                     error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = sender.try_stream(e);
+                    _ = subscriber.try_stream(e);
                     return;
                 }
             };
@@ -569,7 +555,7 @@ impl<N: Network> Service<N> {
             if reorged {
                 info!(block_number = %from, hash = %tip_hash, "Reorg detected");
 
-                if !sender.try_stream(ScannerStatus::ReorgDetected).await {
+                if !subscriber.try_stream(ScannerStatus::ReorgDetected).await {
                     break;
                 }
 
@@ -582,7 +568,7 @@ impl<N: Network> Service<N> {
                     }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream(e);
+                        _ = subscriber.try_stream(e);
                         return;
                     }
                 };
@@ -600,7 +586,7 @@ impl<N: Network> Service<N> {
         start: BlockNumber,
         end: BlockNumber,
         max_block_range: u64,
-        sender: &mpsc::Sender<Message>,
+        subscriber: &mpsc::Sender<Message>,
     ) {
         let mut batch_count = 0;
 
@@ -612,7 +598,7 @@ impl<N: Network> Service<N> {
             let batch_end_block_number =
                 next_start_block.saturating_add(max_block_range - 1).min(end);
 
-            if !sender.try_stream(next_start_block..=batch_end_block_number).await {
+            if !subscriber.try_stream(next_start_block..=batch_end_block_number).await {
                 break;
             }
 
@@ -637,7 +623,7 @@ impl<N: Network> Service<N> {
     async fn stream_live_blocks<P: Provider<N>>(
         mut range_start: BlockNumber,
         provider: P,
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
     ) {
@@ -656,9 +642,7 @@ impl<N: Network> Service<N> {
 
                     if incoming_block_num < range_start {
                         warn!("Reorg detected: sending forked range");
-                        if sender.send(Message::Status(ScannerStatus::ReorgDetected)).await.is_err()
-                        {
-                            warn!("Downstream channel closed, stopping live blocks task");
+                        if !subscriber.try_stream(ScannerStatus::ReorgDetected).await {
                             return;
                         }
 
@@ -677,8 +661,7 @@ impl<N: Network> Service<N> {
                         let range_end =
                             confirmed.min(range_start.saturating_add(max_block_range - 1));
 
-                        if sender.send(Message::Data(range_start..=range_end)).await.is_err() {
-                            warn!("Downstream channel closed, stopping live blocks task");
+                        if !subscriber.try_stream(range_start..=range_end).await {
                             return;
                         }
 
@@ -688,16 +671,14 @@ impl<N: Network> Service<N> {
                 }
             }
             Err(e) => {
-                if sender.send(Message::Error(e)).await.is_err() {
-                    warn!("Downstream channel closed, stopping live blocks task");
-                }
+                _ = subscriber.try_stream(e).await;
             }
         }
     }
 
     async fn process_live_block_buffer(
         mut buffer_rx: mpsc::Receiver<Message>,
-        sender: mpsc::Sender<Message>,
+        subscriber: mpsc::Sender<Message>,
         cutoff: BlockNumber,
     ) {
         let mut processed = 0;
@@ -709,29 +690,26 @@ impl<N: Network> Service<N> {
                 Message::Data(range) => {
                     let (start, end) = (*range.start(), *range.end());
                     if start >= cutoff {
-                        if sender.send(Message::Data(range)).await.is_err() {
-                            warn!("Subscriber channel closed, cleaning up");
-                            return;
+                        if !subscriber.try_stream(range).await {
+                            break;
                         }
                         processed += end - start;
                     } else if end >= cutoff {
                         discarded += cutoff - start;
 
                         let start = cutoff;
-                        if sender.send(Message::Data(start..=end)).await.is_err() {
-                            warn!("Subscriber channel closed, cleaning up");
-                            return;
+                        if !subscriber.try_stream(start..=end).await {
+                            break;
                         }
                         processed += end - start;
                     } else {
                         discarded += end - start;
                     }
                 }
-                _ => {
+                other => {
                     // Could be error or status
-                    if sender.send(data).await.is_err() {
-                        warn!("Subscriber channel closed, cleaning up");
-                        return;
+                    if !subscriber.try_stream(other).await {
+                        break;
                     }
                 }
             }
@@ -749,20 +727,6 @@ impl<N: Network> Service<N> {
             .map_err(|_| ScannerError::WebSocketConnectionFailed(1))?;
 
         Ok(ws_stream)
-    }
-}
-
-trait TryStream {
-    async fn try_stream<T: Into<Message>>(&self, msg: T) -> bool;
-}
-
-impl TryStream for mpsc::Sender<Message> {
-    async fn try_stream<T: Into<Message>>(&self, msg: T) -> bool {
-        if let Err(err) = self.send(msg.into()).await {
-            warn!(error = %err, "Downstream channel closed, stopping stream");
-            return false;
-        }
-        true
     }
 }
 
@@ -805,7 +769,7 @@ impl BlockRangeScannerClient {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamLive {
-            sender: blocks_sender,
+            subscriber: blocks_sender,
             block_confirmations,
             response: response_tx,
         };
@@ -836,7 +800,7 @@ impl BlockRangeScannerClient {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamHistorical {
-            sender: blocks_sender,
+            subscriber: blocks_sender,
             start_height: start_height.into(),
             end_height: end_height.into(),
             response: response_tx,
@@ -868,7 +832,7 @@ impl BlockRangeScannerClient {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamFrom {
-            sender: blocks_sender,
+            subscriber: blocks_sender,
             start_height,
             block_confirmations,
             response: response_tx,
@@ -900,7 +864,7 @@ impl BlockRangeScannerClient {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Rewind {
-            sender: blocks_sender,
+            subscriber: blocks_sender,
             start_height: start_height.into(),
             end_height: end_height.into(),
             response: response_tx,
