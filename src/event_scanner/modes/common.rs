@@ -49,12 +49,12 @@ pub fn spawn_log_consumers<N: Network>(
     range_tx: &Sender<BlockRangeMessage>,
     mode: ConsumerMode,
 ) {
-    for listener in listeners {
+    for listener in listeners.iter().cloned() {
+        let EventListener { filter, sender } = listener;
+
         let provider = provider.clone();
-        let filter = listener.filter.clone();
         let base_filter = Filter::from(&filter);
-        let sender = listener.sender.clone();
-        let mut sub = range_tx.subscribe();
+        let mut range_rx = range_tx.subscribe();
 
         tokio::spawn(async move {
             // Only used for CollectLatest
@@ -64,7 +64,7 @@ pub fn spawn_log_consumers<N: Network>(
             };
 
             loop {
-                match sub.recv().await {
+                match range_rx.recv().await {
                     Ok(BlockRangeMessage::Data(range)) => {
                         match get_logs(range, &filter, &base_filter, &provider).await {
                             Ok(logs) => {

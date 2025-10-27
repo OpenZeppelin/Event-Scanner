@@ -565,7 +565,7 @@ impl<N: Network> Service<N> {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            if !try_send(&sender, batch_to..=batch_from).await {
+            if !try_send(sender, batch_to..=batch_from).await {
                 break;
             }
 
@@ -580,11 +580,11 @@ impl<N: Network> Service<N> {
                 break;
             }
 
-            let reorged = match reorg_detected(&provider, tip_hash).await {
+            let reorged = match reorg_detected(provider, tip_hash).await {
                 Ok(detected) => detected,
                 Err(e) => {
-                    error!(error = %e, "Terminal RPC call error, shuting down");
-                    _ = try_send(&sender, e);
+                    error!(error = %e, "Terminal RPC call error, shutting down");
+                    _ = try_send(sender, e);
                     return;
                 }
             };
@@ -592,7 +592,7 @@ impl<N: Network> Service<N> {
             if reorged {
                 info!(block_number = %from, hash = %tip_hash, "Reorg detected");
 
-                if !try_send(&sender, ScannerStatus::ReorgDetected).await {
+                if !try_send(sender, ScannerStatus::ReorgDetected).await {
                     break;
                 }
 
@@ -604,8 +604,8 @@ impl<N: Network> Service<N> {
                         block.expect("Chain should have the same height post-reorg").header().hash()
                     }
                     Err(e) => {
-                        error!(error = %e, "Terminal RPC call error, shuting down");
-                        _ = try_send(&sender, e);
+                        error!(error = %e, "Terminal RPC call error, shutting down");
+                        _ = try_send(sender, e);
                         return;
                     }
                 };
