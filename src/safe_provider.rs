@@ -214,25 +214,26 @@ impl<N: Network> SafeProvider<N> {
             return result;
         }
 
-        info!(
-            "Primary provider failed, trying {} fallback provider(s)",
-            self.fallback_providers.len()
-        );
+        info!("Primary provider failed, trying fallback provider(s)");
 
         // Try each fallback provider
         for (idx, fallback_provider) in self.fallback_providers.iter().enumerate() {
-            info!("Attempting fallback provider {}", idx + 1);
+            info!(
+                "Attempting fallback provider {} out of {}",
+                idx + 1,
+                self.fallback_providers.len()
+            );
 
             let fallback_result =
                 self.try_provider_with_timeout(fallback_provider, &operation).await;
 
             match fallback_result {
                 Ok(value) => {
-                    info!("Fallback provider {} succeeded", idx + 1);
+                    info!(provider_num = idx + 1, "Fallback provider succeeded");
                     return Ok(value);
                 }
                 Err(e) => {
-                    error!("Fallback provider {} failed with error: {}", idx + 1, e);
+                    error!(provider_num = idx + 1, err = %e, "Fallback provider failed with error");
                 }
             }
         }
