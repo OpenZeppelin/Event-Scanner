@@ -1,23 +1,20 @@
-use alloy::{eips::BlockNumberOrTag, primitives::U256};
+use alloy::primitives::U256;
 use event_scanner::{assert_next, types::ScannerStatus};
 
-use crate::common::{TestCounter, setup_scanner};
+use crate::common::{TestCounter, setup_sync_scanner};
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
-    let setup = setup_scanner(None, None, None).await?;
+    let setup = setup_sync_scanner(Some(0.1), None, 0).await?;
     let contract = setup.contract;
-    let client = setup.client;
+    let scanner = setup.scanner;
     let mut stream = setup.stream;
 
-    let receipt = contract.increase().send().await?.get_receipt().await?;
-    let first_historical_block =
-        receipt.block_number.expect("historical receipt should contain block number");
-
+    contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    client.start_scanner(BlockNumberOrTag::Number(first_historical_block), None).await?;
+    scanner.start().await?;
 
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
