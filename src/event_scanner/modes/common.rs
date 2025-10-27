@@ -48,7 +48,7 @@ pub fn spawn_log_consumers<N: Network>(
     mode: ConsumerMode,
 ) {
     for listener in listeners.iter().cloned() {
-        let EventListener { filter, sender } = listener;
+        let EventListener { filter, subscriber } = listener;
 
         let provider = provider.clone();
         let base_filter = Filter::from(&filter);
@@ -72,7 +72,7 @@ pub fn spawn_log_consumers<N: Network>(
 
                                 match mode {
                                     ConsumerMode::Stream => {
-                                        if !sender.try_stream(logs).await {
+                                        if !subscriber.try_stream(logs).await {
                                             break;
                                         }
                                     }
@@ -90,19 +90,19 @@ pub fn spawn_log_consumers<N: Network>(
                                 }
                             }
                             Err(e) => {
-                                if !sender.try_stream(e).await {
+                                if !subscriber.try_stream(e).await {
                                     break;
                                 }
                             }
                         }
                     }
                     Ok(BlockRangeMessage::Error(e)) => {
-                        if !sender.try_stream(e).await {
+                        if !subscriber.try_stream(e).await {
                             break;
                         }
                     }
                     Ok(BlockRangeMessage::Status(status)) => {
-                        if !sender.try_stream(status).await {
+                        if !subscriber.try_stream(status).await {
                             break;
                         }
                     }
@@ -119,7 +119,7 @@ pub fn spawn_log_consumers<N: Network>(
                     collected.reverse(); // restore chronological order
                 }
 
-                _ = sender.try_stream(collected).await;
+                _ = subscriber.try_stream(collected).await;
             }
         });
     }

@@ -107,7 +107,7 @@ impl<N: Network> SyncEventScanner<N> {
     #[must_use]
     pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
         let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
-        self.listeners.push(EventListener { filter, sender });
+        self.listeners.push(EventListener { filter, subscriber: sender });
         ReceiverStream::new(receiver)
     }
 
@@ -219,7 +219,7 @@ mod tests {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let mut scanner = SyncScannerBuilder::new().connect::<Ethereum>(provider);
         let _stream = scanner.subscribe(EventFilter::new());
-        let sender = &scanner.listeners[0].sender;
+        let sender = &scanner.listeners[0].subscriber;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
     }
 }

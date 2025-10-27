@@ -4,5 +4,5 @@ use tokio::sync::mpsc::Sender;
 #[derive(Clone)]
 pub(crate) struct EventListener {
     pub filter: EventFilter,
-    pub sender: Sender<Message>,
+    pub subscriber: Sender<Message>,
 }
