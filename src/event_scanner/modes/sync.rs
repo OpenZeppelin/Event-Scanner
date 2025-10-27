@@ -20,34 +20,13 @@ impl SyncScannerBuilder {
     /// transitions to live streaming mode.
     ///
     /// This method combines two scanning phases into a single operation:
+    ///
     /// 1. **Latest events phase**: Collects up to `count` most recent events by scanning backwards
     ///    from the current chain tip
-    /// 2. **Automatic transition**: Emits [`ScannerStatus::SwitchingToLive`] to signal the mode
-    ///    change
+    /// 2. **Automatic transition**: Emits [`ScannerStatus::SwitchingToLive`][switch_to_live] to
+    ///    signal the mode change
     /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
     ///    on-chain
-    ///
-    /// # How it works
-    ///
-    /// The scanner captures the latest block number before starting to establish a clear boundary
-    /// between phases. The historical phase scans from `Earliest` to `latest_block`, while the
-    /// live phase starts from `latest_block + 1`. This design prevents duplicate events and
-    /// handles race conditions where new blocks arrive during setup.
-    ///
-    /// # Key behaviors
-    ///
-    /// - **No duplicates**: Events are not delivered twice across the phase transition
-    /// - **Flexible count**: If fewer than `count` events exist, returns all available events
-    /// - **Reorg handling**: Both phases handle reorgs appropriately:
-    ///   - Historical phase: resets and rescans on reorg detection
-    ///   - Live phase: resets stream to the first post-reorg block that satisfies the block
-    ///     confirmations set via [`block_confirmations`](Self::block_confirmations)
-    /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
-    ///
-    /// # Arguments
-    ///
-    /// * `count` - Maximum number of recent events to collect per listener before switching to live
-    ///   streaming
     ///
     /// # Example
     ///
@@ -88,26 +67,50 @@ impl SyncScannerBuilder {
     /// # }
     /// ```
     ///
+    /// # How it works
+    ///
+    /// The scanner captures the latest block number before starting to establish a clear boundary
+    /// between phases. The historical phase scans from genesis block to the current latest block,
+    /// while the live phase starts from the block after the latest block. This design prevents
+    /// duplicate events and handles race conditions where new blocks arrive during setup.
+    ///
+    /// # Key behaviors
+    ///
+    /// - **No duplicates**: Events are not delivered twice across the phase transition
+    /// - **Flexible count**: If fewer than `count` events exist, returns all available events
+    /// - **Reorg handling**: Both phases handle reorgs appropriately:
+    ///   - Historical phase: resets and rescans on reorg detection
+    ///   - Live phase: resets stream to the first post-reorg block that satisfies the configured
+    ///     block confirmations
+    /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of recent events to collect per listener before switching to live
+    ///   streaming
+    ///
     /// # Important notes
     ///
-    /// - Register event streams via [`subscribe`](Self::subscribe) **before** calling
-    ///   [`start`](Self::start)
-    /// - The [`start`](Self::start) method returns immediately; events are delivered asynchronously
+    /// - Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
+    ///   [`scanner.start()`][start]
+    /// - The [`scanner.start()`][start] method returns immediately; events are delivered
+    ///   asynchronously
     /// - The live phase continues indefinitely until the scanner is dropped or encounters an error
     ///
     /// # Detailed reorg behavior
     ///
-    /// - **Historical rewind phase**: Reverse-ordered rewind over `Earliest..=latest_block`. On
-    ///   detecting a reorg, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
-    ///   new tip, and continues until collectors accumulate `count` logs. Final delivery to
-    ///   listeners preserves chronological order.
-    /// - **Live streaming phase**: Starts from `latest_block + 1` and respects block confirmations
-    ///   configured via [`block_confirmations`](Self::block_confirmations). On reorg, emits
-    ///   [`ScannerStatus::ReorgDetected`], adjusts the next confirmed window (possibly re-emitting
-    ///   confirmed portions), and continues streaming.
+    /// - **Historical rewind phase**: Restart the scanner. On detecting a reorg, emits
+    ///   [`ScannerStatus::ReorgDetected`][reorg], resets the rewind start to the new tip, and
+    ///   continues until collectors accumulate `count` logs. Final delivery to listeners preserves
+    ///   chronological order.
+    /// - **Live streaming phase**: Starts from `latest_block + 1` and respects the configured block
+    ///   confirmations. On reorg, emits [`ScannerStatus::ReorgDetected`][reorg], adjusts the next
+    ///   confirmed window (possibly re-emitting confirmed portions), and continues streaming.
     ///
-    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
-    /// [`ScannerStatus::SwitchingToLive`]: crate::types::ScannerStatus::SwitchingToLive
+    /// [subscribe]: from_latest::SyncFromLatestEventScanner::subscribe
+    /// [start]: from_latest::SyncFromLatestEventScanner::start
+    /// [reorg]: crate::types::ScannerStatus::ReorgDetected
+    /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
     #[must_use]
     pub fn from_latest(self, count: usize) -> SyncFromLatestScannerBuilder {
         SyncFromLatestScannerBuilder::new(count)

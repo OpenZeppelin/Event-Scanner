@@ -22,7 +22,6 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
   - [Scanning Latest Events](#scanning-latest-events)
-  - [Scanning Latest Events Then Live](#scanning-latest-events-then-live)
 - [Examples](#examples)
 - [Testing](#testing)
 
