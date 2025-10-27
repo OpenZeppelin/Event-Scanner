@@ -479,8 +479,6 @@ impl<N: Network> Service<N> {
             Self::process_live_block_buffer(live_block_buffer_receiver, subscriber, cutoff).await;
         });
 
-        info!("Successfully transitioned from historical to live data");
-
         Ok(())
     }
 
