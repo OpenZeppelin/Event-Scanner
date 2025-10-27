@@ -62,6 +62,17 @@ impl<N: Network> SyncScannerBuilder<N> {
         self
     }
 
+    /// Adds a fallback provider (can add multiple)
+    ///
+    /// # Errors
+    ///
+    /// Will panic if the provider does not implement pubsub
+    #[must_use]
+    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
+        self.block_range_scanner.fallback_providers.push(provider);
+        self
+    }
+
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`SyncEventScanner`].
@@ -70,7 +81,7 @@ impl<N: Network> SyncScannerBuilder<N> {
     ///
     /// Returns an error if the connection fails
     pub async fn connect_ws(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
+        let block_range_scanner = self.block_range_scanner.clone().connect_ws(ws_url).await?;
         Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -81,11 +92,8 @@ impl<N: Network> SyncScannerBuilder<N> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> TransportResult<SyncEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+    pub async fn connect_ipc(self, ipc_path: String) -> TransportResult<SyncEventScanner<N>> {
+        let block_range_scanner = self.block_range_scanner.clone().connect_ipc(ipc_path).await?;
         Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -97,8 +105,8 @@ impl<N: Network> SyncScannerBuilder<N> {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> SyncEventScanner<N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
+    pub fn connect(self, provider: RootProvider<N>) -> SyncEventScanner<N> {
+        let block_range_scanner = self.block_range_scanner.clone().connect(provider);
         SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -146,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_config_defaults() {
-        let config = SyncScannerBuilder::new();
+        let config: SyncScannerBuilder<Ethereum> = SyncScannerBuilder::new();
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
         assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
@@ -154,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_pattern() {
-        let config = SyncScannerBuilder::new()
+        let config: SyncScannerBuilder<Ethereum> = SyncScannerBuilder::new()
             .max_block_range(25)
             .block_confirmations(5)
             .from_block(BlockNumberOrTag::Number(50));
@@ -166,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_with_different_block_types() {
-        let config = SyncScannerBuilder::new()
+        let config: SyncScannerBuilder<Ethereum> = SyncScannerBuilder::new()
             .from_block(BlockNumberOrTag::Earliest)
             .block_confirmations(20)
             .max_block_range(100);
@@ -178,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_with_zero_confirmations() {
-        let config =
+        let config: SyncScannerBuilder<Ethereum> =
             SyncScannerBuilder::new().from_block(0).block_confirmations(0).max_block_range(75);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(0)));
@@ -188,7 +196,7 @@ mod tests {
 
     #[test]
     fn test_sync_scanner_builder_last_call_wins() {
-        let config = SyncScannerBuilder::new()
+        let config: SyncScannerBuilder<Ethereum> = SyncScannerBuilder::new()
             .max_block_range(25)
             .max_block_range(55)
             .max_block_range(105)
@@ -205,7 +213,7 @@ mod tests {
     #[test]
     fn test_sync_event_stream_listeners_vector_updates() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = SyncScannerBuilder::new().connect::<Ethereum>(provider);
+        let mut scanner = SyncScannerBuilder::new().connect(provider);
         assert_eq!(scanner.listeners.len(), 0);
         let _stream1 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 1);
@@ -217,7 +225,7 @@ mod tests {
     #[test]
     fn test_sync_event_stream_channel_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = SyncScannerBuilder::new().connect::<Ethereum>(provider);
+        let mut scanner = SyncScannerBuilder::new().connect(provider);
         let _stream = scanner.subscribe(EventFilter::new());
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);

@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
         info!("Historical event {} created", i + 1);
     }
 
-    let mut scanner = EventScanner::sync().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScanner::sync::<Ethereum>().connect_ws(anvil.ws_endpoint_url()).await?;
 
     let mut stream = scanner.subscribe(increase_filter);
 

@@ -121,7 +121,7 @@ pub struct BlockRangeScanner<N: Network> {
     pub max_timeout: Duration,
     pub max_retries: usize,
     pub retry_interval: Duration,
-    pub providers: Vec<RootProvider<N>>,
+    pub fallback_providers: Vec<RootProvider<N>>,
 }
 
 impl<N: Network> Default for BlockRangeScanner<N> {
@@ -138,7 +138,7 @@ impl<N: Network> BlockRangeScanner<N> {
             max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             retry_interval: DEFAULT_RETRY_INTERVAL,
-            providers: Vec::new(),
+            fallback_providers: Vec::new(),
         }
     }
 
@@ -166,9 +166,15 @@ impl<N: Network> BlockRangeScanner<N> {
         self
     }
 
+    /// Adds a fallback provider to the block range scanner
+    ///
+    /// # Errors
+    ///
+    /// Will panic if the provider does not implement pubsub
     #[must_use]
     pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
-        self.providers.push(provider);
+        provider.client().expect_pubsub_frontend();
+        self.fallback_providers.push(provider);
         self
     }
 
@@ -188,7 +194,6 @@ impl<N: Network> BlockRangeScanner<N> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    #[must_use]
     pub async fn connect_ipc(
         self,
         ipc_path: String,

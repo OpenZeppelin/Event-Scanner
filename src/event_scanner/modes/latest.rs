@@ -22,8 +22,8 @@ use crate::{
     },
 };
 
-pub struct LatestScannerBuilder {
-    block_range_scanner: BlockRangeScanner,
+pub struct LatestScannerBuilder<N: Network> {
+    block_range_scanner: BlockRangeScanner<N>,
     count: usize,
     from_block: BlockNumberOrTag,
     to_block: BlockNumberOrTag,
@@ -31,12 +31,12 @@ pub struct LatestScannerBuilder {
 }
 
 pub struct LatestEventScanner<N: Network> {
-    config: LatestScannerBuilder,
+    config: LatestScannerBuilder<N>,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
-impl LatestScannerBuilder {
+impl<N: Network> LatestScannerBuilder<N> {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
@@ -78,6 +78,17 @@ impl LatestScannerBuilder {
         self
     }
 
+    /// Adds a fallback provider (can add multiple)
+    ///
+    /// # Errors
+    ///
+    /// Will panic if the provider does not implement pubsub
+    #[must_use]
+    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
+        self.block_range_scanner.fallback_providers.push(provider);
+        self
+    }
+
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`LatestEventScanner`].
@@ -85,11 +96,8 @@ impl LatestScannerBuilder {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> TransportResult<LatestEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
+    pub async fn connect_ws(self, ws_url: Url) -> TransportResult<LatestEventScanner<N>> {
+        let block_range_scanner = self.block_range_scanner.clone().connect_ws(ws_url).await?;
         Ok(LatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -100,11 +108,8 @@ impl LatestScannerBuilder {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> TransportResult<LatestEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+    pub async fn connect_ipc(self, ipc_path: String) -> TransportResult<LatestEventScanner<N>> {
+        let block_range_scanner = self.block_range_scanner.clone().connect_ipc(ipc_path).await?;
         Ok(LatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -116,8 +121,8 @@ impl LatestScannerBuilder {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> LatestEventScanner<N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
+    pub fn connect(self, provider: RootProvider<N>) -> LatestEventScanner<N> {
+        let block_range_scanner = self.block_range_scanner.clone().connect(provider);
         LatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -166,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_config_defaults() {
-        let config = LatestScannerBuilder::new();
+        let config: LatestScannerBuilder<Ethereum> = LatestScannerBuilder::new();
 
         assert_eq!(config.count, 1);
         assert!(matches!(config.from_block, BlockNumberOrTag::Latest));
@@ -176,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_pattern() {
-        let config = LatestScannerBuilder::new()
+        let config: LatestScannerBuilder<Ethereum> = LatestScannerBuilder::new()
             .max_block_range(25)
             .block_confirmations(5)
             .count(3)
@@ -192,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_with_different_block_types() {
-        let config = LatestScannerBuilder::new()
+        let config: LatestScannerBuilder<Ethereum> = LatestScannerBuilder::new()
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest)
             .count(10)
@@ -206,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_last_call_wins() {
-        let config = LatestScannerBuilder::new()
+        let config: LatestScannerBuilder<Ethereum> = LatestScannerBuilder::new()
             .count(1)
             .count(2)
             .count(3)
@@ -229,7 +234,7 @@ mod tests {
     #[test]
     fn test_latest_event_stream_listeners_vector_updates() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = LatestScannerBuilder::new().connect::<Ethereum>(provider);
+        let mut scanner = LatestScannerBuilder::new().connect(provider);
         assert_eq!(scanner.listeners.len(), 0);
         let _stream1 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 1);
@@ -241,7 +246,7 @@ mod tests {
     #[test]
     fn test_latest_event_stream_channel_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = LatestScannerBuilder::new().connect::<Ethereum>(provider);
+        let mut scanner = LatestScannerBuilder::new().connect(provider);
         let _stream = scanner.subscribe(EventFilter::new());
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);

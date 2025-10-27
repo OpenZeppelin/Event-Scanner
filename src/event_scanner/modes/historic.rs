@@ -19,19 +19,19 @@ use crate::{
     },
 };
 
-pub struct HistoricScannerBuilder {
-    block_range_scanner: BlockRangeScanner,
+pub struct HistoricScannerBuilder<N: Network> {
+    block_range_scanner: BlockRangeScanner<N>,
     from_block: BlockNumberOrTag,
     to_block: BlockNumberOrTag,
 }
 
 pub struct HistoricEventScanner<N: Network> {
-    config: HistoricScannerBuilder,
+    config: HistoricScannerBuilder<N>,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
-impl HistoricScannerBuilder {
+impl<N: Network> HistoricScannerBuilder<N> {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
@@ -59,6 +59,17 @@ impl HistoricScannerBuilder {
         self
     }
 
+    /// Adds a fallback provider (can add multiple)
+    ///
+    /// # Errors
+    ///
+    /// Will panic if the provider does not implement pubsub
+    #[must_use]
+    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
+        self.block_range_scanner.fallback_providers.push(provider);
+        self
+    }
+
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
@@ -66,11 +77,8 @@ impl HistoricScannerBuilder {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> TransportResult<HistoricEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
+    pub async fn connect_ws(self, ws_url: Url) -> TransportResult<HistoricEventScanner<N>> {
+        let block_range_scanner = self.block_range_scanner.clone().connect_ws(ws_url).await?;
         Ok(HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -81,11 +89,8 @@ impl HistoricScannerBuilder {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> TransportResult<HistoricEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+    pub async fn connect_ipc(self, ipc_path: String) -> TransportResult<HistoricEventScanner<N>> {
+        let block_range_scanner = self.block_range_scanner.clone().connect_ipc(ipc_path).await?;
         Ok(HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -97,8 +102,8 @@ impl HistoricScannerBuilder {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> HistoricEventScanner<N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
+    pub fn connect(self, provider: RootProvider<N>) -> HistoricEventScanner<N> {
+        let block_range_scanner = self.block_range_scanner.clone().connect(provider);
         HistoricEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -140,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_config_defaults() {
-        let config = HistoricScannerBuilder::new();
+        let config: HistoricScannerBuilder<Ethereum> = HistoricScannerBuilder::new();
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
         assert!(matches!(config.to_block, BlockNumberOrTag::Latest));
@@ -148,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_pattern() {
-        let config =
+        let config: HistoricScannerBuilder<Ethereum> =
             HistoricScannerBuilder::new().to_block(200).max_block_range(50).from_block(100);
 
         assert!(matches!(config.from_block, BlockNumberOrTag::Number(100)));
@@ -158,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_with_different_block_types() {
-        let config = HistoricScannerBuilder::new()
+        let config: HistoricScannerBuilder<Ethereum> = HistoricScannerBuilder::new()
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest);
 
@@ -168,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_last_call_wins() {
-        let config = HistoricScannerBuilder::new()
+        let config: HistoricScannerBuilder<Ethereum> = HistoricScannerBuilder::new()
             .max_block_range(25)
             .max_block_range(55)
             .max_block_range(105)
@@ -185,7 +190,7 @@ mod tests {
     #[test]
     fn test_historic_event_stream_listeners_vector_updates() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = HistoricScannerBuilder::new().connect::<Ethereum>(provider);
+        let mut scanner = HistoricScannerBuilder::new().connect(provider);
         assert_eq!(scanner.listeners.len(), 0);
         let _stream1 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 1);
@@ -197,7 +202,7 @@ mod tests {
     #[test]
     fn test_historic_event_stream_channel_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = HistoricScannerBuilder::new().connect::<Ethereum>(provider);
+        let mut scanner = HistoricScannerBuilder::new().connect(provider);
         let _stream = scanner.subscribe(EventFilter::new());
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);

@@ -9,7 +9,9 @@ use alloy::{
 };
 
 use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
-use event_scanner::{EventFilter, EventScanner, assert_next, test_utils::LogMetadata};
+use event_scanner::{
+    EventFilter, EventScanner, LatestEventScanner, assert_next, test_utils::LogMetadata,
+};
 
 macro_rules! increase {
     ($contract: expr) => {{
@@ -127,11 +129,11 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScanner::latest()
+    let mut scanner_with_range: LatestEventScanner<Ethereum> = EventScanner::latest()
         .count(10)
         .from_block(start)
         .to_block(end)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .connect_ws(anvil.ws_endpoint_url())
         .await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
@@ -324,11 +326,11 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScanner::latest()
+    let mut scanner_with_range: LatestEventScanner<Ethereum> = EventScanner::latest()
         .count(5)
         .from_block(start)
         .to_block(end)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .connect_ws(anvil.ws_endpoint_url())
         .await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
@@ -358,11 +360,11 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
         .unwrap();
     let end = start;
 
-    let mut scanner_with_range = EventScanner::latest()
+    let mut scanner_with_range: LatestEventScanner<Ethereum> = EventScanner::latest()
         .count(5)
         .from_block(start)
         .to_block(end)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .connect_ws(anvil.ws_endpoint_url())
         .await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 

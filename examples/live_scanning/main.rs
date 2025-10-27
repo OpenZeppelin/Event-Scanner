@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .contract_address(*contract_address)
         .event(Counter::CountIncreased::SIGNATURE);
 
-    let mut scanner = EventScanner::live().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScanner::live::<Ethereum>().connect_ws(anvil.ws_endpoint_url()).await?;
 
     let mut stream = scanner.subscribe(increase_filter);
 
