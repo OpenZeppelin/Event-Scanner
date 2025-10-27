@@ -25,9 +25,6 @@ pub enum ScannerError {
     #[error("Service is shutting down")]
     ServiceShutdown,
 
-    #[error("Only one subscriber allowed at a time")]
-    MultipleSubscribers,
-
     #[error("No subscriber set for streaming")]
     NoSubscriber,
 
