@@ -63,14 +63,18 @@
 //! }
 //! ```
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     join,
     sync::{mpsc, oneshot},
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::{error::ScannerError, types::ScannerStatus};
+use crate::{
+    ScannerMessage,
+    error::ScannerError,
+    types::{ScannerStatus, TryStream},
+};
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
@@ -85,10 +89,31 @@ use alloy::{
 };
 use tracing::{debug, error, info, warn};
 
-mod message;
+pub type Message = ScannerMessage<RangeInclusive<BlockNumber>, ScannerError>;
 
-pub use message::Message;
-use message::TryStream;
+impl From<RangeInclusive<BlockNumber>> for Message {
+    fn from(logs: RangeInclusive<BlockNumber>) -> Self {
+        Message::Data(logs)
+    }
+}
+
+impl PartialEq<RangeInclusive<BlockNumber>> for Message {
+    fn eq(&self, other: &RangeInclusive<BlockNumber>) -> bool {
+        if let Message::Data(range) = self { range.eq(other) } else { false }
+    }
+}
+
+impl From<RpcError<TransportErrorKind>> for Message {
+    fn from(error: RpcError<TransportErrorKind>) -> Self {
+        Message::Error(error.into())
+    }
+}
+
+impl From<ScannerError> for Message {
+    fn from(error: ScannerError) -> Self {
+        Message::Error(error)
+    }
+}
 
 pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19

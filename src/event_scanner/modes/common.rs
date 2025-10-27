@@ -2,7 +2,8 @@ use std::ops::RangeInclusive;
 
 use crate::{
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
-    event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
+    event_scanner::{filter::EventFilter, listener::EventListener},
+    types::TryStream,
 };
 use alloy::{
     network::Network,
@@ -10,12 +11,9 @@ use alloy::{
     rpc::types::{Filter, Log},
     transports::{RpcError, TransportErrorKind},
 };
-use tokio::sync::{
-    broadcast::{self, Sender, error::RecvError},
-    mpsc,
-};
+use tokio::sync::broadcast::{self, Sender, error::RecvError};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[derive(Copy, Clone)]
 pub enum ConsumerMode {
@@ -74,7 +72,7 @@ pub fn spawn_log_consumers<N: Network>(
 
                                 match mode {
                                     ConsumerMode::Stream => {
-                                        if !try_send(&sender, logs).await {
+                                        if !sender.try_stream(logs).await {
                                             break;
                                         }
                                     }
@@ -92,19 +90,19 @@ pub fn spawn_log_consumers<N: Network>(
                                 }
                             }
                             Err(e) => {
-                                if !try_send(&sender, e).await {
+                                if !sender.try_stream(e).await {
                                     break;
                                 }
                             }
                         }
                     }
                     Ok(BlockRangeMessage::Error(e)) => {
-                        if !try_send(&sender, e).await {
+                        if !sender.try_stream(e).await {
                             break;
                         }
                     }
                     Ok(BlockRangeMessage::Status(status)) => {
-                        if !try_send(&sender, status).await {
+                        if !sender.try_stream(status).await {
                             break;
                         }
                     }
@@ -121,7 +119,7 @@ pub fn spawn_log_consumers<N: Network>(
                     collected.reverse(); // restore chronological order
                 }
 
-                _ = try_send(&sender, collected).await;
+                _ = sender.try_stream(collected).await;
             }
         });
     }
@@ -161,12 +159,4 @@ async fn get_logs<N: Network>(
             Err(e)
         }
     }
-}
-
-async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
-    if let Err(err) = sender.send(msg.into()).await {
-        warn!(error = %err, "Downstream channel closed, stopping stream");
-        return false;
-    }
-    true
 }
