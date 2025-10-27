@@ -217,12 +217,11 @@ mod tests {
         let result = provider
             .retry_with_total_timeout(|| async {
                 call_count.fetch_add(1, Ordering::SeqCst);
-                Ok(42)
+                Ok(call_count.load(Ordering::SeqCst))
             })
             .await;
 
-        assert!(matches!(result, Ok(42)));
-        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+        assert!(matches!(result, Ok(1)));
     }
 
     #[tokio::test]
@@ -237,14 +236,12 @@ mod tests {
                 if call_count.load(Ordering::SeqCst) < 3 {
                     Err(TransportErrorKind::custom_str("temporary error"))
                 } else {
-                    Ok(42)
+                    Ok(call_count.load(Ordering::SeqCst))
                 }
             })
             .await;
 
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 42);
-        assert_eq!(call_count.load(Ordering::SeqCst), 3);
+        assert!(matches!(result, Ok(3)));
     }
 
     #[tokio::test]
