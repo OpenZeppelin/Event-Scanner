@@ -235,7 +235,8 @@ mod tests {
     #[tokio::test]
     async fn test_latest_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
-        let mut scanner = LatestScannerBuilder::<Ethereum>::new().connect_ws(anvil.ws_endpoint_url()).await?;
+        let mut scanner =
+            LatestScannerBuilder::<Ethereum>::new().connect_ws(anvil.ws_endpoint_url()).await?;
         assert_eq!(scanner.listeners.len(), 0);
         let _stream1 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 1);
@@ -248,7 +249,8 @@ mod tests {
     #[tokio::test]
     async fn test_latest_event_stream_channel_capacity() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
-        let mut scanner = LatestScannerBuilder::<Ethereum>::new().connect_ws(anvil.ws_endpoint_url()).await?;
+        let mut scanner =
+            LatestScannerBuilder::<Ethereum>::new().connect_ws(anvil.ws_endpoint_url()).await?;
         let _stream = scanner.subscribe(EventFilter::new());
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
