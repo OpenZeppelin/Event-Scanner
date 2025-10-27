@@ -22,19 +22,19 @@ use crate::{
     },
 };
 
-pub struct SyncScannerBuilder {
-    block_range_scanner: BlockRangeScanner,
+pub struct SyncScannerBuilder<N: Network> {
+    block_range_scanner: BlockRangeScanner<N>,
     from_block: BlockNumberOrTag,
     block_confirmations: u64,
 }
 
 pub struct SyncEventScanner<N: Network> {
-    config: SyncScannerBuilder,
+    config: SyncScannerBuilder<N>,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
-impl SyncScannerBuilder {
+impl<N: Network> SyncScannerBuilder<N> {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
@@ -69,8 +69,8 @@ impl SyncScannerBuilder {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
+    pub async fn connect_ws(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
+        let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
     }
 
