@@ -135,7 +135,8 @@ impl<N: Network> LiveEventScanner<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::{network::Ethereum, rpc::client::RpcClient, transports::mock::Asserter};
+    use alloy::network::Ethereum;
+    use alloy_node_bindings::Anvil;
 
     #[test]
     fn test_live_scanner_config_defaults() {
@@ -176,24 +177,26 @@ mod tests {
         assert_eq!(config.block_confirmations, 8);
     }
 
-    #[test]
-    fn test_live_event_stream_listeners_vector_updates() {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = LiveScannerBuilder::new().connect(provider);
+    #[tokio::test]
+    async fn test_live_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let mut scanner = LiveScannerBuilder::<Ethereum>::new().connect_ws(anvil.ws_endpoint_url()).await?;
         assert_eq!(scanner.listeners.len(), 0);
         let _stream1 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 1);
         let _stream2 = scanner.subscribe(EventFilter::new());
         let _stream3 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 3);
+        Ok(())
     }
 
-    #[test]
-    fn test_live_event_stream_channel_capacity() {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = LiveScannerBuilder::new().connect(provider);
+    #[tokio::test]
+    async fn test_live_event_stream_channel_capacity() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let mut scanner = LiveScannerBuilder::<Ethereum>::new().connect_ws(anvil.ws_endpoint_url()).await?;
         let _stream = scanner.subscribe(EventFilter::new());
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+        Ok(())
     }
 }
