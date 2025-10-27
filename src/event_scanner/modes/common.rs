@@ -3,12 +3,11 @@ use std::ops::RangeInclusive;
 use crate::{
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
-    safe_provider::SafeProvider,
+    safe_provider::{SafeProvider, SafeProviderError},
 };
 use alloy::{
     network::Network,
     rpc::types::{Filter, Log},
-    transports::{RpcError, TransportErrorKind},
 };
 use tokio::sync::{
     broadcast::{self, Sender, error::RecvError},
@@ -130,7 +129,7 @@ async fn get_logs<N: Network>(
     event_filter: &EventFilter,
     log_filter: &Filter,
     provider: &SafeProvider<N>,
-) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
+) -> Result<Vec<Log>, SafeProviderError> {
     let log_filter = log_filter.clone().from_block(*range.start()).to_block(*range.end());
 
     match provider.get_logs(&log_filter).await {
