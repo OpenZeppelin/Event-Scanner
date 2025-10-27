@@ -72,10 +72,8 @@ impl<N: Network> SafeProvider<N> {
         number: BlockNumberOrTag,
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
         info!("eth_getBlockByNumber called");
-        let provider = self.provider.clone();
-        let result = self
-            .retry_with_total_timeout(|| async { provider.get_block_by_number(number).await })
-            .await;
+        let operation = async || self.provider.get_block_by_number(number).await;
+        let result = self.retry_with_total_timeout(operation).await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getByBlockNumber failed");
         }
@@ -109,10 +107,8 @@ impl<N: Network> SafeProvider<N> {
         hash: alloy::primitives::BlockHash,
     ) -> Result<Option<N::BlockResponse>, RpcError<TransportErrorKind>> {
         info!("eth_getBlockByHash called");
-        let provider = self.provider.clone();
-        let result = self
-            .retry_with_total_timeout(|| async { provider.get_block_by_hash(hash).await })
-            .await;
+        let operation = async || self.provider.get_block_by_hash(hash).await;
+        let result = self.retry_with_total_timeout(operation).await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockByHash failed");
         }
@@ -130,9 +126,8 @@ impl<N: Network> SafeProvider<N> {
         filter: &Filter,
     ) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
         info!("eth_getLogs called");
-        let provider = self.provider.clone();
-        let result =
-            self.retry_with_total_timeout(|| async { provider.get_logs(filter).await }).await;
+        let operation = || self.provider.get_logs(filter);
+        let result = self.retry_with_total_timeout(operation).await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getLogs failed");
         }
