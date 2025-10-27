@@ -335,14 +335,17 @@ mod tests {
         let call_count_clone = call_count.clone();
 
         let result = provider
-            .retry_with_total_timeout(|| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                if call_count.load(Ordering::SeqCst) < 3 {
-                    Err(SafeProviderError::RpcError(Arc::new(TransportErrorKind::custom_str(
-                        "temp error",
-                    ))))
-                } else {
-                    Ok(call_count.load(Ordering::SeqCst))
+            .retry_with_total_timeout(move |_provider| {
+                let call_count = call_count_clone.clone();
+                async move {
+                    let count = call_count.fetch_add(1, Ordering::SeqCst) + 1;
+                    if count < 3 {
+                        Err(SafeProviderError::RpcError(Arc::new(TransportErrorKind::custom_str(
+                            "temp error",
+                        ))))
+                    } else {
+                        Ok(count)
+                    }
                 }
             })
             .await;
@@ -358,10 +361,13 @@ mod tests {
         let call_count_clone = call_count.clone();
 
         let result = provider
-            .retry_with_total_timeout(move |_provider| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                // permanent error
-                Err::<i32, SafeProviderError>(SafeProviderError::Timeout)
+            .retry_with_total_timeout(move |_provider| {
+                let call_count = call_count_clone.clone();
+                async move {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    // permanent error
+                    Err::<i32, SafeProviderError>(SafeProviderError::Timeout)
+                }
             })
             .await;
 
@@ -376,7 +382,7 @@ mod tests {
         let provider = test_provider(max_timeout, 10, 1);
 
         let result = provider
-            .retry_with_total_timeout(|| async {
+            .retry_with_total_timeout(move |_provider| async move {
                 sleep(Duration::from_millis(max_timeout + 10)).await;
                 Ok(42)
             })
