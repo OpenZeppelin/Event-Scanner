@@ -1,12 +1,19 @@
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
-use crate::{ScannerError, ScannerMessage};
+use crate::{ScannerError, ScannerMessage, safe_provider::SafeProviderError};
 
 pub type Message = ScannerMessage<Vec<Log>, ScannerError>;
 
 impl From<Vec<Log>> for Message {
     fn from(logs: Vec<Log>) -> Self {
         Message::Data(logs)
+    }
+}
+
+impl From<SafeProviderError> for Message {
+    fn from(error: SafeProviderError) -> Message {
+        let scanner_error: ScannerError = error.into();
+        scanner_error.into()
     }
 }
 

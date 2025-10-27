@@ -7,7 +7,7 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::block_range_scanner::Message;
+use crate::{block_range_scanner::Message, safe_provider::SafeProviderError};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -42,6 +42,22 @@ pub enum ScannerError {
 
     #[error("Block not found, block number: {0}")]
     BlockNotFound(BlockNumberOrTag),
+
+    #[error("Operation timed out")]
+    Timeout,
+
+    #[error("Retry failed after {0} tries")]
+    RetryFail(usize),
+}
+
+impl From<SafeProviderError> for ScannerError {
+    fn from(error: SafeProviderError) -> ScannerError {
+        match error {
+            SafeProviderError::RpcError(err) => ScannerError::RpcError(err),
+            SafeProviderError::Timeout => ScannerError::Timeout,
+            SafeProviderError::RetryFail(num) => ScannerError::RetryFail(num),
+        }
+    }
 }
 
 impl From<Result<RangeInclusive<BlockNumber>, ScannerError>> for Message {
