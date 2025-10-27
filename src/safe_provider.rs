@@ -294,7 +294,7 @@ mod tests {
         let provider = test_provider(max_timeout, 10, 1);
 
         let result = provider
-            .retry_with_total_timeout(move || async move {
+            .retry_with_total_timeout(|| async {
                 sleep(Duration::from_millis(max_timeout + 10)).await;
                 Ok(42)
             })
