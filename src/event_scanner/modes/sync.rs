@@ -32,7 +32,7 @@ impl SyncScannerBuilder {
     ///
     /// ```no_run
     /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
+    /// # use event_scanner::{EventFilter, EventScanner, Message};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,14 +51,14 @@ impl SyncScannerBuilder {
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
-    ///         EventScannerMessage::Data(logs) => {
+    ///         Message::Data(logs) => {
     ///             println!("Received {} events", logs.len());
     ///         }
-    ///         EventScannerMessage::Status(status) => {
+    ///         Message::Status(status) => {
     ///             println!("Status update: {:?}", status);
     ///             // You'll see ScannerStatus::SwitchingToLive when transitioning
     ///         }
-    ///         EventScannerMessage::Error(e) => {
+    ///         Message::Error(e) => {
     ///             eprintln!("Error: {}", e);
     ///         }
     ///     }
