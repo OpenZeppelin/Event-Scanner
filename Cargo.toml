@@ -4,8 +4,8 @@ members = [
     "examples/historical_scanning",
     "examples/live_scanning",
     "examples/latest_events_scanning",
-    "examples/latest_events_then_live_scanning",
-    "examples/sync_scanning",
+    "examples/sync_from_latest_scanning",
+    "examples/sync_from_block_scanning",
 ]
 resolver = "2"
 

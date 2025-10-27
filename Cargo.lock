@@ -2415,20 +2415,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "latest_events_then_live_scanning"
-version = "0.3.0-alpha"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "event-scanner",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3706,8 +3692,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "sync_scanning"
+name = "sync_from_block_scanning"
 version = "0.1.0"
+dependencies = [
+ "alloy",
+ "alloy-node-bindings",
+ "anyhow",
+ "event-scanner",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "sync_from_latest_scanning"
+version = "0.3.0-alpha"
 dependencies = [
  "alloy",
  "alloy-node-bindings",

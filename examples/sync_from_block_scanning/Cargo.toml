@@ -1,13 +1,10 @@
 [package]
-name = "latest_events_then_live_scanning"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-publish = false
+name = "sync_from_block_scanning"
+version = "0.1.0"
+edition = "2021"
 
 [[bin]]
-name = "latest_events_then_live_scanning"
+name = "sync_from_block_scanning"
 path = "main.rs"
 
 [dependencies]
