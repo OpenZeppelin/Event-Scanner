@@ -251,74 +251,7 @@ The scanner periodically checks the tip to detect reorgs. On reorg, the scanner 
 Notes:
 
 - Ensure you create streams via `subscribe()` before calling `start` so listeners are registered.
-- The function returns after delivering the messages; to continuously stream new blocks, use `scan_latest_then_live`.
-
-### Scanning Latest Events Then Live
-
-`EventScanner::sync().from_latest(count)` combines the best of both worlds: it fetches recent historical events and then seamlessly transitions to live streaming mode for continuous monitoring.
-
-**What it does:**
-
-1. **Historical rewind phase**: Scans backwards from the current chain tip to collect up to `count` most recent matching events
-2. **Automatic transition**: Emits `ScannerStatus::SwitchingToLive` to signal the mode change
-3. **Live streaming phase**: Continuously monitors and streams new events as they arrive on-chain
-
-**How it works:**
-
-The scanner captures the latest block number before starting to establish a clear boundary between phases. The historical phase scans from `Earliest` to `latest_block`, while the live phase starts from `latest_block + 1`. This design prevents duplicate events and handles race conditions where new blocks arrive during setup.
-
-**Key behaviors:**
-
-- **No duplicates**: Events are not delivered twice across the phase transition
-- **Flexible count**: If fewer than `count` events exist, returns all available events
-- **Reorg handling**: Both phases handle reorgs appropriately:
-  - Historical phase: resets and rescans on reorg detection
-  - Live phase: resets stream to the first post-reorg block that satisfies the block confirmations set via `with_block_confirmations`
-- **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
-
-**Example:**
-
-```rust
-use alloy::{network::Ethereum, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScanner, EventScannerMessage};
-use tokio_stream::StreamExt;
-
-async fn latest_then_live_example(
-    ws_url: alloy::transports::http::reqwest::Url,
-    addr: alloy::primitives::Address,
-) -> eyre::Result<()> {
-    let mut client = EventScanner::new().connect_ws::<Ethereum>(ws_url).await?;
-
-    let filter = EventFilter::new().with_contract_address(addr);
-    let mut stream = client.create_event_stream(filter);
-
-    // Fetch the latest 10 events, then stream new events continuously
-    client.scan_latest_then_live(10).await?;
-
-    while let Some(msg) = stream.next().await {
-        match msg {
-            EventScannerMessage::Data(logs) => {
-                println!("Received {} events", logs.len());
-            }
-            EventScannerMessage::Status(status) => {
-                println!("Status update: {:?}", status);
-                // You'll see ScannerStatus::SwitchingToLive when transitioning
-            }
-            EventScannerMessage::Error(e) => {
-                eprintln!("Error: {}", e);
-            }
-        }
-    }
-
-    Ok(())
-}
-```
-
-**Important notes:**
-
-- Create event streams via `create_event_stream()` **before** calling `scan_latest_then_live`
-- The method returns immediately; events are delivered asynchronously
-- The live phase continues indefinitely until the scanner is dropped or encounters an error
+- The function returns after delivering the messages; to continuously stream new blocks, use `EventScanner::sync().from_latest(count)`.
 
 ---
 
@@ -326,9 +259,9 @@ async fn latest_then_live_example(
 
 - `examples/live_scanning` – minimal live-mode scanner using `EventScanner::live()`
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScanner::historic()`
-- `examples/sync_scanning` – demonstrates replaying from genesis (block 0) before continuing streaming latest blocks using `EventScanner::sync().from_block(0)`
+- `examples/sync_from_block_scanning` – demonstrates replaying from genesis (block 0) before continuing streaming latest blocks using `EventScanner::sync().from_block(block_tag_or_number)`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScanner::latest()`
-- `examples/latest_events_then_live_scanning` – demonstrates scanning the latest events before switching to live mode using `EventScanner::sync().from_latest(count)`.
+- `examples/sync_from_latest_scanning` – demonstrates scanning the latest events before switching to live mode using `EventScanner::sync().from_latest(count)`.
 
 Run an example with:
 
