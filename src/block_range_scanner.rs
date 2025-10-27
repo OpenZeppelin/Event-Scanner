@@ -464,7 +464,7 @@ impl<N: Network> Service<N> {
             .await;
 
             info!("Chain tip reached, switching to live");
-            if !try_send(&sender, ScannerStatus::ChainTipReached).await {
+            if !sender.try_stream(ScannerStatus::ChainTipReached).await {
                 return;
             }
 
@@ -542,7 +542,7 @@ impl<N: Network> Service<N> {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            if !try_send(sender, batch_to..=batch_from).await {
+            if !sender.try_stream(batch_to..=batch_from).await {
                 break;
             }
 
@@ -561,7 +561,7 @@ impl<N: Network> Service<N> {
                 Ok(detected) => detected,
                 Err(e) => {
                     error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = try_send(sender, e);
+                    _ = sender.try_stream(e);
                     return;
                 }
             };
@@ -569,7 +569,7 @@ impl<N: Network> Service<N> {
             if reorged {
                 info!(block_number = %from, hash = %tip_hash, "Reorg detected");
 
-                if !try_send(sender, ScannerStatus::ReorgDetected).await {
+                if !sender.try_stream(ScannerStatus::ReorgDetected).await {
                     break;
                 }
 
@@ -582,7 +582,7 @@ impl<N: Network> Service<N> {
                     }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = try_send(sender, e);
+                        _ = sender.try_stream(e);
                         return;
                     }
                 };
@@ -612,7 +612,7 @@ impl<N: Network> Service<N> {
             let batch_end_block_number =
                 next_start_block.saturating_add(max_block_range - 1).min(end);
 
-            if !try_send(sender, next_start_block..=batch_end_block_number).await {
+            if !sender.try_stream(next_start_block..=batch_end_block_number).await {
                 break;
             }
 
@@ -752,12 +752,18 @@ impl<N: Network> Service<N> {
     }
 }
 
-async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
-    if let Err(err) = sender.send(msg.into()).await {
-        warn!(error = %err, "Downstream channel closed, stopping stream");
-        return false;
+trait TryStream {
+    async fn try_stream<T: Into<Message>>(&self, msg: T) -> bool;
+}
+
+impl TryStream for mpsc::Sender<Message> {
+    async fn try_stream<T: Into<Message>>(&self, msg: T) -> bool {
+        if let Err(err) = self.send(msg.into()).await {
+            warn!(error = %err, "Downstream channel closed, stopping stream");
+            return false;
+        }
+        true
     }
-    true
 }
 
 async fn reorg_detected<N: Network>(
@@ -1367,7 +1373,7 @@ mod tests {
     async fn try_send_forwards_errors_to_subscribers() {
         let (tx, mut rx) = mpsc::channel(1);
 
-        _ = super::try_send(&tx, ScannerError::WebSocketConnectionFailed(4)).await;
+        _ = tx.try_stream(ScannerError::WebSocketConnectionFailed(4)).await;
 
         assert!(matches!(
             rx.recv().await,
