@@ -236,19 +236,11 @@ pub enum Command {
         end_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
-    Unsubscribe {
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
-    Shutdown {
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
 }
 
 struct Service<N: Network> {
     provider: RootProvider<N>,
     max_block_range: u64,
-    subscriber: Option<mpsc::Sender<Message>>,
-    websocket_connected: bool,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
     shutdown: bool,
@@ -261,8 +253,6 @@ impl<N: Network> Service<N> {
         let service = Self {
             provider,
             max_block_range,
-            subscriber: None,
-            websocket_connected: false,
             error_count: 0,
             command_receiver: cmd_rx,
             shutdown: false,
@@ -296,37 +286,24 @@ impl<N: Network> Service<N> {
     async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
         match command {
             Command::StreamLive { sender, block_confirmations, response } => {
-                self.ensure_no_subscriber()?;
                 info!("Starting live stream");
                 let result = self.handle_live(block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamHistorical { sender, start_height, end_height, response } => {
-                self.ensure_no_subscriber()?;
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting historical stream");
                 let result = self.handle_historical(start_height, end_height, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamFrom { sender, start_height, block_confirmations, response } => {
-                self.ensure_no_subscriber()?;
                 info!(start_height = ?start_height, "Starting streaming from");
                 let result = self.handle_sync(start_height, block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::Rewind { sender, start_height, end_height, response } => {
-                self.ensure_no_subscriber()?;
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
                 let result = self.handle_rewind(start_height, end_height, sender).await;
                 let _ = response.send(result);
-            }
-            Command::Unsubscribe { response } => {
-                self.handle_unsubscribe();
-                let _ = response.send(Ok(()));
-            }
-            Command::Shutdown { response } => {
-                self.shutdown = true;
-                self.handle_unsubscribe();
-                let _ = response.send(Ok(()));
             }
         }
         Ok(())
@@ -773,20 +750,6 @@ impl<N: Network> Service<N> {
 
         Ok(ws_stream)
     }
-
-    fn handle_unsubscribe(&mut self) {
-        if self.subscriber.take().is_some() {
-            info!("Unsubscribing current subscriber");
-            self.websocket_connected = false;
-        }
-    }
-
-    fn ensure_no_subscriber(&self) -> Result<(), ScannerError> {
-        if self.subscriber.is_some() {
-            return Err(ScannerError::MultipleSubscribers);
-        }
-        Ok(())
-    }
 }
 
 async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
@@ -943,36 +906,6 @@ impl BlockRangeScannerClient {
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
-
-    /// Unsubscribes the current subscriber.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn unsubscribe(&self) -> Result<(), ScannerError> {
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::Unsubscribe { response: response_tx };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)?
-    }
-
-    /// Shuts down the subscription service and unsubscribes the current subscriber.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn shutdown(&self) -> Result<(), ScannerError> {
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::Shutdown { response: response_tx };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)?
-    }
 }
 
 #[cfg(test)]
@@ -982,16 +915,11 @@ mod tests {
     use alloy::{
         network::Ethereum,
         providers::{ProviderBuilder, ext::AnvilApi},
-        rpc::{client::RpcClient, types::anvil::ReorgOptions},
-        transports::mock::Asserter,
+        rpc::types::anvil::ReorgOptions,
     };
     use alloy_node_bindings::Anvil;
     use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
-
-    fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
-        RootProvider::new(RpcClient::mocked(asserter))
-    }
 
     #[test]
     fn block_range_scanner_defaults_match_constants() {
@@ -1007,22 +935,6 @@ mod tests {
         let scanner = BlockRangeScanner::new().max_block_range(max_block_range);
 
         assert_eq!(scanner.max_block_range, max_block_range);
-    }
-
-    #[test]
-    fn handle_unsubscribe_clears_subscriber() {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
-
-        let (tx, _rx) = mpsc::channel(1);
-        service.websocket_connected = true;
-        service.subscriber = Some(tx);
-
-        service.handle_unsubscribe();
-
-        assert!(service.subscriber.is_none());
-        assert!(!service.websocket_connected);
     }
 
     #[tokio::test]
