@@ -22,8 +22,8 @@
 //!     tracing_subscriber::fmt::init();
 //!
 //!     // Configuration
-//!     let block_range_scanner = BlockRangeScanner::new()
-//!         .connect_ws::<Ethereum>(Url::parse("ws://localhost:8546").unwrap())
+//!     let block_range_scanner = BlockRangeScanner::<Ethereum>::new()
+//!         .connect_ws(Url::parse("ws://localhost:8546").unwrap())
 //!         .await?;
 //!
 //!     // Create client to send subscribe command to block scanner
