@@ -89,6 +89,16 @@ use alloy::{
 };
 use tracing::{debug, error, info, warn};
 
+pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
+// copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
+pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
+
+pub const MAX_BUFFERED_MESSAGES: usize = 50000;
+
+// Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
+// is considered final)
+pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
+
 pub type Message = ScannerMessage<RangeInclusive<BlockNumber>, ScannerError>;
 
 impl From<RangeInclusive<BlockNumber>> for Message {
@@ -114,16 +124,6 @@ impl From<ScannerError> for Message {
         Message::Error(error)
     }
 }
-
-pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
-// copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
-pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
-
-pub const MAX_BUFFERED_MESSAGES: usize = 50000;
-
-// Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
-// is considered final)
-pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
 
 #[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
