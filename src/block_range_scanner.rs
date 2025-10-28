@@ -606,7 +606,7 @@ impl<N: Network> Service<N> {
                 // store the updated end block hash
                 tip_hash = match provider.get_block_by_number(from.into()).await {
                     Ok(block) => block.header().hash(),
-                    Err(RobustProviderError::BlockNotFound(_) => {
+                    Err(RobustProviderError::BlockNotFound(_)) => {
                         panic!("Block with number '{from}' should exist post-reorg");
                     }
                     Err(e) => {
