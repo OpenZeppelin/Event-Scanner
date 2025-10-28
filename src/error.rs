@@ -7,7 +7,7 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::{block_range_scanner::Message, robust_provider::RobustProviderError};
+use crate::{block_range_scanner::Message, robust_provider::Error as RobustProviderError};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -40,16 +40,15 @@ pub enum ScannerError {
     #[error("Operation timed out")]
     Timeout,
 
-    #[error("Retry failed after {0} tries")]
-    RetryFail(usize),
+    #[error("RPC call failed after exhausting all retry attempts: {0}")]
+    RetryFailure(Arc<RpcError<TransportErrorKind>>),
 }
 
 impl From<RobustProviderError> for ScannerError {
     fn from(error: RobustProviderError) -> ScannerError {
         match error {
-            RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
             RobustProviderError::Timeout => ScannerError::Timeout,
-            RobustProviderError::RetryFail(num) => ScannerError::RetryFail(num),
+            RobustProviderError::RetryFailure(err) => ScannerError::RetryFailure(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
         }
     }
