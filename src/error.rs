@@ -1,13 +1,12 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::sync::Arc;
 
 use alloy::{
     eips::BlockId,
-    primitives::BlockNumber,
     transports::{RpcError, TransportErrorKind},
 };
 use thiserror::Error;
 
-use crate::{block_range_scanner::Message, robust_provider::Error as RobustProviderError};
+use crate::robust_provider::Error as RobustProviderError;
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -24,9 +23,6 @@ pub enum ScannerError {
 
     #[error("Service is shutting down")]
     ServiceShutdown,
-
-    #[error("Only one subscriber allowed at a time")]
-    MultipleSubscribers,
 
     #[error("No subscriber set for streaming")]
     NoSubscriber,
@@ -54,15 +50,6 @@ impl From<RobustProviderError> for ScannerError {
     }
 }
 
-impl From<Result<RangeInclusive<BlockNumber>, ScannerError>> for Message {
-    fn from(logs: Result<RangeInclusive<BlockNumber>, ScannerError>) -> Self {
-        match logs {
-            Ok(logs) => Message::Data(logs),
-            Err(e) => Message::Error(e),
-        }
-    }
-}
-
 impl From<serde_json::Error> for ScannerError {
     fn from(error: serde_json::Error) -> Self {
         ScannerError::SerializationError(Arc::new(error))
@@ -72,11 +59,5 @@ impl From<serde_json::Error> for ScannerError {
 impl From<RpcError<TransportErrorKind>> for ScannerError {
     fn from(error: RpcError<TransportErrorKind>) -> Self {
         ScannerError::RpcError(Arc::new(error))
-    }
-}
-
-impl From<ScannerError> for Message {
-    fn from(error: ScannerError) -> Self {
-        Message::Error(error)
     }
 }

@@ -13,7 +13,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     let num_initial_events = 5;
     let num_new_events = 3;
@@ -74,7 +74,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     let num_initial_events = 5;
 
@@ -137,7 +137,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     let num_initial_events = 4;
 
@@ -199,7 +199,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     let num_initial_events = 4;
 
@@ -263,7 +263,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(Option::Some(1.0), Option::None, block_confirmations).await?;
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     provider.anvil_mine(Some(10), None).await?;
 

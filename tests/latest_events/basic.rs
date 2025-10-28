@@ -10,7 +10,8 @@ use alloy::{
 
 use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
 use event_scanner::{
-    EventFilter, EventScanner, LatestEventScanner, assert_next, test_utils::LogMetadata,
+    EventFilter, EventScanner, LatestEventScanner, assert_closed, assert_next,
+    test_utils::LogMetadata,
 };
 
 macro_rules! increase {
@@ -64,7 +65,7 @@ async fn latest_scanner_exact_count_returns_last_events_in_order() -> anyhow::Re
     scanner.start().await?;
 
     assert_next!(stream, expected);
-    assert_next!(stream, None);
+    assert_closed!(stream);
 
     Ok(())
 }
@@ -86,7 +87,7 @@ async fn latest_scanner_fewer_available_than_count_returns_all() -> anyhow::Resu
     scanner.start().await?;
 
     assert_next!(stream, expected);
-    assert_next!(stream, None);
+    assert_closed!(stream);
 
     Ok(())
 }
@@ -103,7 +104,7 @@ async fn latest_scanner_no_events_returns_empty() -> anyhow::Result<()> {
     let expected: &[LogMetadata<TestCounter::CountIncreased>] = &[];
 
     assert_next!(stream, expected);
-    assert_next!(stream, None);
+    assert_closed!(stream);
 
     Ok(())
 }
@@ -140,7 +141,7 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     scanner_with_range.start().await?;
 
     assert_next!(stream_with_range, expected);
-    assert_next!(stream_with_range, None);
+    assert_closed!(stream_with_range);
 
     Ok(())
 }
@@ -175,10 +176,10 @@ async fn latest_scanner_multiple_listeners_to_same_event_receive_same_results() 
     scanner.start().await?;
 
     assert_next!(stream1, expected);
-    assert_next!(stream1, None);
+    assert_closed!(stream1);
 
     assert_next!(stream2, expected);
-    assert_next!(stream2, None);
+    assert_closed!(stream2);
 
     Ok(())
 }
@@ -221,11 +222,11 @@ async fn latest_scanner_different_filters_receive_different_results() -> anyhow:
 
     let expected = &inc_log_meta;
     assert_next!(stream_inc, expected);
-    assert_next!(stream_inc, None);
+    assert_closed!(stream_inc);
 
     let expected = &dec_log_meta;
     assert_next!(stream_dec, expected);
-    assert_next!(stream_dec, None);
+    assert_closed!(stream_dec);
 
     Ok(())
 }
@@ -264,11 +265,11 @@ async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> any
 
     let expected = &inc_log_meta;
     assert_next!(stream_inc, expected);
-    assert_next!(stream_inc, None);
+    assert_closed!(stream_inc);
 
     let expected = &dec_log_meta;
     assert_next!(stream_dec, expected);
-    assert_next!(stream_dec, None);
+    assert_closed!(stream_dec);
 
     Ok(())
 }
@@ -302,7 +303,7 @@ async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
     scanner.start().await?;
 
     assert_next!(stream_a, &a_log_meta);
-    assert_next!(stream_a, None);
+    assert_closed!(stream_a);
 
     Ok(())
 }
@@ -337,7 +338,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     scanner_with_range.start().await?;
 
     assert_next!(stream_with_range, &log_meta);
-    assert_next!(stream_with_range, None);
+    assert_closed!(stream_with_range);
 
     Ok(())
 }
@@ -371,7 +372,7 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     scanner_with_range.start().await?;
 
     assert_next!(stream_with_range, expected);
-    assert_next!(stream_with_range, None);
+    assert_closed!(stream_with_range);
 
     Ok(())
 }

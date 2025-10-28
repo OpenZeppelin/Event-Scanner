@@ -123,7 +123,7 @@ impl<N: Network> HistoricEventScanner<N> {
     ///
     /// # Errors
     ///
-    /// - `EventScannerMessage::ServiceShutdown` if the service is already shutting down.
+    /// Can error out if the service fails to start.
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;

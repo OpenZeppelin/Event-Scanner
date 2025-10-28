@@ -6,23 +6,18 @@ use crate::common::{TestCounter, setup_sync_scanner};
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     let setup = setup_sync_scanner(Some(0.1), None, 0).await?;
-    let contract = setup.contract.clone();
-
-    let historical_events = 3;
-    let live_events = 2;
-
-    for _ in 0..historical_events {
-        contract.increase().send().await?.watch().await?;
-    }
-
+    let contract = setup.contract;
     let scanner = setup.scanner;
     let mut stream = setup.stream;
 
-    tokio::spawn(async move { scanner.start().await });
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
-    for _ in 0..live_events {
-        contract.increase().send().await?.watch().await?;
-    }
+    scanner.start().await?;
+
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     // historical events
     assert_next!(
