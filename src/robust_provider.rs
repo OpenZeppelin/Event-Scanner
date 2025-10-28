@@ -20,6 +20,8 @@ pub enum RobustProviderError {
     Timeout,
     #[error("Retry failed after {0} tries")]
     RetryFail(usize),
+    #[error("Block not found, block number: {0}")]
+    BlockNotFound(BlockNumberOrTag),
 }
 
 impl From<RpcError<TransportErrorKind>> for RobustProviderError {
@@ -87,7 +89,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> Result<Option<N::BlockResponse>, RobustProviderError> {
+    ) -> Result<N::BlockResponse, RobustProviderError> {
         info!("eth_getBlockByNumber called");
         let operation = async || {
             self.provider.get_block_by_number(number).await.map_err(RobustProviderError::from)
@@ -96,7 +98,11 @@ impl<N: Network> RobustProvider<N> {
         if let Err(e) = &result {
             error!(error = %e, "eth_getByBlockNumber failed");
         }
-        result
+
+        match result? {
+            Some(block) => Ok(block),
+            None => Err(RobustProviderError::BlockNotFound(number)),
+        }
     }
 
     /// Fetch the latest block number with retry and timeout.

@@ -3,7 +3,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::BlockNumber,
-    transports::{RpcError, TransportErrorKind, http::reqwest},
+    transports::{RpcError, TransportErrorKind},
 };
 use thiserror::Error;
 
@@ -11,9 +11,6 @@ use crate::{block_range_scanner::Message, robust_provider::RobustProviderError};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
-    #[error("HTTP request failed: {0}")]
-    HttpError(Arc<reqwest::Error>),
-
     // #[error("WebSocket error: {0}")]
     // WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("Serialization error: {0}")]
@@ -37,9 +34,6 @@ pub enum ScannerError {
     #[error("Historical sync failed: {0}")]
     HistoricalSyncError(String),
 
-    #[error("WebSocket connection failed after {0} attempts")]
-    WebSocketConnectionFailed(usize),
-
     #[error("Block not found, block number: {0}")]
     BlockNotFound(BlockNumberOrTag),
 
@@ -56,6 +50,7 @@ impl From<RobustProviderError> for ScannerError {
             RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
             RobustProviderError::Timeout => ScannerError::Timeout,
             RobustProviderError::RetryFail(num) => ScannerError::RetryFail(num),
+            RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
         }
     }
 }
@@ -66,12 +61,6 @@ impl From<Result<RangeInclusive<BlockNumber>, ScannerError>> for Message {
             Ok(logs) => Message::Data(logs),
             Err(e) => Message::Error(e),
         }
-    }
-}
-
-impl From<reqwest::Error> for ScannerError {
-    fn from(error: reqwest::Error) -> Self {
-        ScannerError::HttpError(Arc::new(error))
     }
 }
 
