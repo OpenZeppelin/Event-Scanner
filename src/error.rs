@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use alloy::{
-    eips::BlockNumberOrTag,
-    transports::{RpcError, TransportErrorKind, http::reqwest},
+    eips::BlockId,
+    transports::{RpcError, TransportErrorKind},
 };
 use thiserror::Error;
+
+use crate::robust_provider::Error as RobustProviderError;
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -45,12 +47,6 @@ impl From<RobustProviderError> for ScannerError {
             RobustProviderError::RetryFailure(err) => ScannerError::RetryFailure(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
         }
-    }
-}
-
-impl From<reqwest::Error> for ScannerError {
-    fn from(error: reqwest::Error) -> Self {
-        ScannerError::HttpError(Arc::new(error))
     }
 }
 

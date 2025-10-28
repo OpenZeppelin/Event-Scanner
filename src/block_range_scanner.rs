@@ -68,6 +68,10 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerMessage,
     error::ScannerError,
+    robust_provider::{
+        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL,
+        Error as RobustProviderError, RobustProvider,
+    },
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -105,6 +109,12 @@ impl From<RangeInclusive<BlockNumber>> for Message {
 impl PartialEq<RangeInclusive<BlockNumber>> for Message {
     fn eq(&self, other: &RangeInclusive<BlockNumber>) -> bool {
         if let Message::Data(range) = self { range.eq(other) } else { false }
+    }
+}
+
+impl From<RobustProviderError> for Message {
+    fn from(error: RobustProviderError) -> Self {
+        Message::Error(error.into())
     }
 }
 
@@ -513,7 +523,7 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
 
-        let (start_block, end_block) = join!(
+        let (start_block, end_block) = try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height),
         )?;
@@ -543,7 +553,7 @@ impl<N: Network> Service<N> {
         to: N::BlockResponse,
         max_block_range: u64,
         sender: &mpsc::Sender<Message>,
-        provider: &RootProvider<N>,
+        provider: &RobustProvider<N>,
     ) {
         let mut batch_count = 0;
 
@@ -595,13 +605,11 @@ impl<N: Network> Service<N> {
                 batch_from = from;
                 // store the updated end block hash
                 tip_hash = match provider.get_block_by_number(from.into()).await {
-                    Ok(block) => block
-                        .unwrap_or_else(|| {
-                            panic!("Block with number '{from}' should exist post-reorg")
-                        })
-                        .header()
-                        .hash(),
+                    Ok(block) => block.header().hash(),
                     Err(e) => {
+                        if matches!(e, RobustProviderError::BlockNotFound(_)) {
+                            panic!("Block with number '{from}' should exist post-reorg");
+                        }
                         error!(error = %e, "Terminal RPC call error, shutting down");
                         _ = sender.try_stream(e);
                         return;
@@ -762,10 +770,10 @@ impl<N: Network> Service<N> {
 }
 
 async fn reorg_detected<N: Network>(
-    provider: &RootProvider<N>,
+    provider: &RobustProvider<N>,
     hash_to_check: B256,
 ) -> Result<bool, RpcError<TransportErrorKind>> {
-    Ok(provider.get_block_by_hash(hash_to_check).await?.is_none())
+    Ok(provider.get_block_by_hash(hash_to_check).await.is_err())
 }
 
 pub struct BlockRangeScannerClient {
@@ -914,6 +922,7 @@ mod tests {
     use super::*;
     use crate::{assert_closed, assert_empty, assert_next};
     use alloy::{
+        eips::BlockId,
         network::Ethereum,
         providers::{ProviderBuilder, ext::AnvilApi},
         rpc::types::anvil::ReorgOptions,
@@ -1366,21 +1375,16 @@ mod tests {
 
     #[tokio::test]
     async fn try_send_forwards_errors_to_subscribers() {
-        let (tx, mut rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::channel::<Message>(1);
 
-        service.send_to_subscriber(Message::Error(ScannerError::BlockNotFound(4.into()))).await;
+        _ = tx.try_stream(ScannerError::BlockNotFound(4.into())).await;
 
-        match rx.recv().await.expect("subscriber should stay open") {
-            Message::Error(err) => {
-                assert!(matches!(
-                    err,
-                    ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))
-                ));
-            }
-            other => panic!("unexpected message: {other:?}"),
-        }
-
-        Ok(())
+        assert!(matches!(
+            rx.recv().await,
+            Some(ScannerMessage::Error(ScannerError::BlockNotFound(BlockId::Number(
+                BlockNumberOrTag::Number(4)
+            ))))
+        ));
     }
 
     #[tokio::test]
@@ -1575,7 +1579,10 @@ mod tests {
 
         let stream = client.rewind(0, 999).await;
 
-        assert!(matches!(stream, Err(ScannerError::BlockNotFound(BlockNumberOrTag::Number(999)))));
+        assert!(matches!(
+            stream,
+            Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(999))))
+        ));
 
         Ok(())
     }
