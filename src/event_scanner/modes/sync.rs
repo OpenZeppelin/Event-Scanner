@@ -1,7 +1,5 @@
 use alloy::eips::BlockNumberOrTag;
 
-use crate::event_scanner::modes::common::{ConsumerMode, handle_stream};
-
 pub(crate) mod from_block;
 pub(crate) mod from_latest;
 

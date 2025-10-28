@@ -19,7 +19,7 @@ use crate::{
     event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
 };
 
-use super::{ConsumerMode, handle_stream};
+use crate::event_scanner::modes::common::{ConsumerMode, handle_stream};
 
 pub struct SyncFromLatestScannerBuilder {
     block_range_scanner: BlockRangeScanner,
