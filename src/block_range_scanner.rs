@@ -772,8 +772,12 @@ impl<N: Network> Service<N> {
 async fn reorg_detected<N: Network>(
     provider: &RobustProvider<N>,
     hash_to_check: B256,
-) -> Result<bool, RpcError<TransportErrorKind>> {
-    Ok(provider.get_block_by_hash(hash_to_check).await.is_err())
+) -> Result<bool, ScannerError> {
+    match provider.get_block_by_hash(hash_to_check).await {
+        Ok(_) => Ok(false),
+        Err(RobustProviderError::BlockNotFound(_)) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub struct BlockRangeScannerClient {
