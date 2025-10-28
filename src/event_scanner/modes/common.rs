@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use crate::{
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
-    robust_provider::{Error, RobustProvider},
+    robust_provider::{Error as RobustProviderError, RobustProvider},
 };
 use alloy::{
     network::Network,
@@ -129,7 +129,7 @@ async fn get_logs<N: Network>(
     event_filter: &EventFilter,
     log_filter: &Filter,
     provider: &RobustProvider<N>,
-) -> Result<Vec<Log>, Error> {
+) -> Result<Vec<Log>, RobustProviderError> {
     let log_filter = log_filter.clone().from_block(*range.start()).to_block(*range.end());
 
     match provider.get_logs(&log_filter).await {
