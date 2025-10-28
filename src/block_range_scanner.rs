@@ -212,7 +212,7 @@ impl<N: Network> BlockRangeScanner<N> {
     #[must_use]
     pub fn connect(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
         provider.client().expect_pubsub_frontend();
-        let safe_provider = RobustProvider::new(provider)
+        let robust_provider = RobustProvider::new(provider)
             .max_timeout(self.max_timeout)
             .max_retries(self.max_retries)
             .retry_interval(self.retry_interval);
