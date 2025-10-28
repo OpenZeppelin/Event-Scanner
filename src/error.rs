@@ -46,7 +46,7 @@ pub enum ScannerError {
     #[error("Operation timed out")]
     Timeout,
 
-    #[error("Retry failed after {0} tries")]
+    #[error("RPC call failed after exhausting all retry attempts: {0}")]
     RetryFailure(Arc<RpcError<TransportErrorKind>>),
 }
 
