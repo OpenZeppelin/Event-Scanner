@@ -1,19 +1,16 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use alloy::{
-    eips::BlockNumberOrTag,
+    eips::BlockId,
     primitives::BlockNumber,
-    transports::{RpcError, TransportErrorKind, http::reqwest},
+    transports::{RpcError, TransportErrorKind},
 };
 use thiserror::Error;
 
-use crate::{block_range_scanner::Message, robust_provider::RobustProviderError};
+use crate::{block_range_scanner::Message, robust_provider::Error as RobustProviderError};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
-    #[error("HTTP request failed: {0}")]
-    HttpError(Arc<reqwest::Error>),
-
     // #[error("WebSocket error: {0}")]
     // WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("Serialization error: {0}")]
@@ -37,25 +34,22 @@ pub enum ScannerError {
     #[error("Historical sync failed: {0}")]
     HistoricalSyncError(String),
 
-    #[error("WebSocket connection failed after {0} attempts")]
-    WebSocketConnectionFailed(usize),
-
-    #[error("Block not found, block number: {0}")]
-    BlockNotFound(BlockNumberOrTag),
+    #[error("Block not found, Block Id: {0}")]
+    BlockNotFound(BlockId),
 
     #[error("Operation timed out")]
     Timeout,
 
-    #[error("Retry failed after {0} tries")]
-    RetryFail(usize),
+    #[error("RPC call failed after exhausting all retry attempts: {0}")]
+    RetryFailure(Arc<RpcError<TransportErrorKind>>),
 }
 
 impl From<RobustProviderError> for ScannerError {
     fn from(error: RobustProviderError) -> ScannerError {
         match error {
-            RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
             RobustProviderError::Timeout => ScannerError::Timeout,
-            RobustProviderError::RetryFail(num) => ScannerError::RetryFail(num),
+            RobustProviderError::RetryFailure(err) => ScannerError::RetryFailure(err),
+            RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
         }
     }
 }
@@ -66,12 +60,6 @@ impl From<Result<RangeInclusive<BlockNumber>, ScannerError>> for Message {
             Ok(logs) => Message::Data(logs),
             Err(e) => Message::Error(e),
         }
-    }
-}
-
-impl From<reqwest::Error> for ScannerError {
-    fn from(error: reqwest::Error) -> Self {
-        ScannerError::HttpError(Arc::new(error))
     }
 }
 

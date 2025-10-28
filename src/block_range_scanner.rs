@@ -41,11 +41,6 @@
 //!                 error!("Received error from subscription: {e}");
 //!                 match e {
 //!                     ScannerError::ServiceShutdown => break,
-//!                     ScannerError::WebSocketConnectionFailed(_) => {
-//!                         error!(
-//!                             "WebSocket connection failed, continuing to listen for reconnection"
-//!                         );
-//!                     }
 //!                     _ => {
 //!                         error!("Non-fatal error, continuing: {e}");
 //!                     }
@@ -65,8 +60,8 @@
 
 use std::{cmp::Ordering, ops::RangeInclusive, time::Duration};
 use tokio::{
-    join,
     sync::{mpsc, oneshot},
+    try_join,
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
@@ -412,10 +407,8 @@ impl<N: Network> Service<N> {
             self.provider.get_block_by_number(end_height)
         )?;
 
-        let start_block_num =
-            start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
-        let end_block_num =
-            end_block.ok_or_else(|| ScannerError::BlockNotFound(end_height))?.header().number();
+        let start_block_num = start_block.header().number();
+        let end_block_num = end_block.header().number();
 
         let (start_block_num, end_block_num) = match start_block_num.cmp(&end_block_num) {
             Ordering::Greater => (end_block_num, start_block_num),
@@ -449,12 +442,8 @@ impl<N: Network> Service<N> {
             self.provider.get_block_by_number(BlockNumberOrTag::Latest)
         )?;
 
-        let start_block_num =
-            start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
-        let latest_block = latest_block
-            .ok_or_else(|| ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
-            .header()
-            .number();
+        let start_block_num = start_block.header().number();
+        let latest_block = latest_block.header().number();
 
         let confirmed_tip_num = latest_block.saturating_sub(block_confirmations);
 
@@ -550,13 +539,10 @@ impl<N: Network> Service<N> {
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
     ) -> Result<(), ScannerError> {
-        let (start_block, end_block) = join!(
+        let (start_block, end_block) = try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height),
-        );
-
-        let start_block = start_block?.ok_or(ScannerError::BlockNotFound(start_height))?;
-        let end_block = end_block?.ok_or(ScannerError::BlockNotFound(end_height))?;
+        )?;
 
         // normalize block range
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
@@ -620,13 +606,7 @@ impl<N: Network> Service<N> {
                 // restart rewind
                 batch_from = from;
                 // store the updated end block hash
-                tip_hash = self
-                    .provider
-                    .get_block_by_number(from.into())
-                    .await?
-                    .expect("Chain should have the same height post-reorg")
-                    .header()
-                    .hash();
+                tip_hash = self.provider.get_block_by_number(from.into()).await?.header().hash();
             } else {
                 // SAFETY: `batch_to` is always greater than `to`, so `batch_to - 1` is always
                 // a valid unsigned integer
@@ -640,12 +620,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn reorg_detected(&self, hash_to_check: B256) -> Result<bool, ScannerError> {
-        Ok(self
-            .provider
-            .get_block_by_hash(hash_to_check)
-            .await
-            .map_err(ScannerError::from)?
-            .is_none())
+        Ok(self.provider.get_block_by_hash(hash_to_check).await.is_err())
     }
 
     async fn stream_historical_blocks(
@@ -799,11 +774,7 @@ impl<N: Network> Service<N> {
     async fn get_block_subscription(
         provider: &RobustProvider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, ScannerError> {
-        let ws_stream = provider
-            .subscribe_blocks()
-            .await
-            .map_err(|_| ScannerError::WebSocketConnectionFailed(1))?;
-
+        let ws_stream = provider.subscribe_blocks().await?;
         Ok(ws_stream)
     }
 
@@ -1016,7 +987,10 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
 
-    use alloy::providers::{Provider, RootProvider};
+    use alloy::{
+        eips::BlockId,
+        providers::{Provider, RootProvider},
+    };
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -1670,13 +1644,14 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(1);
         service.subscriber = Some(tx);
 
-        service
-            .send_to_subscriber(Message::Error(ScannerError::WebSocketConnectionFailed(4)))
-            .await;
+        service.send_to_subscriber(Message::Error(ScannerError::BlockNotFound(4.into()))).await;
 
         match rx.recv().await.expect("subscriber should stay open") {
-            Message::Error(ScannerError::WebSocketConnectionFailed(attempts)) => {
-                assert_eq!(attempts, 4);
+            Message::Error(err) => {
+                assert!(matches!(
+                    err,
+                    ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))
+                ));
             }
             other => panic!("unexpected message: {other:?}"),
         }
