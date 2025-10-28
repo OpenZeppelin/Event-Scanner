@@ -109,6 +109,7 @@ impl<N: Network> SyncFromLatestEventScanner<N> {
     /// # Errors
     ///
     /// Returns an error if the scanner fails to start.
+    #[allow(clippy::missing_panics_doc)]
     pub async fn start(self) -> Result<(), ScannerError> {
         let count = self.config.latest_events_count;
         let provider = self.block_range_scanner.provider().clone();
