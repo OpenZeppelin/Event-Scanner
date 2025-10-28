@@ -24,7 +24,28 @@ pub enum ConsumerMode {
     CollectLatest { count: usize },
 }
 
-// Note: assumes it is running in a separate tokio task, so as to be non-blocking.
+/// Orchestrates the consumption of block range messages from a stream and dispatches them to
+/// event log consumers.
+///
+/// This function sets up a broadcast channel to distribute block range messages from the input
+/// stream to multiple log consumers (one per event listener). Each consumer fetches logs for
+/// their specific event filter and handles them according to the specified mode.
+///
+/// # Why this design?
+///
+/// Log consumers are tightly coupled with the `ConsumerMode` because the mode dictates their
+/// entire lifecycle and behavior:
+/// - `Stream` mode: consumers forward logs immediately as they arrive
+/// - `CollectLatest` mode: consumers accumulate logs and send them only at the end
+///
+/// This tight coupling means consumers cannot be reused across different modes. For example,
+/// the "sync from latest" scanning strategy needs to run two modes sequentially (first
+/// `CollectLatest` to get recent events, then `Stream` for ongoing events), requiring separate
+/// consumer spawns for each phase rather than reusing the same consumers.
+///
+/// # Note
+///
+/// Assumes it is running in a separate tokio task, so as to be non-blocking.
 pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unpin>(
     mut stream: S,
     provider: &RootProvider<N>,
