@@ -8,7 +8,7 @@ use alloy::{
 
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::{
     ScannerError, ScannerStatus,
@@ -125,7 +125,7 @@ impl<N: Network> SyncFromLatestEventScanner<N> {
         let latest_block = provider
             .get_block_by_number(BlockNumberOrTag::Latest)
             .await?
-            .ok_or_else(|| ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
+            .ok_or(ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
             .header()
             .number();
 
@@ -157,11 +157,11 @@ impl<N: Network> SyncFromLatestEventScanner<N> {
             // Use a one-off channel for the notification.
             let (tx, rx) = mpsc::channel::<BlockRangeMessage>(1);
             let stream = ReceiverStream::new(rx);
-            if tx.send(BlockRangeMessage::Status(ScannerStatus::SwitchingToLive)).await.is_err() {
-                warn!("No log consumers, stopping stream");
-                return;
-            }
-            // close the channel to drop log consumers immediately
+            tx.send(BlockRangeMessage::Status(ScannerStatus::SwitchingToLive))
+                .await
+                .expect("receiver exists");
+
+            // close the channel to stop the stream
             drop(tx);
 
             let sync_stream = stream.chain(sync_stream);
