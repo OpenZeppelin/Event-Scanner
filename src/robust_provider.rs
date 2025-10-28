@@ -189,8 +189,7 @@ impl<N: Network> RobustProvider<N> {
         )
         .await
         {
-            Ok(Ok(res)) => Ok(res),
-            Ok(Err(e)) => Err(e.into()),
+            Ok(res) => res.map_err(Error::from),
             Err(_) => Err(Error::Timeout),
         }
     }
