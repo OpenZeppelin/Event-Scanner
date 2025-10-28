@@ -576,9 +576,12 @@ impl<N: Network> Service<N> {
                 batch_from = from;
                 // store the updated end block hash
                 tip_hash = match provider.get_block_by_number(from.into()).await {
-                    Ok(block) => {
-                        block.expect("Chain should have the same height post-reorg").header().hash()
-                    }
+                    Ok(block) => block
+                        .unwrap_or_else(|| {
+                            panic!("Block with number '{from}' should exist post-reorg")
+                        })
+                        .header()
+                        .hash(),
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
                         _ = sender.try_stream(e);
