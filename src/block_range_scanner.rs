@@ -1635,8 +1635,8 @@ mod tests {
         service.send_to_subscriber(Message::Error(ScannerError::BlockNotFound(4.into()))).await;
 
         match rx.recv().await.expect("subscriber should stay open") {
-            Message::Error(ScannerError::BlockNotFound(attempts)) => {
-                assert_eq!(attempts, 4.into());
+            Message::Error(err) => {
+                assert!(matches!(err, ScannerError::BlockNotFound(BlockNumberOrTag::Number(4))));
             }
             other => panic!("unexpected message: {other:?}"),
         }
