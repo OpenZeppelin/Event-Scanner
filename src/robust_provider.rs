@@ -29,7 +29,7 @@ impl From<RpcError<TransportErrorKind>> for RobustProviderError {
     }
 }
 
-/// Safe provider wrapper with built-in retry and timeout mechanisms.
+/// Provider wrapper with built-in retry and timeout mechanisms.
 ///
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
