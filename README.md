@@ -228,18 +228,3 @@ Integration tests cover all modes:
 ```bash
 cargo nextest run --features test-utils
 ```
-
----
-
-## Errors
-
-The scanner surfaces errors via `EventScannerError`:
-
-- `EventScannerError::BlockRangeScanner(BlockRangeScannerError)` – issues from the underlying block range service (e.g., subscription/channel constraints, historical/sync failures).
-- `EventScannerError::Provider(RpcError<TransportErrorKind>)` – transport/provider-level failures (e.g., connection problems, RPC errors).
-
-Status notifications are emitted as `EventScannerMessage::Status(ScannerStatus)`, including:
-
-- `ScannerStatus::ReorgDetected`
-- `ScannerStatus::SwitchingToLive`
-
