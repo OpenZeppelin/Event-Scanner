@@ -71,8 +71,9 @@ use tokio::{
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
+    ScannerMessage,
     error::ScannerError,
-    types::{ScannerMessage, ScannerStatus},
+    types::{ScannerStatus, TryStream},
 };
 use alloy::{
     consensus::BlockHeader,
@@ -109,6 +110,18 @@ impl From<RangeInclusive<BlockNumber>> for Message {
 impl PartialEq<RangeInclusive<BlockNumber>> for Message {
     fn eq(&self, other: &RangeInclusive<BlockNumber>) -> bool {
         if let Message::Data(range) = self { range.eq(other) } else { false }
+    }
+}
+
+impl From<RpcError<TransportErrorKind>> for Message {
+    fn from(error: RpcError<TransportErrorKind>) -> Self {
+        Message::Error(error.into())
+    }
+}
+
+impl From<ScannerError> for Message {
+    fn from(error: ScannerError) -> Self {
+        Message::Error(error)
     }
 }
 
@@ -224,19 +237,11 @@ pub enum Command {
         end_height: BlockNumberOrTag,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
-    Unsubscribe {
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
-    Shutdown {
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
 }
 
 struct Service<N: Network> {
     provider: RootProvider<N>,
     max_block_range: u64,
-    subscriber: Option<mpsc::Sender<Message>>,
-    websocket_connected: bool,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
     shutdown: bool,
@@ -249,8 +254,6 @@ impl<N: Network> Service<N> {
         let service = Self {
             provider,
             max_block_range,
-            subscriber: None,
-            websocket_connected: false,
             error_count: 0,
             command_receiver: cmd_rx,
             shutdown: false,
@@ -271,7 +274,7 @@ impl<N: Network> Service<N> {
                             self.error_count += 1;
                         }
                     } else {
-                        info!("Command channel closed, shutting down");
+                        warn!("Command channel closed, shutting down");
                         break;
                     }
                 }
@@ -284,49 +287,34 @@ impl<N: Network> Service<N> {
     async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
         match command {
             Command::StreamLive { sender, block_confirmations, response } => {
-                self.ensure_no_subscriber()?;
                 info!("Starting live stream");
-                self.subscriber = Some(sender);
-                let result = self.handle_live(block_confirmations).await;
+                let result = self.handle_live(block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamHistorical { sender, start_height, end_height, response } => {
-                self.ensure_no_subscriber()?;
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting historical stream");
-                self.subscriber = Some(sender);
-                let result = self.handle_historical(start_height, end_height).await;
+                let result = self.handle_historical(start_height, end_height, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamFrom { sender, start_height, block_confirmations, response } => {
-                self.ensure_no_subscriber()?;
-                self.subscriber = Some(sender);
                 info!(start_height = ?start_height, "Starting streaming from");
-                let result = self.handle_sync(start_height, block_confirmations).await;
+                let result = self.handle_sync(start_height, block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::Rewind { sender, start_height, end_height, response } => {
-                self.ensure_no_subscriber()?;
-                self.subscriber = Some(sender);
                 info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
-                let result = self.handle_rewind(start_height, end_height).await;
+                let result = self.handle_rewind(start_height, end_height, sender).await;
                 let _ = response.send(result);
-            }
-            Command::Unsubscribe { response } => {
-                self.handle_unsubscribe();
-                let _ = response.send(Ok(()));
-            }
-            Command::Shutdown { response } => {
-                self.shutdown = true;
-                self.handle_unsubscribe();
-                let _ = response.send(Ok(()));
             }
         }
         Ok(())
     }
 
-    async fn handle_live(&mut self, block_confirmations: u64) -> Result<(), ScannerError> {
-        let sender = self.subscriber.clone().ok_or_else(|| ScannerError::ServiceShutdown)?;
-
+    async fn handle_live(
+        &mut self,
+        block_confirmations: u64,
+        sender: mpsc::Sender<Message>,
+    ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
@@ -354,7 +342,10 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
+        sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
+        let max_block_range = self.max_block_range;
+
         let (start_block, end_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height)
@@ -372,11 +363,15 @@ impl<N: Network> Service<N> {
 
         info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
-        let sender = self.subscriber.take().ok_or_else(|| ScannerError::ServiceShutdown)?;
-        let max_block_range = self.max_block_range;
-
-        Self::stream_historical_blocks(start_block_num, end_block_num, max_block_range, &sender)
-            .await?;
+        tokio::spawn(async move {
+            Self::stream_historical_blocks(
+                start_block_num,
+                end_block_num,
+                max_block_range,
+                &sender,
+            )
+            .await;
+        });
 
         Ok(())
     }
@@ -385,9 +380,8 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         block_confirmations: u64,
+        sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
-        let sender = self.subscriber.clone().ok_or_else(|| ScannerError::ServiceShutdown)?;
-
         let provider = self.provider.clone();
         let max_block_range = self.max_block_range;
 
@@ -454,7 +448,7 @@ impl<N: Network> Service<N> {
         let cutoff = confirmed_tip;
 
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
-        let live_subscription_task = tokio::spawn(async move {
+        tokio::spawn(async move {
             Self::stream_live_blocks(
                 cutoff + 1,
                 provider,
@@ -469,16 +463,12 @@ impl<N: Network> Service<N> {
             // Step 4: Perform historical synchronization
             // This processes blocks from start_block to end_block (cutoff)
             // If this fails, we need to abort the live streaming task
-            if Self::stream_historical_blocks(start_block, confirmed_tip, max_block_range, &sender)
-                .await
-                .is_err()
-            {
-                error!("Error during syncing past blocks, stopping stream");
-                live_subscription_task.abort();
-                return;
-            }
+            Self::stream_historical_blocks(start_block, confirmed_tip, max_block_range, &sender)
+                .await;
 
-            if !Self::try_send(&sender, ScannerStatus::SwitchingToLive).await {
+            info!("Chain tip reached, switching to live");
+
+            if !sender.try_stream(ScannerStatus::SwitchingToLive).await {
                 return;
             }
 
@@ -501,11 +491,10 @@ impl<N: Network> Service<N> {
         &mut self,
         start_height: BlockNumberOrTag,
         end_height: BlockNumberOrTag,
+        sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
-        let sender = self.subscriber.take().ok_or_else(|| ScannerError::NoSubscriber)?;
-
-        let provider = self.provider.clone();
         let max_block_range = self.max_block_range;
+        let provider = self.provider.clone();
 
         let (start_block, end_block) = join!(
             self.provider.get_block_by_number(start_height),
@@ -522,7 +511,7 @@ impl<N: Network> Service<N> {
         };
 
         tokio::spawn(async move {
-            Self::stream_rewind(sender, provider, from, to, max_block_range).await
+            Self::stream_rewind(from, to, max_block_range, &sender, &provider).await;
         });
 
         Ok(())
@@ -536,12 +525,12 @@ impl<N: Network> Service<N> {
     ///
     /// Returns an error if the stream fails
     async fn stream_rewind(
-        sender: mpsc::Sender<Message>,
-        provider: RootProvider<N>,
         from: N::BlockResponse,
         to: N::BlockResponse,
         max_block_range: u64,
-    ) -> Result<(), ScannerError> {
+        sender: &mpsc::Sender<Message>,
+        provider: &RootProvider<N>,
+    ) {
         let mut batch_count = 0;
 
         // for checking whether reorg occurred
@@ -557,7 +546,7 @@ impl<N: Network> Service<N> {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            if !Self::try_send(&sender, batch_to..=batch_from).await {
+            if !sender.try_stream(batch_to..=batch_from).await {
                 break;
             }
 
@@ -572,49 +561,49 @@ impl<N: Network> Service<N> {
                 break;
             }
 
-            let reorg_detected = match Self::reorg_detected(&provider, tip_hash).await {
-                Ok(reorg_detected) => {
+            let reorged = match reorg_detected(provider, tip_hash).await {
+                Ok(detected) => {
                     info!(block_number = %from, hash = %tip_hash, "Reorg detected");
-                    reorg_detected
+                    detected
                 }
                 Err(e) => {
-                    error!(error = %e, "Failed the reorg check");
-                    _ = Self::try_send(&sender, e).await;
-                    break;
+                    error!(error = %e, "Terminal RPC call error, shutting down");
+                    _ = sender.try_stream(e);
+                    return;
                 }
             };
 
-            if reorg_detected {
-                if !Self::try_send(&sender, ScannerStatus::ReorgDetected).await {
+            if reorged {
+                info!(block_number = %from, hash = %tip_hash, "Reorg detected");
+
+                if !sender.try_stream(ScannerStatus::ReorgDetected).await {
                     break;
                 }
 
                 // restart rewind
                 batch_from = from;
                 // store the updated end block hash
-                tip_hash = provider
-                    .get_block_by_number(from.into())
-                    .await?
-                    .expect("Chain should have the same height post-reorg")
-                    .header()
-                    .hash();
+                tip_hash = match provider.get_block_by_number(from.into()).await {
+                    Ok(block) => block
+                        .unwrap_or_else(|| {
+                            panic!("Block with number '{from}' should exist post-reorg")
+                        })
+                        .header()
+                        .hash(),
+                    Err(e) => {
+                        error!(error = %e, "Terminal RPC call error, shutting down");
+                        _ = sender.try_stream(e);
+                        return;
+                    }
+                };
             } else {
-                // SAFETY: `batch_to` is always greater than `to`, so `batch_to - 1` is always
-                // a valid unsigned integer
+                // `batch_to` is always greater than `to`, so `batch_to - 1` is always a valid
+                // unsigned integer
                 batch_from = batch_to - 1;
             }
         }
 
         info!(batch_count = batch_count, "Rewind completed");
-
-        Ok(())
-    }
-
-    async fn reorg_detected(
-        provider: &RootProvider<N>,
-        hash_to_check: B256,
-    ) -> Result<bool, ScannerError> {
-        Ok(provider.get_block_by_hash(hash_to_check).await?.is_none())
     }
 
     async fn stream_historical_blocks(
@@ -622,7 +611,7 @@ impl<N: Network> Service<N> {
         end: BlockNumber,
         max_block_range: u64,
         sender: &mpsc::Sender<Message>,
-    ) -> Result<(), ScannerError> {
+    ) {
         let mut batch_count = 0;
 
         let mut next_start_block = start;
@@ -633,9 +622,7 @@ impl<N: Network> Service<N> {
             let batch_end_block_number =
                 next_start_block.saturating_add(max_block_range - 1).min(end);
 
-            if !Self::try_send(sender, Message::Data(next_start_block..=batch_end_block_number))
-                .await
-            {
+            if !sender.try_stream(next_start_block..=batch_end_block_number).await {
                 break;
             }
 
@@ -655,8 +642,6 @@ impl<N: Network> Service<N> {
         }
 
         info!(batch_count = batch_count, "Historical sync completed");
-
-        Ok(())
     }
 
     async fn stream_live_blocks<P: Provider<N>>(
@@ -681,9 +666,7 @@ impl<N: Network> Service<N> {
 
                     if incoming_block_num < range_start {
                         warn!("Reorg detected: sending forked range");
-                        if sender.send(Message::Status(ScannerStatus::ReorgDetected)).await.is_err()
-                        {
-                            warn!("Downstream channel closed, stopping live blocks task");
+                        if !sender.try_stream(ScannerStatus::ReorgDetected).await {
                             return;
                         }
 
@@ -708,8 +691,7 @@ impl<N: Network> Service<N> {
                             "Sending live block range"
                         );
 
-                        if sender.send(Message::Data(range_start..=range_end)).await.is_err() {
-                            warn!("Downstream channel closed, stopping live blocks task");
+                        if !sender.try_stream(range_start..=range_end).await {
                             return;
                         }
 
@@ -719,9 +701,7 @@ impl<N: Network> Service<N> {
                 }
             }
             Err(e) => {
-                if sender.send(Message::Error(e)).await.is_err() {
-                    warn!("Downstream channel closed, stopping live blocks task");
-                }
+                _ = sender.try_stream(e).await;
             }
         }
     }
@@ -740,29 +720,26 @@ impl<N: Network> Service<N> {
                 Message::Data(range) => {
                     let (start, end) = (*range.start(), *range.end());
                     if start >= cutoff {
-                        if sender.send(Message::Data(range)).await.is_err() {
-                            warn!("Subscriber channel closed, cleaning up");
-                            return;
+                        if !sender.try_stream(range).await {
+                            break;
                         }
                         processed += end - start;
-                    } else if end > cutoff {
+                    } else if end >= cutoff {
                         discarded += cutoff - start;
 
                         let start = cutoff;
-                        if sender.send(Message::Data(start..=end)).await.is_err() {
-                            warn!("Subscriber channel closed, cleaning up");
-                            return;
+                        if !sender.try_stream(start..=end).await {
+                            break;
                         }
                         processed += end - start;
                     } else {
                         discarded += end - start;
                     }
                 }
-                _ => {
+                other => {
                     // Could be error or status
-                    if sender.send(data).await.is_err() {
-                        warn!("Subscriber channel closed, cleaning up");
-                        return;
+                    if !sender.try_stream(other).await {
+                        break;
                     }
                 }
             }
@@ -781,28 +758,13 @@ impl<N: Network> Service<N> {
 
         Ok(ws_stream)
     }
+}
 
-    async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
-        if let Err(err) = sender.send(msg.into()).await {
-            warn!(error = %err, "Downstream channel closed, stopping stream");
-            return false;
-        }
-        true
-    }
-
-    fn handle_unsubscribe(&mut self) {
-        if self.subscriber.take().is_some() {
-            info!("Unsubscribing current subscriber");
-            self.websocket_connected = false;
-        }
-    }
-
-    fn ensure_no_subscriber(&self) -> Result<(), ScannerError> {
-        if self.subscriber.is_some() {
-            return Err(ScannerError::MultipleSubscribers);
-        }
-        Ok(())
-    }
+async fn reorg_detected<N: Network>(
+    provider: &RootProvider<N>,
+    hash_to_check: B256,
+) -> Result<bool, RpcError<TransportErrorKind>> {
+    Ok(provider.get_block_by_hash(hash_to_check).await?.is_none())
 }
 
 pub struct BlockRangeScannerClient {
@@ -944,59 +906,20 @@ impl BlockRangeScannerClient {
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
-
-    /// Unsubscribes the current subscriber.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn unsubscribe(&self) -> Result<(), ScannerError> {
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::Unsubscribe { response: response_tx };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)?
-    }
-
-    /// Shuts down the subscription service and unsubscribes the current subscriber.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn shutdown(&self) -> Result<(), ScannerError> {
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::Shutdown { response: response_tx };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)?
-    }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use std::time::Duration;
-    use tokio::time::timeout;
-
     use super::*;
-    use crate::assert_next;
+    use crate::{assert_closed, assert_empty, assert_next};
     use alloy::{
         network::Ethereum,
         providers::{ProviderBuilder, ext::AnvilApi},
-        rpc::{client::RpcClient, types::anvil::ReorgOptions},
-        transports::mock::Asserter,
+        rpc::types::anvil::ReorgOptions,
     };
     use alloy_node_bindings::Anvil;
     use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
-
-    fn mocked_provider(asserter: Asserter) -> RootProvider<Ethereum> {
-        RootProvider::new(RpcClient::mocked(asserter))
-    }
 
     #[test]
     fn block_range_scanner_defaults_match_constants() {
@@ -1014,48 +937,51 @@ mod tests {
         assert_eq!(scanner.max_block_range, max_block_range);
     }
 
-    #[test]
-    fn handle_unsubscribe_clears_subscriber() {
-        let asserter = Asserter::new();
-        let provider = mocked_provider(asserter);
-        let (mut service, _cmd) = Service::new(provider, DEFAULT_MAX_BLOCK_RANGE);
-
-        let (tx, _rx) = mpsc::channel(1);
-        service.websocket_connected = true;
-        service.subscriber = Some(tx);
-
-        service.handle_unsubscribe();
-
-        assert!(service.subscriber.is_none());
-        assert!(!service.websocket_connected);
-    }
-
     #[tokio::test]
-    async fn live_mode_processes_all_blocks() -> anyhow::Result<()> {
-        let anvil = Anvil::new().block_time_f64(0.01).try_spawn()?;
+    async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+        // --- Zero block confirmations -> stream immediately ---
 
         let client = BlockRangeScanner::new()
             .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
-        let expected_blocks = 10;
+        let mut stream = client.stream_live(0).await?;
 
-        let mut receiver =
-            client.stream_live(DEFAULT_BLOCK_CONFIRMATIONS).await?.take(expected_blocks);
+        provider.anvil_mine(Some(5), None).await?;
 
-        let mut block_range_start = 0;
+        assert_next!(stream, 1..=1);
+        assert_next!(stream, 2..=2);
+        assert_next!(stream, 3..=3);
+        assert_next!(stream, 4..=4);
+        assert_next!(stream, 5..=5);
+        let mut stream = assert_empty!(stream);
 
-        while let Some(Message::Data(range)) = receiver.next().await {
-            info!("Received block range: [{range:?}]");
-            if block_range_start == 0 {
-                block_range_start = *range.start();
-            }
+        provider.anvil_mine(Some(1), None).await?;
 
-            assert_eq!(block_range_start, *range.start());
-            assert!(range.end() >= range.start());
-            block_range_start = *range.end() + 1;
-        }
+        assert_next!(stream, 6..=6);
+        assert_empty!(stream);
+
+        // --- 1 block confirmation  ---
+
+        let mut stream = client.stream_live(1).await?;
+
+        provider.anvil_mine(Some(5), None).await?;
+
+        assert_next!(stream, 6..=6);
+        assert_next!(stream, 7..=7);
+        assert_next!(stream, 8..=8);
+        assert_next!(stream, 9..=9);
+        assert_next!(stream, 10..=10);
+        let mut stream = assert_empty!(stream);
+
+        provider.anvil_mine(Some(1), None).await?;
+
+        assert_next!(stream, 11..=11);
+        assert_empty!(stream);
 
         Ok(())
     }
@@ -1065,7 +991,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         let block_confirmations = 5;
 
@@ -1074,106 +1000,23 @@ mod tests {
             .await?
             .run()?;
 
-        let expected_blocks = 10;
-        let mut receiver = client
-            .stream_from(BlockNumberOrTag::Latest, block_confirmations)
-            .await?
-            .take(expected_blocks);
+        let stream = client.stream_from(BlockNumberOrTag::Latest, block_confirmations).await?;
 
-        let latest_head = provider.get_block_number().await?;
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        let stream = assert_empty!(stream);
 
-        let mut expected_range_start = latest_head;
+        provider.anvil_mine(Some(4), None).await?;
 
-        while let Some(Message::Data(range)) = receiver.next().await {
-            assert_eq!(expected_range_start, *range.start());
-            assert_eq!(range.end(), range.start());
-            expected_range_start += 1;
-        }
+        let mut stream = assert_empty!(stream);
 
-        // verify that the final block number (range.end) was of the latest block with the expected
-        // block confirmations
-        assert_eq!(expected_range_start, latest_head + expected_blocks as u64);
+        provider.anvil_mine(Some(1), None).await?;
 
-        Ok(())
-    }
+        assert_next!(stream, 20..=20);
+        let mut stream = assert_empty!(stream);
 
-    #[tokio::test]
-    async fn live_mode_respects_block_confirmations() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
+        provider.anvil_mine(Some(1), None).await?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
-
-        let block_confirmations = 5;
-
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let expected_blocks = 10;
-
-        let mut receiver = client.stream_live(block_confirmations).await?.take(expected_blocks);
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        let latest_head = provider.get_block_number().await?;
-        provider.anvil_mine(Option::Some(expected_blocks as u64), Option::None).await?;
-
-        let mut expected_range_start = latest_head.saturating_sub(block_confirmations) + 1;
-
-        while let Some(Message::Data(range)) = receiver.next().await {
-            assert_eq!(expected_range_start, *range.start());
-            assert_eq!(range.end(), range.start());
-            expected_range_start += 1;
-        }
-
-        // we add 1 to the right side, because we're expecting the number of the _next_ block to be
-        // mined
-        assert_eq!(
-            expected_range_start,
-            latest_head + expected_blocks as u64 + 1 - block_confirmations
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn live_mode_respects_block_confirmations_on_new_chain() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn()?;
-
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-
-        let block_confirmations = 5;
-
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
-
-        let mut receiver = client.stream_live(block_confirmations).await?;
-
-        provider.anvil_mine(Option::Some(6), Option::None).await?;
-
-        let next = receiver.next().await;
-        if let Some(Message::Data(range)) = next {
-            assert_eq!(0, *range.start());
-            assert_eq!(0, *range.end());
-        } else {
-            panic!("expected range, got: {next:?}");
-        }
-
-        let next = receiver.next().await;
-        if let Some(Message::Data(range)) = next {
-            assert_eq!(1, *range.start());
-            assert_eq!(1, *range.end());
-        } else {
-            panic!("expected range, got: {next:?}");
-        }
-
-        // assert no new pending confirmed block ranges
-        assert!(
-            timeout(Duration::from_secs(1), async move { receiver.next().await }).await.is_err()
-        );
+        assert_next!(stream, 21..=21);
+        assert_empty!(stream);
 
         Ok(())
     }
@@ -1194,13 +1037,13 @@ mod tests {
 
         let mut receiver = client.stream_live(block_confirmations).await?;
 
-        provider.anvil_mine(Option::Some(10), Option::None).await?;
+        provider.anvil_mine(Some(10), None).await?;
 
         provider
             .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
             .await?;
 
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         let mut block_range_start = 0;
 
@@ -1238,13 +1081,13 @@ mod tests {
 
         let mut receiver = client.stream_live(block_confirmations).await?;
 
-        provider.anvil_mine(Option::Some(10), Option::None).await?;
+        provider.anvil_mine(Some(10), None).await?;
 
         provider
             .anvil_reorg(ReorgOptions { depth: block_confirmations + 5, tx_block_pairs: vec![] })
             .await?;
 
-        provider.anvil_mine(Option::Some(30), Option::None).await?;
+        provider.anvil_mine(Some(30), None).await?;
         receiver.close();
 
         let mut block_range_start = 0;
@@ -1294,7 +1137,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(120), Option::None).await?;
+        provider.anvil_mine(Some(120), None).await?;
 
         let end_num = 110;
 
@@ -1310,7 +1153,7 @@ mod tests {
 
         let depth = 15;
         _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
-        _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+        _ = provider.anvil_mine(Some(20), None).await;
 
         assert_next!(stream, 0..=29);
         assert_next!(stream, 30..=59);
@@ -1318,7 +1161,7 @@ mod tests {
         assert_next!(stream, 90..=110);
         assert_next!(stream, ScannerStatus::ReorgDetected);
         assert_next!(stream, 105..=110);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1329,7 +1172,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(120), Option::None).await?;
+        provider.anvil_mine(Some(120), None).await?;
 
         let end_num = 120;
 
@@ -1344,10 +1187,10 @@ mod tests {
             .await?;
 
         let pre_reorg_mine = 20;
-        _ = provider.anvil_mine(Option::Some(pre_reorg_mine), Option::None).await;
+        _ = provider.anvil_mine(Some(pre_reorg_mine), None).await;
         let depth = pre_reorg_mine + 1;
         _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
-        _ = provider.anvil_mine(Option::Some(20), Option::None).await;
+        _ = provider.anvil_mine(Some(20), None).await;
 
         assert_next!(stream, 0..=29);
         assert_next!(stream, 30..=59);
@@ -1355,7 +1198,7 @@ mod tests {
         assert_next!(stream, 90..=120);
         assert_next!(stream, ScannerStatus::ReorgDetected);
         assert_next!(stream, 120..=120);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1366,7 +1209,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(100), Option::None).await?;
+        provider.anvil_mine(Some(100), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
@@ -1380,23 +1223,23 @@ mod tests {
         assert_next!(stream, 5..=9);
         assert_next!(stream, 10..=14);
         assert_next!(stream, 15..=19);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // ranges where last batch is smaller than blocks per epoch
         let mut stream = client.stream_historical(93, 99).await?;
         assert_next!(stream, 93..=97);
         assert_next!(stream, 98..=99);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // range where blocks per epoch is larger than the number of blocks in the range
         let mut stream = client.stream_historical(3, 5).await?;
         assert_next!(stream, 3..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // single item range
         let mut stream = client.stream_historical(3, 3).await?;
         assert_next!(stream, 3..=3);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         // range where blocks per epoch is larger than the number of blocks on chain
         let client = BlockRangeScanner::new()
@@ -1407,11 +1250,11 @@ mod tests {
 
         let mut stream = client.stream_historical(0, 20).await?;
         assert_next!(stream, 0..=20);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         let mut stream = client.stream_historical(0, 99).await?;
         assert_next!(stream, 0..=99);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1421,7 +1264,7 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-        provider.anvil_mine(Option::Some(11), Option::None).await?;
+        provider.anvil_mine(Some(11), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
@@ -1433,13 +1276,13 @@ mod tests {
         assert_next!(stream, 0..=4);
         assert_next!(stream, 5..=9);
         assert_next!(stream, 10..=10);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn buffered_messages_trim_ranges_prior_to_cutoff() -> anyhow::Result<()> {
+    async fn buffered_messages_after_cutoff_are_all_passed() {
         let cutoff = 50;
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
         buffer_tx.send(Message::Data(51..=55)).await.unwrap();
@@ -1447,21 +1290,19 @@ mod tests {
         buffer_tx.send(Message::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(Message::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // All ranges should be forwarded as-is since they're after cutoff
-        assert_eq!(forwarded, vec![51..=55, 56..=60, 61..=70]);
-        Ok(())
+        assert_next!(stream, 51..=55);
+        assert_next!(stream, 56..=60);
+        assert_next!(stream, 61..=70);
+        assert_closed!(stream);
     }
 
     #[tokio::test]
-    async fn ranges_entirely_before_cutoff_are_discarded() -> anyhow::Result<()> {
+    async fn ranges_entirely_before_cutoff_are_discarded() {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
@@ -1470,131 +1311,68 @@ mod tests {
         buffer_tx.send(Message::Data(61..=70)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(Message::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // All ranges should be discarded since they're before cutoff
-        assert_eq!(forwarded, vec![]);
-        Ok(())
+        assert_closed!(stream);
     }
 
     #[tokio::test]
-    async fn ranges_overlapping_cutoff_are_trimmed() -> anyhow::Result<()> {
+    async fn ranges_overlapping_cutoff_are_trimmed() {
         let cutoff = 75;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(70..=80)).await.unwrap();
-        buffer_tx.send(Message::Data(60..=80)).await.unwrap();
-        buffer_tx.send(Message::Data(74..=76)).await.unwrap();
+        buffer_tx.send(Message::Data(60..=70)).await.unwrap();
+        buffer_tx.send(Message::Data(71..=80)).await.unwrap();
+        buffer_tx.send(Message::Data(81..=86)).await.unwrap();
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(Message::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // All ranges should be trimmed to start at cutoff (75)
-        assert_eq!(forwarded, vec![75..=80, 75..=80, 75..=76]);
-        Ok(())
+        assert_next!(stream, 75..=80);
+        assert_next!(stream, 81..=86);
+        assert_closed!(stream);
     }
 
     #[tokio::test]
-    async fn mixed_ranges_are_handled_correctly() -> anyhow::Result<()> {
-        let cutoff = 50;
-
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(30..=45)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(Message::Data(46..=55)).await.unwrap(); // Overlaps: trim to 50..=55
-        buffer_tx.send(Message::Data(56..=65)).await.unwrap(); // After cutoff: forward as-is
-        buffer_tx.send(Message::Data(40..=49)).await.unwrap(); // Before cutoff: discard
-        buffer_tx.send(Message::Data(49..=51)).await.unwrap(); // Overlaps: trim to 50..=51
-        buffer_tx.send(Message::Data(51..=100)).await.unwrap(); // After cutoff: forward as-is
-        drop(buffer_tx);
-
-        let (out_tx, mut out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
-
-        let mut forwarded = Vec::new();
-        while let Some(Message::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
-
-        assert_eq!(forwarded, vec![50..=55, 56..=65, 50..=51, 51..=100]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn edge_case_range_exactly_at_cutoff() -> anyhow::Result<()> {
+    async fn edge_case_range_exactly_at_cutoff() {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(99..=99)).await.unwrap(); // Just before: discard
-        buffer_tx.send(Message::Data(100..=100)).await.unwrap(); // Exactly at: forward
+        buffer_tx.send(Message::Data(98..=98)).await.unwrap(); // Just before: discard
         buffer_tx.send(Message::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
+        buffer_tx.send(Message::Data(100..=100)).await.unwrap(); // Exactly at: forward
         buffer_tx.send(Message::Data(100..=101)).await.unwrap(); // Starts at cutoff: forward
+        buffer_tx.send(Message::Data(102..=102)).await.unwrap(); // After cutoff: forward
         drop(buffer_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel(8);
+        let (out_tx, out_rx) = mpsc::channel(8);
         Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut forwarded = Vec::new();
-        while let Some(Message::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
+        let mut stream = ReceiverStream::new(out_rx);
 
-        // ensure no duplicates
-        assert_eq!(forwarded, vec![100..=100, 100..=101]);
-        Ok(())
+        assert_next!(stream, 100..=100);
+        assert_next!(stream, 100..=100);
+        assert_next!(stream, 100..=101);
+        assert_next!(stream, 102..=102);
+        assert_closed!(stream);
     }
 
     #[tokio::test]
-    async fn cutoff_at_zero_handles_all_ranges() -> anyhow::Result<()> {
-        let cutoff = 0;
-
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(0..=5)).await.unwrap();
-        buffer_tx.send(Message::Data(6..=10)).await.unwrap();
-        buffer_tx.send(Message::Data(11..=25)).await.unwrap();
-        drop(buffer_tx);
-
-        let (out_tx, mut out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
-
-        let mut forwarded = Vec::new();
-        while let Some(Message::Data(range)) = out_rx.recv().await {
-            forwarded.push(range);
-        }
-
-        // All ranges should be forwarded since they're all >= 0
-        assert_eq!(forwarded, vec![0..=5, 6..=10, 11..=25]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn forwards_errors_to_subscribers() -> anyhow::Result<()> {
+    async fn try_send_forwards_errors_to_subscribers() {
         let (tx, mut rx) = mpsc::channel(1);
 
-        let sent =
-            Service::<Ethereum>::try_send(&tx, ScannerError::WebSocketConnectionFailed(4)).await;
+        _ = tx.try_stream(ScannerError::WebSocketConnectionFailed(4)).await;
 
-        assert!(sent);
-
-        match rx.recv().await.expect("subscriber should stay open") {
-            Message::Error(ScannerError::WebSocketConnectionFailed(attempts)) => {
-                assert_eq!(attempts, 4);
-            }
-            other => panic!("unexpected message: {other:?}"),
-        }
-
-        Ok(())
+        assert!(matches!(
+            rx.recv().await,
+            Some(Message::Error(ScannerError::WebSocketConnectionFailed(4)))
+        ));
     }
 
     #[tokio::test]
@@ -1603,7 +1381,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(150), Option::None).await?;
+        provider.anvil_mine(Some(150), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(100)
@@ -1615,7 +1393,7 @@ mod tests {
 
         // Range length is 51, epoch is 100 -> single batch [100..=150]
         assert_next!(stream, 100..=150);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1627,7 +1405,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
@@ -1641,7 +1419,7 @@ mod tests {
         assert_next!(stream, 10..=14);
         assert_next!(stream, 5..=9);
         assert_next!(stream, 0..=4);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1652,7 +1430,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(4)
@@ -1666,7 +1444,7 @@ mod tests {
         assert_next!(stream, 9..=12);
         assert_next!(stream, 5..=8);
         assert_next!(stream, 3..=4);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1677,7 +1455,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
@@ -1688,7 +1466,7 @@ mod tests {
         let mut stream = client.rewind(7, 7).await?;
 
         assert_next!(stream, 7..=7);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1699,7 +1477,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
-        provider.anvil_mine(Option::Some(15), Option::None).await?;
+        provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(1)
@@ -1714,7 +1492,7 @@ mod tests {
         assert_next!(stream, 7..=7);
         assert_next!(stream, 6..=6);
         assert_next!(stream, 5..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1725,7 +1503,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
-        provider.anvil_mine(Option::Some(20), Option::None).await?;
+        provider.anvil_mine(Some(20), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(7)
@@ -1739,7 +1517,7 @@ mod tests {
         assert_next!(stream, 14..=20);
         assert_next!(stream, 7..=13);
         assert_next!(stream, 0..=6);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1750,7 +1528,7 @@ mod tests {
 
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         // Ensure blocks at 3 and 15 exist
-        provider.anvil_mine(Option::Some(16), Option::None).await?;
+        provider.anvil_mine(Some(16), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
@@ -1763,14 +1541,14 @@ mod tests {
         assert_next!(stream, 11..=15);
         assert_next!(stream, 6..=10);
         assert_next!(stream, 3..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         let mut stream = client.rewind(3, 15).await?;
 
         assert_next!(stream, 11..=15);
         assert_next!(stream, 6..=10);
         assert_next!(stream, 3..=5);
-        assert_next!(stream, None);
+        assert_closed!(stream);
 
         Ok(())
     }
@@ -1786,12 +1564,9 @@ mod tests {
             .await?
             .run()?;
 
-        let res = client.rewind(0, 999).await;
+        let stream = client.rewind(0, 999).await;
 
-        match res {
-            Err(ScannerError::BlockNotFound(_)) => {}
-            other => panic!("unexpected result: {other:?}"),
-        }
+        assert!(matches!(stream, Err(ScannerError::BlockNotFound(BlockNumberOrTag::Number(999)))));
 
         Ok(())
     }

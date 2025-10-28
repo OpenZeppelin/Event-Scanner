@@ -2,7 +2,8 @@ use std::ops::RangeInclusive;
 
 use crate::{
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
-    event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
+    event_scanner::{filter::EventFilter, listener::EventListener},
+    types::TryStream,
 };
 use alloy::{
     network::Network,
@@ -11,10 +12,7 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use tokio::{
-    sync::{
-        broadcast::{self, Sender, error::RecvError},
-        mpsc,
-    },
+    sync::broadcast::{self, Sender, error::RecvError},
     task::JoinSet,
 };
 use tokio_stream::{Stream, StreamExt};
@@ -26,6 +24,7 @@ pub enum ConsumerMode {
     CollectLatest { count: usize },
 }
 
+// Note: assumes it is running in a separate tokio task, so as to be non-blocking.
 pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unpin>(
     mut stream: S,
     provider: &RootProvider<N>,
@@ -57,12 +56,12 @@ pub fn spawn_log_consumers<N: Network>(
     range_tx: &Sender<BlockRangeMessage>,
     mode: ConsumerMode,
 ) -> JoinSet<()> {
-    listeners.iter().fold(JoinSet::new(), |mut set, listener| {
+    listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
+        let EventListener { filter, sender } = listener;
+
         let provider = provider.clone();
-        let filter = listener.filter.clone();
         let base_filter = Filter::from(&filter);
-        let sender = listener.sender.clone();
-        let mut sub = range_tx.subscribe();
+        let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
             // Only used for CollectLatest
@@ -72,7 +71,7 @@ pub fn spawn_log_consumers<N: Network>(
             };
 
             loop {
-                match sub.recv().await {
+                match range_rx.recv().await {
                     Ok(BlockRangeMessage::Data(range)) => {
                         match get_logs(range, &filter, &base_filter, &provider).await {
                             Ok(logs) => {
@@ -82,7 +81,7 @@ pub fn spawn_log_consumers<N: Network>(
 
                                 match mode {
                                     ConsumerMode::Stream => {
-                                        if !try_send(&sender, logs).await {
+                                        if !sender.try_stream(logs).await {
                                             break;
                                         }
                                     }
@@ -102,7 +101,7 @@ pub fn spawn_log_consumers<N: Network>(
                                 }
                             }
                             Err(e) => {
-                                if !try_send(&sender, e).await {
+                                if !sender.try_stream(e).await {
                                     break;
                                 }
                             }
@@ -110,13 +109,13 @@ pub fn spawn_log_consumers<N: Network>(
                     }
                     Ok(BlockRangeMessage::Error(e)) => {
                         error!(error = ?e, "Received error message");
-                        if !try_send(&sender, e).await {
+                        if !sender.try_stream(e).await {
                             break;
                         }
                     }
                     Ok(BlockRangeMessage::Status(status)) => {
                         info!(status = ?status, "Received status message");
-                        if !try_send(&sender, status).await {
+                        if !sender.try_stream(status).await {
                             break;
                         }
                     }
@@ -134,7 +133,7 @@ pub fn spawn_log_consumers<N: Network>(
                 }
 
                 info!("Sending collected logs to consumer");
-                _ = try_send(&sender, collected).await;
+                _ = sender.try_stream(collected).await;
             }
         });
 
@@ -176,13 +175,4 @@ async fn get_logs<N: Network>(
             Err(e)
         }
     }
-}
-
-async fn try_send<T: Into<Message>>(sender: &mpsc::Sender<Message>, msg: T) -> bool {
-    if let Err(err) = sender.send(msg.into()).await {
-        warn!(error = %err, "Downstream channel closed, stopping stream");
-        return false;
-    }
-    info!("Sent message to consumer");
-    true
 }

@@ -161,6 +161,7 @@ impl<N: Network> LatestEventScanner<N> {
             )
             .await;
         });
+
         Ok(())
     }
 }
