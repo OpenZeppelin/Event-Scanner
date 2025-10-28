@@ -14,7 +14,7 @@ use tokio::time::timeout;
 use tracing::{error, info};
 
 #[derive(Error, Debug, Clone)]
-pub enum SafeProviderError {
+pub enum RobustProviderError {
     #[error("RPC error: {0}")]
     RpcError(Arc<RpcError<TransportErrorKind>>),
     #[error("Operation timed out")]
@@ -23,9 +23,9 @@ pub enum SafeProviderError {
     RetryFail(usize),
 }
 
-impl From<RpcError<TransportErrorKind>> for SafeProviderError {
+impl From<RpcError<TransportErrorKind>> for RobustProviderError {
     fn from(err: RpcError<TransportErrorKind>) -> Self {
-        SafeProviderError::RpcError(Arc::new(err))
+        RobustProviderError::RpcError(Arc::new(err))
     }
 }
 
@@ -34,7 +34,7 @@ impl From<RpcError<TransportErrorKind>> for SafeProviderError {
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
 #[derive(Clone)]
-pub struct SafeProvider<N: Network> {
+pub struct RobustProvider<N: Network> {
     provider: RootProvider<N>,
     max_timeout: Duration,
     max_retries: usize,
@@ -43,15 +43,15 @@ pub struct SafeProvider<N: Network> {
 }
 
 // RPC retry and timeout settings
-/// Default timeout used by `SafeProvider`
+/// Default timeout used by `RobustProvider`
 pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 5;
 /// Default base delay between retries.
 pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
-impl<N: Network> SafeProvider<N> {
-    /// Create a new `SafeProvider` with default settings.
+impl<N: Network> RobustProvider<N> {
+    /// Create a new `RobustProvider` with default settings.
     #[must_use]
     pub fn new(provider: RootProvider<N>) -> Self {
         Self {
@@ -99,11 +99,11 @@ impl<N: Network> SafeProvider<N> {
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> Result<Option<N::BlockResponse>, SafeProviderError> {
+    ) -> Result<Option<N::BlockResponse>, RobustProviderError> {
         info!("eth_getBlockByNumber called");
         let result = self
             .retry_with_total_timeout(move |provider| async move {
-                provider.get_block_by_number(number).await.map_err(SafeProviderError::from)
+                provider.get_block_by_number(number).await.map_err(RobustProviderError::from)
             })
             .await;
         if let Err(e) = &result {
@@ -118,11 +118,11 @@ impl<N: Network> SafeProvider<N> {
     ///
     /// Returns an error if RPC call fails repeatedly even
     /// after exhausting retries or if the call times out.
-    pub async fn get_block_number(&self) -> Result<u64, SafeProviderError> {
+    pub async fn get_block_number(&self) -> Result<u64, RobustProviderError> {
         info!("eth_getBlockNumber called");
         let result = self
             .retry_with_total_timeout(move |provider| async move {
-                provider.get_block_number().await.map_err(SafeProviderError::from)
+                provider.get_block_number().await.map_err(RobustProviderError::from)
             })
             .await;
         if let Err(e) = &result {
@@ -140,11 +140,11 @@ impl<N: Network> SafeProvider<N> {
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
-    ) -> Result<Option<N::BlockResponse>, SafeProviderError> {
+    ) -> Result<Option<N::BlockResponse>, RobustProviderError> {
         info!("eth_getBlockByHash called");
         let result = self
             .retry_with_total_timeout(move |provider| async move {
-                provider.get_block_by_hash(hash).await.map_err(SafeProviderError::from)
+                provider.get_block_by_hash(hash).await.map_err(RobustProviderError::from)
             })
             .await;
         if let Err(e) = &result {
@@ -159,11 +159,11 @@ impl<N: Network> SafeProvider<N> {
     ///
     /// Returns an error if RPC call fails repeatedly even
     /// after exhausting retries or if the call times out.
-    pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, SafeProviderError> {
+    pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, RobustProviderError> {
         info!("eth_getLogs called");
         let result = self
             .retry_with_total_timeout(move |provider| async move {
-                provider.get_logs(filter).await.map_err(SafeProviderError::from)
+                provider.get_logs(filter).await.map_err(RobustProviderError::from)
             })
             .await;
         if let Err(e) = &result {
@@ -180,11 +180,11 @@ impl<N: Network> SafeProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn subscribe_blocks(
         &self,
-    ) -> Result<Subscription<N::HeaderResponse>, SafeProviderError> {
+    ) -> Result<Subscription<N::HeaderResponse>, RobustProviderError> {
         info!("eth_subscribe called");
         let result = self
             .retry_with_total_timeout(move |provider| async move {
-                provider.subscribe_blocks().await.map_err(SafeProviderError::from)
+                provider.subscribe_blocks().await.map_err(RobustProviderError::from)
             })
             .await;
         if let Err(e) = &result {
@@ -211,10 +211,10 @@ impl<N: Network> SafeProvider<N> {
     async fn retry_with_total_timeout<T, F, Fut>(
         &self,
         operation: F,
-    ) -> Result<T, SafeProviderError>
+    ) -> Result<T, RobustProviderError>
     where
         F: Fn(RootProvider<N>) -> Fut,
-        Fut: Future<Output = Result<T, SafeProviderError>>,
+        Fut: Future<Output = Result<T, RobustProviderError>>,
     {
         // Try primary provider first
         let result = self.try_provider_with_timeout(&self.provider, &operation).await;
@@ -252,7 +252,7 @@ impl<N: Network> SafeProvider<N> {
         }
 
         error!("All fallback providers failed or timed out");
-        Err(SafeProviderError::Timeout)
+        Err(RobustProviderError::Timeout)
     }
 
     /// Try executing an operation with a specific provider with retry and timeout.
@@ -260,10 +260,10 @@ impl<N: Network> SafeProvider<N> {
         &self,
         provider: &RootProvider<N>,
         operation: F,
-    ) -> Result<T, SafeProviderError>
+    ) -> Result<T, RobustProviderError>
     where
         F: Fn(RootProvider<N>) -> Fut,
-        Fut: Future<Output = Result<T, SafeProviderError>>,
+        Fut: Future<Output = Result<T, RobustProviderError>>,
     {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
@@ -276,8 +276,8 @@ impl<N: Network> SafeProvider<N> {
         .await
         {
             Ok(Ok(res)) => Ok(res),
-            Ok(Err(_)) => Err(SafeProviderError::RetryFail(self.max_retries + 1)),
-            Err(_) => Err(SafeProviderError::Timeout),
+            Ok(Err(_)) => Err(RobustProviderError::RetryFail(self.max_retries + 1)),
+            Err(_) => Err(RobustProviderError::Timeout),
         }
     }
 }
@@ -296,8 +296,8 @@ mod tests {
         timeout: u64,
         max_retries: usize,
         retry_interval: u64,
-    ) -> SafeProvider<Ethereum> {
-        SafeProvider {
+    ) -> RobustProvider<Ethereum> {
+        RobustProvider {
             provider: RootProvider::new_http("http://localhost:8545".parse().unwrap()),
             max_timeout: Duration::from_millis(timeout),
             max_retries,
@@ -339,9 +339,9 @@ mod tests {
                 async move {
                     let count = call_count.fetch_add(1, Ordering::SeqCst) + 1;
                     if count < 3 {
-                        Err(SafeProviderError::RpcError(Arc::new(TransportErrorKind::custom_str(
-                            "temp error",
-                        ))))
+                        Err(RobustProviderError::RpcError(Arc::new(
+                            TransportErrorKind::custom_str("temp error"),
+                        )))
                     } else {
                         Ok(count)
                     }
@@ -365,13 +365,13 @@ mod tests {
                 async move {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     // permanent error
-                    Err::<i32, SafeProviderError>(SafeProviderError::Timeout)
+                    Err::<i32, RobustProviderError>(RobustProviderError::Timeout)
                 }
             })
             .await;
 
         let err = result.unwrap_err();
-        assert!(matches!(err, SafeProviderError::RetryFail(3)));
+        assert!(matches!(err, RobustProviderError::RetryFail(3)));
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
@@ -388,6 +388,6 @@ mod tests {
             .await;
 
         let err = result.unwrap_err();
-        assert!(matches!(err, SafeProviderError::Timeout));
+        assert!(matches!(err, RobustProviderError::Timeout));
     }
 }
