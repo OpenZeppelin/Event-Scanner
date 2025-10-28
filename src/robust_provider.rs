@@ -282,10 +282,7 @@ impl<N: Network> RobustProvider<N> {
 mod tests {
     use super::*;
     use alloy::network::Ethereum;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
 
     fn test_provider(
@@ -306,11 +303,10 @@ mod tests {
     async fn test_retry_with_timeout_succeeds_on_first_attempt() {
         let provider = test_provider(100, 3, 10);
 
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let call_count_clone = call_count.clone();
+        let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(|| async {
+            .retry_with_total_timeout(|_| async {
                 call_count.fetch_add(1, Ordering::SeqCst);
                 let count = call_count.load(Ordering::SeqCst);
                 Ok(count)
@@ -324,11 +320,10 @@ mod tests {
     async fn test_retry_with_timeout_retries_on_error() {
         let provider = test_provider(100, 3, 10);
 
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let call_count_clone = call_count.clone();
+        let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(|| async {
+            .retry_with_total_timeout(|_| async {
                 call_count.fetch_add(1, Ordering::SeqCst);
                 let count = call_count.load(Ordering::SeqCst);
                 match count {
@@ -345,11 +340,10 @@ mod tests {
     async fn test_retry_with_timeout_fails_after_max_retries() {
         let provider = test_provider(100, 2, 10);
 
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let call_count_clone = call_count.clone();
+        let call_count = AtomicUsize::new(0);
 
         let result: Result<(), Error> = provider
-            .retry_with_total_timeout(|| async {
+            .retry_with_total_timeout(|_| async {
                 call_count.fetch_add(1, Ordering::SeqCst);
                 Err(TransportErrorKind::BackendGone.into())
             })
