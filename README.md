@@ -21,7 +21,6 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Building a Scanner](#building-a-scanner)
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
-  - [Scanning Latest Events](#scanning-latest-events)
 - [Examples](#examples)
 - [Testing](#testing)
 
@@ -199,58 +198,6 @@ let multi_sigs = EventFilter::new()
 - The modes come with sensible defaults; for example not specifying a start block for historic mode automatically sets the start block to the genesis block.
 
 See the integration tests under `tests/` for concrete examples.
-
-### Scanning Latest Events
-
-Scanner mode that collects a specified number of the most recent matching events for each registered stream.
-
-- It does not enter live mode; it scans a block range and then returns.
-- Each registered stream receives at most `count` logs in a single message, chronologically ordered.
-
-Basic usage:
-
-```rust
-use alloy::{network::Ethereum, primitives::Address, transports::http::reqwest::Url};
-use event_scanner::{EventFilter, EventScanner, Message};
-use tokio_stream::StreamExt;
-
-async fn latest_events(ws_url: Url, addr: Address) -> anyhow::Result<()> {
-    let mut scanner = EventScanner::latest().count(10).connect_ws::<Ethereum>(ws_url).await?;
-
-    let filter = EventFilter::new().contract_address(addr);
-
-    let mut stream = scanner.subscribe(filter);
-
-    // Collect the latest 10 events across Earliest..=Latest
-    scanner.start().await?;
-
-    // Expect a single message with up to 10 logs, then the stream ends
-    while let Some(Message::Data(logs)) = stream.next().await {
-        println!("Latest logs: {}", logs.len());
-    }
-
-    Ok(())
-}
-```
-
-Restricting to a specific block range:
-
-```rust
-// Collect the latest 5 events between blocks [1_000_000, 1_100_000]
-let mut scanner = EventScanner::latest()
-    .count(5)
-    .from_block(1_000_000)
-    .to_block(1_100_000)
-    .connect_ws::<Ethereum>(ws_url).await?;
-    .await?;
-```
-
-The scanner periodically checks the tip to detect reorgs. On reorg, the scanner emits `ScannerStatus::ReorgDetected`, resets to the updated tip, and restarts the scan. Final delivery to log listeners is in chronological order.
-
-Notes:
-
-- Ensure you create streams via `subscribe()` before calling `start` so listeners are registered.
-- The function returns after delivering the messages; to continuously stream new blocks, use `EventScanner::sync().from_latest(count)`.
 
 ---
 
