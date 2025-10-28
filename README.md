@@ -169,15 +169,15 @@ Batch builder examples:
 ```rust
 // Multiple contract addresses at once
 let multi_addr = EventFilter::new()
-    .with_contract_addresses([*counter_contract.address(), *other_counter_contract.address()]);
+    .contract_addresses([*counter_contract.address(), *other_counter_contract.address()]);
 
 // Multiple event names at once
 let multi_events = EventFilter::new()
-    .with_events([Counter::CountIncreased::SIGNATURE, Counter::CountDecreased::SIGNATURE]);
+    .events([Counter::CountIncreased::SIGNATURE, Counter::CountDecreased::SIGNATURE]);
 
 // Multiple event signature hashes at once
 let multi_sigs = EventFilter::new()
-    .with_event_signatures([
+    .event_signatures([
         Counter::CountIncreased::SIGNATURE_HASH,
         Counter::CountDecreased::SIGNATURE_HASH,
     ]);
