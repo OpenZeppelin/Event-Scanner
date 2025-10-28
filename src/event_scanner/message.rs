@@ -1,6 +1,6 @@
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
-use crate::{ScannerError, ScannerMessage, safe_provider::SafeProviderError};
+use crate::{ScannerError, ScannerMessage, robust_provider::RobustProviderError};
 
 pub type Message = ScannerMessage<Vec<Log>, ScannerError>;
 
@@ -10,8 +10,8 @@ impl From<Vec<Log>> for Message {
     }
 }
 
-impl From<SafeProviderError> for Message {
-    fn from(error: SafeProviderError) -> Message {
+impl From<RobustProviderError> for Message {
+    fn from(error: RobustProviderError) -> Message {
         let scanner_error: ScannerError = error.into();
         scanner_error.into()
     }

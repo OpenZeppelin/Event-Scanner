@@ -72,8 +72,8 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
     error::ScannerError,
-    safe_provider::{
-        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL, SafeProvider,
+    robust_provider::{
+        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL, RobustProvider,
     },
     types::{ScannerMessage, ScannerStatus},
 };
@@ -198,26 +198,26 @@ impl BlockRangeScanner {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        let safe_provider = SafeProvider::new(provider)
+        let robust_provider = RobustProvider::new(provider)
             .max_timeout(self.max_timeout)
             .max_retries(self.max_retries)
             .retry_interval(self.retry_interval);
         ConnectedBlockRangeScanner {
-            provider: safe_provider,
+            provider: robust_provider,
             max_block_range: self.max_block_range,
         }
     }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
-    provider: SafeProvider<N>,
+    provider: RobustProvider<N>,
     max_block_range: u64,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
-    /// Returns the `SafeProvider`
+    /// Returns the `RobustProvider`
     #[must_use]
-    pub fn provider(&self) -> &SafeProvider<N> {
+    pub fn provider(&self) -> &RobustProvider<N> {
         &self.provider
     }
 
@@ -269,7 +269,7 @@ pub enum Command {
 }
 
 struct Service<N: Network> {
-    provider: SafeProvider<N>,
+    provider: RobustProvider<N>,
     max_block_range: u64,
     subscriber: Option<mpsc::Sender<Message>>,
     websocket_connected: bool,
@@ -280,7 +280,7 @@ struct Service<N: Network> {
 }
 
 impl<N: Network> Service<N> {
-    pub fn new(provider: SafeProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(provider: RobustProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
@@ -678,7 +678,7 @@ impl<N: Network> Service<N> {
 
     async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        provider: SafeProvider<N>,
+        provider: RobustProvider<N>,
         sender: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
@@ -783,7 +783,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn get_block_subscription(
-        provider: &SafeProvider<N>,
+        provider: &RobustProvider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, ScannerError> {
         let ws_stream = provider
             .subscribe_blocks()
@@ -1018,9 +1018,9 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::StreamExt;
 
-    fn mocked_provider(asserter: Asserter) -> SafeProvider<Ethereum> {
+    fn mocked_provider(asserter: Asserter) -> RobustProvider<Ethereum> {
         let root_provider = RootProvider::new(RpcClient::mocked(asserter));
-        SafeProvider::new(root_provider)
+        RobustProvider::new(root_provider)
     }
 
     #[test]
