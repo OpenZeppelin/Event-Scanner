@@ -99,10 +99,7 @@ impl<N: Network> RobustProvider<N> {
             error!(error = %e, "eth_getByBlockNumber failed");
         }
 
-        match result? {
-            Some(block) => Ok(block),
-            None => Err(RobustProviderError::BlockNotFound(number)),
-        }
+        result?.ok_or_else(|| RobustProviderError::BlockNotFound(number))
     }
 
     /// Fetch the latest block number with retry and timeout.
