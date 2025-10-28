@@ -154,9 +154,8 @@ impl<N: Network> RobustProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
-        let provider = self.provider.clone();
-        let result =
-            self.retry_with_total_timeout(|| async { provider.subscribe_blocks().await }).await;
+        let operation = async || self.provider.subscribe_blocks().await;
+        let result = self.retry_with_total_timeout(operation).await;
         if let Err(e) = &result {
             error!(error = %e, "eth_subscribe failed");
         }
