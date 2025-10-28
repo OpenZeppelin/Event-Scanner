@@ -21,7 +21,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let scanner = setup.scanner;
     let mut stream = setup.stream.take(expected_event_count);
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     for _ in 0..expected_event_count {
         contract.increase().send().await?.watch().await?;
@@ -81,7 +81,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let a_stream = scanner.subscribe(a_filter);
     let b_stream = scanner.subscribe(b_filter);
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     for _ in 0..expected_events_a {
         a.increase().send().await?.watch().await?;
@@ -152,7 +152,7 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let mut incr_stream = scanner.subscribe(increase_filter).take(expected_incr_events);
     let mut decr_stream = scanner.subscribe(decrease_filter).take(expected_decr_events);
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     for _ in 0..expected_incr_events {
         contract.increase().send().await?.watch().await?;
@@ -218,7 +218,7 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     let mut stream = scanner.subscribe(filter).take(num_of_events);
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
@@ -249,7 +249,7 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
 
     let mut stream = scanner.subscribe(filter).take(num_of_events);
 
-    tokio::spawn(async move { scanner.start().await });
+    scanner.start().await?;
 
     for _ in 0..num_of_events {
         contract.increase().send().await?.watch().await?;
