@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use alloy::{
-    eips::BlockNumberOrTag,
+    eips::{BlockId, BlockNumberOrTag},
     network::Network,
     providers::{Provider, RootProvider},
     pubsub::Subscription,
@@ -18,8 +18,8 @@ pub enum Error {
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
     RetryFailure(Arc<RpcError<TransportErrorKind>>),
-    #[error("Block not found, block number: {0}")]
-    BlockNotFound(BlockNumberOrTag),
+    #[error("Block not found, Block Id: {0}")]
+    BlockNotFound(BlockId),
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {
@@ -95,7 +95,7 @@ impl<N: Network> RobustProvider<N> {
             error!(error = %e, "eth_getByBlockNumber failed");
         }
 
-        result?.ok_or_else(|| Error::BlockNotFound(number))
+        result?.ok_or_else(|| Error::BlockNotFound(number.into()))
     }
 
     /// Fetch the latest block number with retry and timeout.
@@ -123,14 +123,15 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
-    ) -> Result<Option<N::BlockResponse>, Error> {
+    ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
         let operation = async || self.provider.get_block_by_hash(hash).await;
         let result = self.retry_with_total_timeout(operation).await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockByHash failed");
         }
-        result
+
+        result?.ok_or_else(|| Error::BlockNotFound(hash.into()))
     }
 
     /// Fetch logs for the given filter with retry and timeout.

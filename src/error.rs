@@ -1,7 +1,7 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use alloy::{
-    eips::BlockNumberOrTag,
+    eips::BlockId,
     primitives::BlockNumber,
     transports::{RpcError, TransportErrorKind},
 };
@@ -34,8 +34,8 @@ pub enum ScannerError {
     #[error("Historical sync failed: {0}")]
     HistoricalSyncError(String),
 
-    #[error("Block not found, block number: {0}")]
-    BlockNotFound(BlockNumberOrTag),
+    #[error("Block not found, Block Id: {0}")]
+    BlockNotFound(BlockId),
 
     #[error("Operation timed out")]
     Timeout,

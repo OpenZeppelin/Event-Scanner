@@ -606,12 +606,7 @@ impl<N: Network> Service<N> {
     }
 
     async fn reorg_detected(&self, hash_to_check: B256) -> Result<bool, ScannerError> {
-        Ok(self
-            .provider
-            .get_block_by_hash(hash_to_check)
-            .await
-            .map_err(ScannerError::from)?
-            .is_none())
+        Ok(self.provider.get_block_by_hash(hash_to_check).await.is_err())
     }
 
     async fn stream_historical_blocks(
@@ -978,7 +973,10 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
 
-    use alloy::providers::{Provider, RootProvider};
+    use alloy::{
+        eips::BlockId,
+        providers::{Provider, RootProvider},
+    };
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -1636,7 +1634,10 @@ mod tests {
 
         match rx.recv().await.expect("subscriber should stay open") {
             Message::Error(err) => {
-                assert!(matches!(err, ScannerError::BlockNotFound(BlockNumberOrTag::Number(4))));
+                assert!(matches!(
+                    err,
+                    ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))
+                ));
             }
             other => panic!("unexpected message: {other:?}"),
         }
