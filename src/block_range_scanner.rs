@@ -606,10 +606,10 @@ impl<N: Network> Service<N> {
                 // store the updated end block hash
                 tip_hash = match provider.get_block_by_number(from.into()).await {
                     Ok(block) => block.header().hash(),
+                    Err(RobustProviderError::BlockNotFound(_) => {
+                        panic!("Block with number '{from}' should exist post-reorg");
+                    }
                     Err(e) => {
-                        if matches!(e, RobustProviderError::BlockNotFound(_)) {
-                            panic!("Block with number '{from}' should exist post-reorg");
-                        }
                         error!(error = %e, "Terminal RPC call error, shutting down");
                         _ = sender.try_stream(e);
                         return;
