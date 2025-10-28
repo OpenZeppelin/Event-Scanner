@@ -41,11 +41,6 @@
 //!                 error!("Received error from subscription: {e}");
 //!                 match e {
 //!                     ScannerError::ServiceShutdown => break,
-//!                     ScannerError::WebSocketConnectionFailed(_) => {
-//!                         error!(
-//!                             "WebSocket connection failed, continuing to listen for reconnection"
-//!                         );
-//!                     }
 //!                     _ => {
 //!                         error!("Non-fatal error, continuing: {e}");
 //!                     }
