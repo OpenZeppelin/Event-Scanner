@@ -101,8 +101,11 @@ impl<N: Network> RobustProvider<N> {
         number: BlockNumberOrTag,
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByNumber called");
-        let operation = async || self.provider.get_block_by_number(number).await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(move |provider| async move {
+                provider.get_block_by_number(number).await
+            })
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getByBlockNumber failed");
         }
@@ -118,8 +121,11 @@ impl<N: Network> RobustProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn get_block_number(&self) -> Result<u64, Error> {
         info!("eth_getBlockNumber called");
-        let operation = async || self.provider.get_block_number().await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_number().await },
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockNumber failed");
         }
@@ -137,8 +143,11 @@ impl<N: Network> RobustProvider<N> {
         hash: alloy::primitives::BlockHash,
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
-        let operation = async || self.provider.get_block_by_hash(hash).await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(move |provider| async move {
+                provider.get_block_by_hash(hash).await
+            })
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockByHash failed");
         }
@@ -154,8 +163,11 @@ impl<N: Network> RobustProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
-        let operation = async || self.provider.get_logs(filter).await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_logs(filter).await },
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getLogs failed");
         }
@@ -170,8 +182,11 @@ impl<N: Network> RobustProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
-        let operation = async || self.provider.subscribe_blocks().await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.subscribe_blocks().await },
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_subscribe failed");
         }
