@@ -65,12 +65,12 @@ pub struct EventScannerBuilder<M: Default> {
 impl EventScannerBuilder<Unspecified> {
     #[must_use]
     pub fn historic() -> EventScannerBuilder<Historic> {
-        EventScannerBuilder::<Historic>::new()
+        Default::default()
     }
 
     #[must_use]
     pub fn live() -> EventScannerBuilder<Live> {
-        EventScannerBuilder::<Live>::new()
+        Default::default()
     }
 
     #[must_use]
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_config_defaults() {
-        let config = EventScannerBuilder::<Historic>::new();
+        let config = EventScannerBuilder::historic();
 
         assert!(matches!(config.config.from_block, BlockNumberOrTag::Earliest));
         assert!(matches!(config.config.to_block, BlockNumberOrTag::Latest));
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_live_scanner_config_defaults() {
-        let config = EventScannerBuilder::<Live>::new();
+        let config = EventScannerBuilder::live();
 
         assert_eq!(config.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }

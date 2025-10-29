@@ -8,11 +8,6 @@ use crate::{
 
 impl EventScannerBuilder<Historic> {
     #[must_use]
-    pub(crate) fn new() -> Self {
-        Default::default()
-    }
-
-    #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.block_range_scanner.max_block_range = max_block_range;
         self
@@ -60,10 +55,8 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_pattern() {
-        let config = EventScannerBuilder::<Historic>::new()
-            .to_block(200)
-            .max_block_range(50)
-            .from_block(100);
+        let config =
+            EventScannerBuilder::historic().to_block(200).max_block_range(50).from_block(100);
 
         assert!(matches!(config.config.from_block, BlockNumberOrTag::Number(100)));
         assert!(matches!(config.config.to_block, BlockNumberOrTag::Number(200)));
@@ -72,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_with_different_block_types() {
-        let config = EventScannerBuilder::<Historic>::new()
+        let config = EventScannerBuilder::historic()
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest);
 
@@ -82,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_last_call_wins() {
-        let config = EventScannerBuilder::<Historic>::new()
+        let config = EventScannerBuilder::historic()
             .max_block_range(25)
             .max_block_range(55)
             .max_block_range(105)

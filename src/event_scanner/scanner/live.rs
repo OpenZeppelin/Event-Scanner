@@ -8,11 +8,6 @@ use crate::{
 
 impl EventScannerBuilder<Live> {
     #[must_use]
-    pub(crate) fn new() -> Self {
-        Default::default()
-    }
-
-    #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.block_range_scanner.max_block_range = max_block_range;
         self
