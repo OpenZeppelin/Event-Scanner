@@ -21,19 +21,19 @@ impl EventScannerBuilder<Live> {
 }
 
 impl<N: Network> EventScanner<Live, N> {
-    /// Starts the scanner in live mode.
+    /// Starts the scanner.
     ///
-    /// Streams new blocks as they are produced, applying the configured
-    /// `block_confirmations` to mitigate reorgs.
+    /// # Important notes
     ///
-    /// # Reorg behavior
-    ///
-    /// - Emits [`ScannerStatus::ReorgDetected`] and adjusts the next confirmed range using
-    ///   `block_confirmations` to re-emit the confirmed portion.
+    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
+    ///   this function.
+    /// * The method returns immediately; events are delivered asynchronously.
     ///
     /// # Errors
     ///
     /// Can error out if the service fails to start.
+    ///
+    /// [subscribe]: EventScanner::subscribe
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_live(self.config.block_confirmations).await?;
@@ -44,6 +44,7 @@ impl<N: Network> EventScanner<Live, N> {
         tokio::spawn(async move {
             handle_stream(stream, &provider, &listeners, ConsumerMode::Stream).await;
         });
+
         Ok(())
     }
 }

@@ -27,14 +27,19 @@ impl EventScannerBuilder<Historic> {
 }
 
 impl<N: Network> EventScanner<Historic, N> {
-    /// Starts the scanner in historical mode.
+    /// Starts the scanner.
     ///
-    /// Scans from `from_block` to `to_block` (inclusive), emitting block ranges
-    /// and matching logs to registered listeners.
+    /// # Important notes
+    ///
+    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
+    ///   this function.
+    /// * The method returns immediately; events are delivered asynchronously.
     ///
     /// # Errors
     ///
     /// Can error out if the service fails to start.
+    ///
+    /// [subscribe]: EventScanner::subscribe
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;
@@ -45,6 +50,7 @@ impl<N: Network> EventScanner<Historic, N> {
         tokio::spawn(async move {
             handle_stream(stream, &provider, &listeners, ConsumerMode::Stream).await;
         });
+
         Ok(())
     }
 }

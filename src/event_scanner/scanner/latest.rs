@@ -33,21 +33,19 @@ impl EventScannerBuilder<LatestEvents> {
 }
 
 impl<N: Network> EventScanner<LatestEvents, N> {
-    /// Scans a block range and collects the latest `count` matching events per registered listener.
+    /// Starts the scanner.
     ///
-    /// Emits a single message per listener with up to `count` logs, ordered oldest→newest.
+    /// # Important notes
     ///
-    /// # Reorg behavior
-    ///
-    /// Performs a reverse-ordered rewind over the range, periodically checking the tip hash. If a
-    /// reorg is detected, emits [`ScannerStatus::ReorgDetected`], resets the rewind start to the
-    /// updated tip, and resumes until completion. Final log delivery preserves chronological order.
+    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
+    ///   this function.
+    /// * The method returns immediately; events are delivered asynchronously.
     ///
     /// # Errors
     ///
-    /// - Returns `EventScannerError` if the scanner fails to start or fetching logs fails.
+    /// Can error out if the service fails to start.
     ///
-    /// [`ScannerStatus::ReorgDetected`]: crate::types::ScannerStatus::ReorgDetected
+    /// [subscribe]: EventScanner::subscribe
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.rewind(self.config.from_block, self.config.to_block).await?;

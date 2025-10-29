@@ -23,19 +23,19 @@ impl EventScannerBuilder<SyncFromBlock> {
 }
 
 impl<N: Network> EventScanner<SyncFromBlock, N> {
-    /// Starts the scanner in sync (historical → live) mode.
+    /// Starts the scanner.
     ///
-    /// Streams from `from_block` up to the current confirmed tip using the configured
-    /// `block_confirmations`, then continues streaming new confirmed ranges live.
+    /// # Important notes
     ///
-    /// # Reorg behavior
-    ///
-    /// - In live mode, emits [`ScannerStatus::ReorgDetected`] and adjusts the next confirmed range
-    ///   using `block_confirmations` to re-emit the confirmed portion.
+    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
+    ///   this function.
+    /// * The method returns immediately; events are delivered asynchronously.
     ///
     /// # Errors
     ///
-    /// - `EventScannerMessage::ServiceShutdown` if the service is already shutting down.
+    /// Can error out if the service fails to start.
+    ///
+    /// [subscribe]: EventScanner::subscribe
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream =
@@ -47,6 +47,7 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
         tokio::spawn(async move {
             handle_stream(stream, &provider, &listeners, ConsumerMode::Stream).await;
         });
+
         Ok(())
     }
 }

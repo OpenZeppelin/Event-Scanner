@@ -94,15 +94,14 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, primitives::Address};
-    /// # use event_scanner::{EventFilter, EventScanner, Message};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Collect the latest 10 events across Earliest..=Latest
-    /// let mut scanner = EventScanner::latest()
-    ///     .count(10)
+    /// let mut scanner = EventScannerBuilder::latest(10)
     ///     .connect_ws::<Ethereum>(ws_url)
     ///     .await?;
     ///
@@ -123,13 +122,12 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::network::Ethereum;
-    /// # use event_scanner::EventScanner;
+    /// # use event_scanner::EventScannerBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let ws_url = "ws://localhost:8545".parse()?;
     /// // Collect the latest 5 events between blocks [1_000_000, 1_100_000]
-    /// let mut scanner = EventScanner::latest()
-    ///     .count(5)
+    /// let mut scanner = EventScannerBuilder::latest(5)
     ///     .from_block(1_000_000)
     ///     .to_block(1_100_000)
     ///     .connect_ws::<Ethereum>(ws_url)
@@ -169,10 +167,8 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// - Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
     ///   [`scanner.start()`][start]
-    /// - The [`scanner.start()`][start] method returns immediately; events are delivered
-    ///   asynchronously
     /// - For continuous streaming after collecting latest events, use
-    ///   [`EventScanner::sync().from_latest(count)`][sync_from_latest] instead
+    ///   [`EventScannerBuilder::sync().from_latest(count)`][sync_from_latest] instead
     ///
     /// # Reorg behavior
     ///
@@ -185,15 +181,10 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// Final delivery to log listeners preserves chronological order regardless of reorgs.
     ///
-    /// [count]: latest::LatestScannerBuilder::count
-    /// [from_block]: latest::LatestScannerBuilder::from_block
-    /// [to_block]: latest::LatestScannerBuilder::to_block
-    /// [block_confirmations]: latest::LatestScannerBuilder::block_confirmations
-    /// [max_block_range]: latest::LatestScannerBuilder::max_block_range
-    /// [subscribe]: latest::LatestEventScanner::subscribe
-    /// [start]: latest::LatestEventScanner::start
-    /// [sync_from_latest]: SyncScannerBuilder::from_latest
-    /// [reorg]: crate::types::ScannerStatus::ReorgDetected
+    /// [subscribe]: EventScanner::subscribe
+    /// [start]: EventScanner::start
+    /// [sync_from_latest]: EventScannerBuilder::from_latest
+    /// [reorg]: ScannerStatus::ReorgDetected
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
         EventScannerBuilder::<LatestEvents>::new(count)
