@@ -163,13 +163,6 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// * `count` - Maximum number of recent events to collect per listener
     ///
-    /// # Important notes
-    ///
-    /// - Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
-    ///   [`scanner.start()`][start]
-    /// - For continuous streaming after collecting latest events, use
-    ///   [`EventScannerBuilder::sync().from_latest(count)`][sync_from_latest] instead
-    ///
     /// # Reorg behavior
     ///
     /// During the scan, the scanner periodically checks the tip to detect reorgs. On reorg
@@ -180,6 +173,11 @@ impl EventScannerBuilder<Unspecified> {
     /// 4. Continues until `count` events are collected
     ///
     /// Final delivery to log listeners preserves chronological order regardless of reorgs.
+    ///
+    /// # Notes
+    ///
+    /// For continuous streaming after collecting latest events, use
+    /// [`EventScannerBuilder::sync().from_latest(count)`][sync_from_latest] instead
     ///
     /// [subscribe]: EventScanner::subscribe
     /// [start]: EventScanner::start
