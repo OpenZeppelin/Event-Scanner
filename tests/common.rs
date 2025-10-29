@@ -285,3 +285,16 @@ pub async fn increase(
         tx_hash,
     })
 }
+
+pub async fn decrease(
+    contract: &TestCounter::TestCounterInstance<Arc<impl Provider + Clone>>,
+) -> anyhow::Result<LogMetadata<TestCounter::CountDecreased>> {
+    let receipt = contract.decrease().send().await?.get_receipt().await?;
+    let tx_hash = receipt.transaction_hash;
+    let new_count = receipt.decoded_log::<TestCounter::CountDecreased>().unwrap().data.newCount;
+    Ok(LogMetadata {
+        event: TestCounter::CountDecreased { newCount: U256::from(new_count) },
+        address: *contract.address(),
+        tx_hash,
+    })
+}
