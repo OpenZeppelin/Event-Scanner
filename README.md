@@ -205,7 +205,7 @@ See the integration tests under `tests/` for concrete examples.
 
 - `examples/live_scanning` – minimal live-mode scanner using `EventScanner::live()`
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScanner::historic()`
-- `examples/sync_from_block_scanning` – demonstrates replaying from genesis (block 0) before continuing streaming latest blocks using `EventScanner::sync().from_block(block_tag_or_number)`
+- `examples/sync_from_block_scanning` – Demonstrates replaying from genesis (block 0) before continuing to stream the latest blocks using `EventScanner::sync().from_block(block_tag_or_number)`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScanner::latest()`
 - `examples/sync_from_latest_scanning` – demonstrates scanning the latest events before switching to live mode using `EventScanner::sync().from_latest(count)`.
 
