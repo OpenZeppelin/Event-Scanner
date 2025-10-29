@@ -104,8 +104,7 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScannerBuilder::latest()
-        .count(10)
+    let mut scanner_with_range = EventScannerBuilder::latest(10)
         .from_block(start)
         .to_block(end)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
@@ -301,8 +300,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScannerBuilder::latest()
-        .count(5)
+    let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
@@ -335,8 +333,7 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
         .unwrap();
     let end = start;
 
-    let mut scanner_with_range = EventScannerBuilder::latest()
-        .count(5)
+    let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
         .connect_ws::<Ethereum>(anvil.ws_endpoint_url())

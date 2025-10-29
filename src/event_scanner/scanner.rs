@@ -60,17 +60,6 @@ impl Default for Live {
     }
 }
 
-impl Default for LatestEvents {
-    fn default() -> Self {
-        Self {
-            count: 1,
-            from_block: BlockNumberOrTag::Latest,
-            to_block: BlockNumberOrTag::Earliest,
-            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-        }
-    }
-}
-
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     config: M,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
@@ -172,6 +161,10 @@ impl EventScannerBuilder<Unspecified> {
     /// - **Default range**: By default, scans from `Earliest` to `Latest` block
     /// - **Reorg handling**: Periodically checks the tip to detect reorgs during the scan
     ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of recent events to collect per listener
+    ///
     /// # Important notes
     ///
     /// - Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
@@ -202,8 +195,8 @@ impl EventScannerBuilder<Unspecified> {
     /// [sync_from_latest]: SyncScannerBuilder::from_latest
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     #[must_use]
-    pub fn latest() -> EventScannerBuilder<LatestEvents> {
-        Default::default()
+    pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
+        EventScannerBuilder::<LatestEvents>::new(count)
     }
 }
 
@@ -212,6 +205,20 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
         Self {
             config: SyncFromLatestEvents {
                 count,
+                block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            },
+            block_range_scanner: BlockRangeScanner::default(),
+        }
+    }
+}
+
+impl EventScannerBuilder<LatestEvents> {
+    pub fn new(count: usize) -> Self {
+        Self {
+            config: LatestEvents {
+                count,
+                from_block: BlockNumberOrTag::Latest,
+                to_block: BlockNumberOrTag::Earliest,
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
             },
             block_range_scanner: BlockRangeScanner::default(),
@@ -302,9 +309,9 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_config_defaults() {
-        let builder = EventScannerBuilder::latest();
+        let builder = EventScannerBuilder::latest(10);
 
-        assert_eq!(builder.config.count, 1);
+        assert_eq!(builder.config.count, 10);
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Latest));
         assert!(matches!(builder.config.to_block, BlockNumberOrTag::Earliest));
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);

@@ -20,12 +20,6 @@ impl EventScannerBuilder<LatestEvents> {
     }
 
     #[must_use]
-    pub fn count(mut self, count: usize) -> Self {
-        self.config.count = count;
-        self
-    }
-
-    #[must_use]
     pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.config.from_block = block.into();
         self
@@ -81,10 +75,9 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_pattern() {
-        let builder = EventScannerBuilder::latest()
+        let builder = EventScannerBuilder::latest(3)
             .max_block_range(25)
             .block_confirmations(5)
-            .count(3)
             .from_block(BlockNumberOrTag::Number(50))
             .to_block(BlockNumberOrTag::Number(150));
 
@@ -97,10 +90,9 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_with_different_block_types() {
-        let builder = EventScannerBuilder::latest()
+        let builder = EventScannerBuilder::latest(10)
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest)
-            .count(10)
             .block_confirmations(20);
 
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
@@ -111,10 +103,7 @@ mod tests {
 
     #[test]
     fn test_latest_scanner_builder_last_call_wins() {
-        let builder = EventScannerBuilder::latest()
-            .count(1)
-            .count(2)
-            .count(3)
+        let builder = EventScannerBuilder::latest(3)
             .from_block(10)
             .from_block(20)
             .to_block(100)

@@ -173,7 +173,7 @@ pub async fn setup_latest_scanner(
     to: Option<BlockNumberOrTag>,
 ) -> anyhow::Result<LatestScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
-    let mut builder = EventScannerBuilder::latest().count(count);
+    let mut builder = EventScannerBuilder::latest(count);
     if let Some(f) = from {
         builder = builder.from_block(f);
     }
