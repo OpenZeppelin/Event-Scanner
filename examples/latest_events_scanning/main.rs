@@ -1,6 +1,6 @@
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScanner, Message};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         .event(Counter::CountIncreased::SIGNATURE);
 
     let mut scanner =
-        EventScanner::latest().count(5).connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+        EventScannerBuilder::latest(5).connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut stream = scanner.subscribe(increase_filter);
 

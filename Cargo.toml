@@ -4,7 +4,8 @@ members = [
     "examples/historical_scanning",
     "examples/live_scanning",
     "examples/latest_events_scanning",
-    "examples/sync_scanning"
+    "examples/sync_from_latest_scanning",
+    "examples/sync_from_block_scanning",
 ]
 resolver = "2"
 
@@ -13,7 +14,7 @@ authors = ["OpenZeppelin"]
 edition = "2024"
 license = "AGPL-3.0-only"
 repository = "https://github.com/OpenZeppelin/Event-Scanner"
-version = "0.3.0-alpha"
+version = "0.4.0-alpha"
 
 [workspace.lints.clippy]
 pedantic = "warn"
@@ -32,6 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio-stream = "0.1.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+test-log = { version = "0.2.18", features = ["trace"] }
 hex = "0.4"
 backon = "1.5.2"
 
@@ -66,8 +68,11 @@ chrono.workspace = true
 alloy-node-bindings.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
 tracing-subscriber.workspace = true
-backon.workspace = true
+# used when debugging tests
+test-log.workspace = true
 
 [lints]
 workspace = true
