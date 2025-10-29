@@ -1,0 +1,18 @@
+[package]
+name = "sync_from_block_scanning"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sync_from_block_scanning"
+path = "main.rs"
+
+[dependencies]
+alloy.workspace = true
+alloy-node-bindings.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+event-scanner = { path = "../.." }

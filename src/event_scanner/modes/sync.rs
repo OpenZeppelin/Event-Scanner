@@ -1,225 +1,124 @@
-use alloy::{
-    eips::BlockNumberOrTag,
-    network::Network,
-    providers::RootProvider,
-    transports::{TransportResult, http::reqwest::Url},
-};
+use alloy::eips::BlockNumberOrTag;
 
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
+pub(crate) mod from_block;
+pub(crate) mod from_latest;
 
-use crate::{
-    ScannerError,
-    block_range_scanner::{
-        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
-        MAX_BUFFERED_MESSAGES,
-    },
-    event_scanner::{
-        filter::EventFilter,
-        listener::EventListener,
-        message::Message,
-        modes::common::{ConsumerMode, handle_stream},
-    },
-};
+use from_block::SyncFromBlockEventScannerBuilder;
+use from_latest::SyncFromLatestScannerBuilder;
 
-pub struct SyncScannerBuilder {
-    block_range_scanner: BlockRangeScanner,
-    from_block: BlockNumberOrTag,
-    block_confirmations: u64,
-}
-
-pub struct SyncEventScanner<N: Network> {
-    config: SyncScannerBuilder,
-    block_range_scanner: ConnectedBlockRangeScanner<N>,
-    listeners: Vec<EventListener>,
-}
+pub struct SyncScannerBuilder;
 
 impl SyncScannerBuilder {
     #[must_use]
     pub(crate) fn new() -> Self {
-        Self {
-            block_range_scanner: BlockRangeScanner::new(),
-            from_block: BlockNumberOrTag::Earliest,
-            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-        }
+        Self
+    }
+
+    /// Scans the latest `count` matching events per registered listener, then automatically
+    /// transitions to live streaming mode.
+    ///
+    /// This method combines two scanning phases into a single operation:
+    ///
+    /// 1. **Latest events phase**: Collects up to `count` most recent events by scanning backwards
+    ///    from the current chain tip
+    /// 2. **Automatic transition**: Emits [`ScannerStatus::SwitchingToLive`][switch_to_live] to
+    ///    signal the mode change
+    /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
+    ///    on-chain
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use alloy::network::Ethereum;
+    /// # use event_scanner::{EventFilter, EventScanner, Message};
+    /// # use tokio_stream::StreamExt;
+    /// #
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let ws_url = "ws://localhost:8545".parse()?;
+    /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
+    /// // Fetch the latest 10 events, then stream new events continuously
+    /// let mut scanner = EventScanner::sync()
+    ///     .from_latest(10)
+    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .await?;
+    ///
+    /// let filter = EventFilter::new().contract_address(contract_address);
+    /// let mut stream = scanner.subscribe(filter);
+    ///
+    /// scanner.start().await?;
+    ///
+    /// while let Some(msg) = stream.next().await {
+    ///     match msg {
+    ///         Message::Data(logs) => {
+    ///             println!("Received {} events", logs.len());
+    ///         }
+    ///         Message::Status(status) => {
+    ///             println!("Status update: {:?}", status);
+    ///             // You'll see ScannerStatus::SwitchingToLive when transitioning
+    ///         }
+    ///         Message::Error(e) => {
+    ///             eprintln!("Error: {}", e);
+    ///         }
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # How it works
+    ///
+    /// The scanner captures the latest block number before starting to establish a clear boundary
+    /// between phases. The historical phase scans from genesis block to the current latest block,
+    /// while the live phase starts from the block after the latest block. This design prevents
+    /// duplicate events and handles race conditions where new blocks arrive during setup.
+    ///
+    /// # Key behaviors
+    ///
+    /// - **No duplicates**: Events are not delivered twice across the phase transition
+    /// - **Flexible count**: If fewer than `count` events exist, returns all available events
+    /// - **Reorg handling**: Both phases handle reorgs appropriately:
+    ///   - Historical phase: resets and rescans on reorg detection
+    ///   - Live phase: resets stream to the first post-reorg block that satisfies the configured
+    ///     block confirmations
+    /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - Maximum number of recent events to collect per listener before switching to live
+    ///   streaming
+    ///
+    /// # Important notes
+    ///
+    /// - Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
+    ///   [`scanner.start()`][start]
+    /// - The [`scanner.start()`][start] method returns immediately; events are delivered
+    ///   asynchronously
+    /// - The live phase continues indefinitely until the scanner is dropped or encounters an error
+    ///
+    /// # Detailed reorg behavior
+    ///
+    /// - **Historical rewind phase**: Restart the scanner. On detecting a reorg, emits
+    ///   [`ScannerStatus::ReorgDetected`][reorg], resets the rewind start to the new tip, and
+    ///   continues until collectors accumulate `count` logs. Final delivery to listeners preserves
+    ///   chronological order.
+    /// - **Live streaming phase**: Starts from `latest_block + 1` and respects the configured block
+    ///   confirmations. On reorg, emits [`ScannerStatus::ReorgDetected`][reorg], adjusts the next
+    ///   confirmed window (possibly re-emitting confirmed portions), and continues streaming.
+    ///
+    /// [subscribe]: from_latest::SyncFromLatestEventScanner::subscribe
+    /// [start]: from_latest::SyncFromLatestEventScanner::start
+    /// [reorg]: crate::types::ScannerStatus::ReorgDetected
+    /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
+    #[must_use]
+    pub fn from_latest(self, count: usize) -> SyncFromLatestScannerBuilder {
+        SyncFromLatestScannerBuilder::new(count)
     }
 
     #[must_use]
-    pub fn max_block_range(mut self, max_block_range: u64) -> Self {
-        self.block_range_scanner.max_block_range = max_block_range;
-        self
-    }
-
-    #[must_use]
-    pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
-        self.from_block = block.into();
-        self
-    }
-
-    #[must_use]
-    pub fn block_confirmations(mut self, count: u64) -> Self {
-        self.block_confirmations = count;
-        self
-    }
-
-    /// Connects to the provider via WebSocket.
-    ///
-    /// Final builder method: consumes the builder and returns the built [`SyncEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<SyncEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
-    }
-
-    /// Connects to the provider via IPC.
-    ///
-    /// Final builder method: consumes the builder and returns the built [`SyncEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
+    pub fn from_block(
         self,
-        ipc_path: String,
-    ) -> TransportResult<SyncEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
-    }
-
-    /// Connects to an existing provider.
-    ///
-    /// Final builder method: consumes the builder and returns the built [`SyncEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> SyncEventScanner<N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
-        SyncEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
-    }
-}
-
-impl<N: Network> SyncEventScanner<N> {
-    #[must_use]
-    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
-        let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
-        self.listeners.push(EventListener { filter, sender });
-        ReceiverStream::new(receiver)
-    }
-
-    /// Starts the scanner in sync (historical → live) mode.
-    ///
-    /// Streams from `from_block` up to the current confirmed tip using the configured
-    /// `block_confirmations`, then continues streaming new confirmed ranges live.
-    ///
-    /// # Reorg behavior
-    ///
-    /// - In live mode, emits [`ScannerStatus::ReorgDetected`] and adjusts the next confirmed range
-    ///   using `block_confirmations` to re-emit the confirmed portion.
-    ///
-    /// # Errors
-    ///
-    /// Can error out if the service fails to start.
-    pub async fn start(self) -> Result<(), ScannerError> {
-        let client = self.block_range_scanner.run()?;
-        let stream =
-            client.stream_from(self.config.from_block, self.config.block_confirmations).await?;
-        handle_stream(
-            stream,
-            self.block_range_scanner.provider(),
-            &self.listeners,
-            ConsumerMode::Stream,
-        )
-        .await;
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy::{network::Ethereum, rpc::client::RpcClient, transports::mock::Asserter};
-
-    #[test]
-    fn test_sync_scanner_config_defaults() {
-        let config = SyncScannerBuilder::new();
-
-        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
-        assert_eq!(config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
-    }
-
-    #[test]
-    fn test_sync_scanner_builder_pattern() {
-        let config = SyncScannerBuilder::new()
-            .max_block_range(25)
-            .block_confirmations(5)
-            .from_block(BlockNumberOrTag::Number(50));
-
-        assert_eq!(config.block_range_scanner.max_block_range, 25);
-        assert_eq!(config.block_confirmations, 5);
-        assert!(matches!(config.from_block, BlockNumberOrTag::Number(50)));
-    }
-
-    #[test]
-    fn test_sync_scanner_builder_with_different_block_types() {
-        let config = SyncScannerBuilder::new()
-            .from_block(BlockNumberOrTag::Earliest)
-            .block_confirmations(20)
-            .max_block_range(100);
-
-        assert!(matches!(config.from_block, BlockNumberOrTag::Earliest));
-        assert_eq!(config.block_confirmations, 20);
-        assert_eq!(config.block_range_scanner.max_block_range, 100);
-    }
-
-    #[test]
-    fn test_sync_scanner_builder_with_zero_confirmations() {
-        let config =
-            SyncScannerBuilder::new().from_block(0).block_confirmations(0).max_block_range(75);
-
-        assert!(matches!(config.from_block, BlockNumberOrTag::Number(0)));
-        assert_eq!(config.block_confirmations, 0);
-        assert_eq!(config.block_range_scanner.max_block_range, 75);
-    }
-
-    #[test]
-    fn test_sync_scanner_builder_last_call_wins() {
-        let config = SyncScannerBuilder::new()
-            .max_block_range(25)
-            .max_block_range(55)
-            .max_block_range(105)
-            .from_block(1)
-            .from_block(2)
-            .block_confirmations(5)
-            .block_confirmations(7);
-
-        assert_eq!(config.block_range_scanner.max_block_range, 105);
-        assert!(matches!(config.from_block, BlockNumberOrTag::Number(2)));
-        assert_eq!(config.block_confirmations, 7);
-    }
-
-    #[test]
-    fn test_sync_event_stream_listeners_vector_updates() {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = SyncScannerBuilder::new().connect::<Ethereum>(provider);
-        assert_eq!(scanner.listeners.len(), 0);
-        let _stream1 = scanner.subscribe(EventFilter::new());
-        assert_eq!(scanner.listeners.len(), 1);
-        let _stream2 = scanner.subscribe(EventFilter::new());
-        let _stream3 = scanner.subscribe(EventFilter::new());
-        assert_eq!(scanner.listeners.len(), 3);
-    }
-
-    #[test]
-    fn test_sync_event_stream_channel_capacity() {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = SyncScannerBuilder::new().connect::<Ethereum>(provider);
-        let _stream = scanner.subscribe(EventFilter::new());
-        let sender = &scanner.listeners[0].sender;
-        assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+        block: impl Into<BlockNumberOrTag>,
+    ) -> SyncFromBlockEventScannerBuilder {
+        SyncFromBlockEventScannerBuilder::new(block.into())
     }
 }

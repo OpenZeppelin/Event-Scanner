@@ -122,13 +122,13 @@ impl<N: Network> HistoricEventScanner<N> {
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;
-        handle_stream(
-            stream,
-            self.block_range_scanner.provider(),
-            &self.listeners,
-            ConsumerMode::Stream,
-        )
-        .await;
+
+        let provider = self.block_range_scanner.provider().clone();
+        let listeners = self.listeners.clone();
+
+        tokio::spawn(async move {
+            handle_stream(stream, &provider, &listeners, ConsumerMode::Stream).await;
+        });
         Ok(())
     }
 }

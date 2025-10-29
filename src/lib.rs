@@ -10,5 +10,5 @@ pub use types::{ScannerMessage, ScannerStatus};
 
 pub use event_scanner::{
     EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
-    SyncEventScanner,
+    SyncFromBlockEventScanner, SyncFromLatestEventScanner,
 };

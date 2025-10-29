@@ -148,13 +148,20 @@ impl<N: Network> LatestEventScanner<N> {
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.rewind(self.config.from_block, self.config.to_block).await?;
-        handle_stream(
-            stream,
-            self.block_range_scanner.provider(),
-            &self.listeners,
-            ConsumerMode::CollectLatest { count: self.config.count },
-        )
-        .await;
+
+        let provider = self.block_range_scanner.provider().clone();
+        let listeners = self.listeners.clone();
+
+        tokio::spawn(async move {
+            handle_stream(
+                stream,
+                &provider,
+                &listeners,
+                ConsumerMode::CollectLatest { count: self.config.count },
+            )
+            .await;
+        });
+
         Ok(())
     }
 }

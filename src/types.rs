@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Copy, Debug, Clone)]
 pub enum ScannerMessage<T: Clone, E: Error + Clone> {
@@ -12,7 +12,7 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
 
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub enum ScannerStatus {
-    ChainTipReached,
+    SwitchingToLive,
     ReorgDetected,
 }
 
@@ -38,6 +38,7 @@ impl<T: Clone, E: Error + Clone> TryStream<T, E> for mpsc::Sender<ScannerMessage
             warn!(error = %err, "Downstream channel closed, stopping stream");
             return false;
         }
+        info!("Message sent");
         true
     }
 }

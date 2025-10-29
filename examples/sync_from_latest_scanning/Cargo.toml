@@ -1,10 +1,13 @@
 [package]
-name = "sync_scanning"
-version = "0.1.0"
-edition = "2021"
+name = "sync_from_latest_scanning"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
 
 [[bin]]
-name = "sync_scanning"
+name = "sync_from_latest_scanning"
 path = "main.rs"
 
 [dependencies]

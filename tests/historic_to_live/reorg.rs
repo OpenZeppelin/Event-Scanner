@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use alloy::providers::ext::AnvilApi;
+use alloy::{eips::BlockNumberOrTag, providers::ext::AnvilApi};
 use event_scanner::{Message, types::ScannerStatus};
 use tokio::{sync::Mutex, time::timeout};
 use tokio_stream::StreamExt;
@@ -12,7 +12,9 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
 
-    let setup = setup_sync_scanner(Some(1.0), None, block_confirmations).await?;
+    let setup =
+        setup_sync_scanner(Some(1.0), None, BlockNumberOrTag::Earliest, block_confirmations)
+            .await?;
     let provider = setup.provider.clone();
     let contract = setup.contract.clone();
 
