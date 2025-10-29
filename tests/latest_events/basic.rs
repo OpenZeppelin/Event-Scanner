@@ -3,13 +3,12 @@ use std::sync::Arc;
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::U256,
     providers::{Provider, ext::AnvilApi},
     sol_types::SolEvent,
 };
 
 use crate::common::{
-    TestCounter, decrease, deploy_counter, increase, setup_common, setup_latest_scanner,
+    TestCounter, TestCounterExt, deploy_counter, setup_common, setup_latest_scanner,
 };
 use event_scanner::{
     EventFilter, EventScanner, assert_closed, assert_next, test_utils::LogMetadata,
@@ -24,16 +23,16 @@ async fn latest_scanner_exact_count_returns_last_events_in_order() -> anyhow::Re
     let mut stream = setup.stream;
 
     // Produce 8 events
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
 
     let expected = &[
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
     ];
 
     // Ask for the latest 5
@@ -55,9 +54,9 @@ async fn latest_scanner_fewer_available_than_count_returns_all() -> anyhow::Resu
 
     // Produce only 3 events
     let mut expected = vec![];
-    expected.push(increase(&contract).await?);
-    expected.push(increase(&contract).await?);
-    expected.push(increase(&contract).await?);
+    expected.push(contract.increase_and_get_meta().await?);
+    expected.push(contract.increase_and_get_meta().await?);
+    expected.push(contract.increase_and_get_meta().await?);
 
     scanner.start().await?;
 
@@ -88,14 +87,14 @@ async fn latest_scanner_no_events_returns_empty() -> anyhow::Result<()> {
 async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
     // Mine 6 events, one per tx (auto-mined), then manually mint 2 empty blocks to widen range
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
 
     let mut expected = vec![];
-    expected.push(increase(&contract).await?);
-    expected.push(increase(&contract).await?);
+    expected.push(contract.increase_and_get_meta().await?);
+    expected.push(contract.increase_and_get_meta().await?);
 
     // manual empty block minting
     provider.anvil_mine(Some(2), None).await?;
@@ -137,15 +136,15 @@ async fn latest_scanner_multiple_listeners_to_same_event_receive_same_results() 
     let mut stream2 = scanner.subscribe(filter2);
 
     // Produce 7 events
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
 
     let expected = &[
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
     ];
 
     scanner.start().await?;
@@ -179,17 +178,17 @@ async fn latest_scanner_different_filters_receive_different_results() -> anyhow:
     let mut stream_dec = scanner.subscribe(filter_dec);
 
     // Produce 5 increases, then 2 decreases
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
 
     let mut inc_log_meta = vec![];
-    inc_log_meta.push(increase(&contract).await?);
-    inc_log_meta.push(increase(&contract).await?);
-    inc_log_meta.push(increase(&contract).await?);
+    inc_log_meta.push(contract.increase_and_get_meta().await?);
+    inc_log_meta.push(contract.increase_and_get_meta().await?);
+    inc_log_meta.push(contract.increase_and_get_meta().await?);
 
     let mut dec_log_meta = vec![];
-    dec_log_meta.push(decrease(&contract).await?);
-    dec_log_meta.push(decrease(&contract).await?);
+    dec_log_meta.push(contract.decrease_and_get_meta().await?);
+    dec_log_meta.push(contract.decrease_and_get_meta().await?);
 
     // Ask for latest 3 across the full range: each filtered listener should receive their own last
     // 3 events
@@ -225,16 +224,16 @@ async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> any
     let mut dec_log_meta = Vec::new();
 
     // inc -> 1
-    _ = increase(&contract).await?;
+    _ = contract.increase_and_get_meta().await?;
 
     // inc -> 2
-    inc_log_meta.push(increase(&contract).await?);
+    inc_log_meta.push(contract.increase_and_get_meta().await?);
     // dec -> 1
-    dec_log_meta.push(decrease(&contract).await?);
+    dec_log_meta.push(contract.decrease_and_get_meta().await?);
     // inc -> 2
-    inc_log_meta.push(increase(&contract).await?);
+    inc_log_meta.push(contract.increase_and_get_meta().await?);
     // dec -> 1
-    dec_log_meta.push(decrease(&contract).await?);
+    dec_log_meta.push(contract.decrease_and_get_meta().await?);
 
     scanner.start().await?;
 
@@ -269,11 +268,11 @@ async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
     let mut a_log_meta = Vec::new();
-    a_log_meta.push(increase(&contract_a).await?);
-    let _ = contract_b.increase().send().await?.get_receipt().await?; // ignored by filter
-    a_log_meta.push(increase(&contract_a).await?);
-    let _ = contract_b.increase().send().await?.get_receipt().await?; // ignored by filter
-    a_log_meta.push(increase(&contract_a).await?);
+    a_log_meta.push(contract_a.increase_and_get_meta().await?);
+    _ = contract_b.increase_and_get_meta().await?; // ignored by filter
+    a_log_meta.push(contract_a.increase_and_get_meta().await?);
+    _ = contract_b.increase_and_get_meta().await?; // ignored by filter
+    a_log_meta.push(contract_a.increase_and_get_meta().await?);
 
     scanner.start().await?;
 
@@ -290,13 +289,13 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 
     // Emit 2 events
     let mut log_meta = vec![];
-    log_meta.push(increase(&contract).await?);
-    log_meta.push(increase(&contract).await?);
+    log_meta.push(contract.increase_and_get_meta().await?);
+    log_meta.push(contract.increase_and_get_meta().await?);
 
     // Mine 10 empty blocks
     provider.anvil_mine(Some(10), None).await?;
     // Emit 1 more event
-    log_meta.push(increase(&contract).await?);
+    log_meta.push(contract.increase_and_get_meta().await?);
 
     let head = provider.get_block_number().await?;
     let start = BlockNumberOrTag::from(head - 12);
@@ -322,9 +321,9 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
-    _ = increase(&contract).await?;
-    let expected = &[increase(&contract).await?];
-    _ = increase(&contract).await?;
+    _ = contract.increase_and_get_meta().await?;
+    let expected = &[contract.increase_and_get_meta().await?];
+    _ = contract.increase_and_get_meta().await?;
 
     // Pick the expected tx's block number as the block range
     let expected_tx_hash = expected[0].tx_hash;

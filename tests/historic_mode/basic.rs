@@ -1,7 +1,7 @@
 use alloy::eips::BlockNumberOrTag;
 use event_scanner::{assert_closed, assert_next};
 
-use crate::common::{increase, setup_historic_scanner};
+use crate::common::{TestCounterExt, setup_historic_scanner};
 
 #[tokio::test]
 async fn processes_events_within_specified_historical_range() -> anyhow::Result<()> {
@@ -17,11 +17,11 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     let mut stream = setup.stream;
 
     let expected = &[
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
-        increase(&contract).await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
+        contract.increase_and_get_meta().await?,
     ];
 
     scanner.start().await?;

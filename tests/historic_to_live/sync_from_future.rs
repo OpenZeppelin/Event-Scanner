@@ -1,4 +1,4 @@
-use crate::common::{increase, setup_sync_scanner};
+use crate::common::{TestCounterExt, setup_sync_scanner};
 use event_scanner::assert_next;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -13,8 +13,8 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     scanner.start().await?;
 
     // Send 2 transactions that should not appear in the stream
-    _ = increase(&contract).await?;
-    _ = increase(&contract).await?;
+    _ = contract.increase_and_get_meta().await?;
+    _ = contract.increase_and_get_meta().await?;
 
     // Assert: no messages should be received before reaching the start height
     let inner = setup.stream.into_inner();
@@ -22,7 +22,7 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     let mut stream = ReceiverStream::new(inner);
 
     // Act: emit an event that will be mined in block == future_start
-    let expected = &[increase(&contract).await?];
+    let expected = &[contract.increase_and_get_meta().await?];
 
     // Assert: the first streamed message arrives and contains the expected event
     assert_next!(stream, expected);
