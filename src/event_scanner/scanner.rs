@@ -22,7 +22,6 @@ mod latest;
 mod live;
 mod sync;
 
-pub use latest::{LatestEventScanner, LatestScannerBuilder};
 pub use sync::{
     SyncScannerBuilder, from_block::SyncFromBlockEventScanner,
     from_latest::SyncFromLatestEventScanner,
@@ -37,6 +36,12 @@ pub struct Historic {
 pub struct Live {
     pub(crate) block_confirmations: u64,
 }
+pub struct LatestEvents {
+    pub(crate) count: usize,
+    pub(crate) from_block: BlockNumberOrTag,
+    pub(crate) to_block: BlockNumberOrTag,
+    pub(crate) block_confirmations: u64,
+}
 
 impl Default for Historic {
     fn default() -> Self {
@@ -47,6 +52,17 @@ impl Default for Historic {
 impl Default for Live {
     fn default() -> Self {
         Self { block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
+    }
+}
+
+impl Default for LatestEvents {
+    fn default() -> Self {
+        Self {
+            count: 1,
+            from_block: BlockNumberOrTag::Latest,
+            to_block: BlockNumberOrTag::Earliest,
+            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+        }
     }
 }
 
@@ -181,8 +197,8 @@ impl EventScannerBuilder<Unspecified> {
     /// [sync_from_latest]: SyncScannerBuilder::from_latest
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     #[must_use]
-    pub fn latest() -> LatestScannerBuilder {
-        LatestScannerBuilder::new()
+    pub fn latest() -> EventScannerBuilder<LatestEvents> {
+        Default::default()
     }
 }
 
@@ -245,17 +261,27 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_config_defaults() {
-        let config = EventScannerBuilder::historic();
+        let builder = EventScannerBuilder::historic();
 
-        assert!(matches!(config.config.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(config.config.to_block, BlockNumberOrTag::Latest));
+        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
     }
 
     #[test]
     fn test_live_scanner_config_defaults() {
-        let config = EventScannerBuilder::live();
+        let builder = EventScannerBuilder::live();
 
-        assert_eq!(config.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn test_latest_scanner_config_defaults() {
+        let builder = EventScannerBuilder::latest();
+
+        assert_eq!(builder.config.count, 1);
+        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Latest));
+        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Earliest));
+        assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
     #[test]

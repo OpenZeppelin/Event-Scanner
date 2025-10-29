@@ -54,23 +54,23 @@ mod tests {
 
     #[test]
     fn test_live_scanner_builder_pattern() {
-        let config = EventScannerBuilder::live().max_block_range(25).block_confirmations(5);
+        let builder = EventScannerBuilder::live().max_block_range(25).block_confirmations(5);
 
-        assert_eq!(config.block_range_scanner.max_block_range, 25);
-        assert_eq!(config.config.block_confirmations, 5);
+        assert_eq!(builder.block_range_scanner.max_block_range, 25);
+        assert_eq!(builder.config.block_confirmations, 5);
     }
 
     #[test]
     fn test_live_scanner_builder_with_zero_confirmations() {
-        let config = EventScannerBuilder::live().block_confirmations(0).max_block_range(100);
+        let builder = EventScannerBuilder::live().block_confirmations(0).max_block_range(100);
 
-        assert_eq!(config.config.block_confirmations, 0);
-        assert_eq!(config.block_range_scanner.max_block_range, 100);
+        assert_eq!(builder.config.block_confirmations, 0);
+        assert_eq!(builder.block_range_scanner.max_block_range, 100);
     }
 
     #[test]
     fn test_live_scanner_builder_last_call_wins() {
-        let config = EventScannerBuilder::live()
+        let builder = EventScannerBuilder::live()
             .max_block_range(25)
             .max_block_range(55)
             .max_block_range(105)
@@ -78,7 +78,7 @@ mod tests {
             .block_confirmations(4)
             .block_confirmations(8);
 
-        assert_eq!(config.block_range_scanner.max_block_range, 105);
-        assert_eq!(config.config.block_confirmations, 8);
+        assert_eq!(builder.block_range_scanner.max_block_range, 105);
+        assert_eq!(builder.config.block_confirmations, 8);
     }
 }

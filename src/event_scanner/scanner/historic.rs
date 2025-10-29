@@ -55,27 +55,27 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_pattern() {
-        let config =
+        let builder =
             EventScannerBuilder::historic().to_block(200).max_block_range(50).from_block(100);
 
-        assert!(matches!(config.config.from_block, BlockNumberOrTag::Number(100)));
-        assert!(matches!(config.config.to_block, BlockNumberOrTag::Number(200)));
-        assert_eq!(config.block_range_scanner.max_block_range, 50);
+        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(100)));
+        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(200)));
+        assert_eq!(builder.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
     fn test_historic_scanner_builder_with_different_block_types() {
-        let config = EventScannerBuilder::historic()
+        let builder = EventScannerBuilder::historic()
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest);
 
-        assert!(matches!(config.config.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(config.config.to_block, BlockNumberOrTag::Latest));
+        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
     }
 
     #[test]
     fn test_historic_scanner_builder_last_call_wins() {
-        let config = EventScannerBuilder::historic()
+        let builder = EventScannerBuilder::historic()
             .max_block_range(25)
             .max_block_range(55)
             .max_block_range(105)
@@ -84,8 +84,8 @@ mod tests {
             .to_block(100)
             .to_block(200);
 
-        assert_eq!(config.block_range_scanner.max_block_range, 105);
-        assert!(matches!(config.config.from_block, BlockNumberOrTag::Number(2)));
-        assert!(matches!(config.config.to_block, BlockNumberOrTag::Number(200)));
+        assert_eq!(builder.block_range_scanner.max_block_range, 105);
+        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(2)));
+        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(200)));
     }
 }
