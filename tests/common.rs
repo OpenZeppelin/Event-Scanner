@@ -15,9 +15,11 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
-    EventFilter, EventScannerBuilder, LatestEventScanner, LiveEventScanner, Message,
-    SyncFromBlockEventScanner, SyncFromLatestEventScanner,
-    event_scanner::modes::{EventScanner, Historic},
+    EventFilter, EventScannerBuilder, Message,
+    event_scanner::{
+        EventScanner, Historic, LatestEventScanner, Live, SyncFromBlockEventScanner,
+        SyncFromLatestEventScanner,
+    },
     test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -62,8 +64,8 @@ where
     pub anvil: AnvilInstance,
 }
 
-pub type LiveScannerSetup<P> = ScannerSetup<LiveEventScanner<Ethereum>, P>;
-pub type HistoricScannerSetup<P> = ScannerSetup<EventScanner<Historic, Ethereum>, P>;
+pub type LiveScannerSetup<P> = ScannerSetup<EventScanner<Live>, P>;
+pub type HistoricScannerSetup<P> = ScannerSetup<EventScanner<Historic>, P>;
 pub type SyncScannerSetup<P> = ScannerSetup<SyncFromBlockEventScanner<Ethereum>, P>;
 pub type SyncFromLatestScannerSetup<P> = ScannerSetup<SyncFromLatestEventScanner<Ethereum>, P>;
 pub type LatestScannerSetup<P> = ScannerSetup<LatestEventScanner<Ethereum>, P>;

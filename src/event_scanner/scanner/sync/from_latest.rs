@@ -16,10 +16,13 @@ use crate::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage,
     },
-    event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
+    event_scanner::{
+        filter::EventFilter,
+        listener::EventListener,
+        message::Message,
+        scanner::common::{ConsumerMode, handle_stream},
+    },
 };
-
-use crate::event_scanner::modes::common::{ConsumerMode, handle_stream};
 
 pub struct SyncFromLatestScannerBuilder {
     block_range_scanner: BlockRangeScanner,

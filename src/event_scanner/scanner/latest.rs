@@ -8,18 +8,14 @@ use alloy::{
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+use super::common::{ConsumerMode, handle_stream};
 use crate::{
     ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES,
     },
-    event_scanner::{
-        filter::EventFilter,
-        listener::EventListener,
-        message::Message,
-        modes::common::{ConsumerMode, handle_stream},
-    },
+    event_scanner::{filter::EventFilter, listener::EventListener, message::Message},
 };
 
 pub struct LatestScannerBuilder {

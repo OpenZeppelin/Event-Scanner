@@ -18,7 +18,7 @@ use crate::{
         filter::EventFilter,
         listener::EventListener,
         message::Message,
-        modes::common::{ConsumerMode, handle_stream},
+        scanner::common::{ConsumerMode, handle_stream},
     },
 };
 

@@ -1,35 +1,53 @@
-mod common;
-mod historic;
-mod latest;
-mod live;
-mod sync;
-
 use alloy::{
     eips::BlockNumberOrTag,
     network::{Ethereum, Network},
     providers::RootProvider,
     transports::{TransportResult, http::reqwest::Url},
 };
-pub use latest::{LatestEventScanner, LatestScannerBuilder};
-pub use live::{LiveEventScanner, LiveScannerBuilder};
-pub use sync::{
-    SyncScannerBuilder,
-    from_block::{SyncFromBlockEventScanner, SyncFromBlockEventScannerBuilder},
-    from_latest::{SyncFromLatestEventScanner, SyncFromLatestScannerBuilder},
-};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     EventFilter, Message,
-    block_range_scanner::{BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES},
+    block_range_scanner::{
+        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
+        MAX_BUFFERED_MESSAGES,
+    },
     event_scanner::listener::EventListener,
 };
 
+mod common;
+mod historic;
+mod latest;
+mod live;
+mod sync;
+
+pub use latest::{LatestEventScanner, LatestScannerBuilder};
+pub use sync::{
+    SyncScannerBuilder, from_block::SyncFromBlockEventScanner,
+    from_latest::SyncFromLatestEventScanner,
+};
+
+#[derive(Default)]
 pub struct Unspecified;
 pub struct Historic {
-    from_block: BlockNumberOrTag,
-    to_block: BlockNumberOrTag,
+    pub(crate) from_block: BlockNumberOrTag,
+    pub(crate) to_block: BlockNumberOrTag,
+}
+pub struct Live {
+    pub(crate) block_confirmations: u64,
+}
+
+impl Default for Historic {
+    fn default() -> Self {
+        Self { from_block: BlockNumberOrTag::Earliest, to_block: BlockNumberOrTag::Latest }
+    }
+}
+
+impl Default for Live {
+    fn default() -> Self {
+        Self { block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
+    }
 }
 
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
@@ -38,9 +56,10 @@ pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     listeners: Vec<EventListener>,
 }
 
-pub struct EventScannerBuilder<M> {
-    mode: M,
-    block_range_scanner: BlockRangeScanner,
+#[derive(Default)]
+pub struct EventScannerBuilder<M: Default> {
+    pub(crate) mode: M,
+    pub(crate) block_range_scanner: BlockRangeScanner,
 }
 
 impl EventScannerBuilder<Unspecified> {
@@ -50,8 +69,8 @@ impl EventScannerBuilder<Unspecified> {
     }
 
     #[must_use]
-    pub fn live() -> LiveScannerBuilder {
-        LiveScannerBuilder::new()
+    pub fn live() -> EventScannerBuilder<Live> {
+        EventScannerBuilder::<Live>::new()
     }
 
     #[must_use]
@@ -167,7 +186,7 @@ impl EventScannerBuilder<Unspecified> {
     }
 }
 
-impl<M> EventScannerBuilder<M> {
+impl<M: Default> EventScannerBuilder<M> {
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
@@ -223,6 +242,21 @@ mod tests {
     use alloy::{providers::mock::Asserter, rpc::client::RpcClient};
 
     use super::*;
+
+    #[test]
+    fn test_historic_scanner_config_defaults() {
+        let config = EventScannerBuilder::<Historic>::new();
+
+        assert!(matches!(config.mode.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(config.mode.to_block, BlockNumberOrTag::Latest));
+    }
+
+    #[test]
+    fn test_live_scanner_config_defaults() {
+        let config = EventScannerBuilder::<Live>::new();
+
+        assert_eq!(config.mode.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
 
     #[test]
     fn test_historic_event_stream_listeners_vector_updates() {

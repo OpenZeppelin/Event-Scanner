@@ -8,7 +8,4 @@ pub mod types;
 pub use error::ScannerError;
 pub use types::{ScannerMessage, ScannerStatus};
 
-pub use event_scanner::{
-    EventFilter, EventScannerBuilder, LatestEventScanner, LiveEventScanner, Message,
-    SyncFromBlockEventScanner, SyncFromLatestEventScanner,
-};
+pub use event_scanner::{EventFilter, EventScannerBuilder, Message};

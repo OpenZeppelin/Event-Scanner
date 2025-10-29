@@ -1,24 +1,15 @@
 use alloy::{eips::BlockNumberOrTag, network::Network};
 
+use super::common::{ConsumerMode, handle_stream};
 use crate::{
-    ScannerError,
-    block_range_scanner::BlockRangeScanner,
-    event_scanner::modes::{
-        EventScanner, EventScannerBuilder, Historic,
-        common::{ConsumerMode, handle_stream},
-    },
+    EventScannerBuilder, ScannerError,
+    event_scanner::scanner::{EventScanner, Historic},
 };
 
 impl EventScannerBuilder<Historic> {
     #[must_use]
     pub(crate) fn new() -> Self {
-        Self {
-            block_range_scanner: BlockRangeScanner::new(),
-            mode: Historic {
-                from_block: BlockNumberOrTag::Earliest,
-                to_block: BlockNumberOrTag::Latest,
-            },
-        }
+        Default::default()
     }
 
     #[must_use]
@@ -66,14 +57,6 @@ impl<N: Network> EventScanner<Historic, N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_historic_scanner_config_defaults() {
-        let config = EventScannerBuilder::<Historic>::new();
-
-        assert!(matches!(config.mode.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(config.mode.to_block, BlockNumberOrTag::Latest));
-    }
 
     #[test]
     fn test_historic_scanner_builder_pattern() {
