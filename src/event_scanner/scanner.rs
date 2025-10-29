@@ -51,7 +51,7 @@ impl Default for Live {
 }
 
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
-    mode: M,
+    config: M,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
@@ -196,7 +196,7 @@ impl<M: Default> EventScannerBuilder<M> {
     /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
         let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(EventScanner { mode: self.config, block_range_scanner, listeners: Vec::new() })
+        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to the provider via IPC.
@@ -211,7 +211,7 @@ impl<M: Default> EventScannerBuilder<M> {
         ipc_path: String,
     ) -> TransportResult<EventScanner<M, N>> {
         let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(EventScanner { mode: self.config, block_range_scanner, listeners: Vec::new() })
+        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to an existing provider.
@@ -224,7 +224,7 @@ impl<M: Default> EventScannerBuilder<M> {
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
-        EventScanner { mode: self.config, block_range_scanner, listeners: Vec::new() }
+        EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
     }
 }
 

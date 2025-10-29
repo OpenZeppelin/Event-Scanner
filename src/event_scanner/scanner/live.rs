@@ -41,7 +41,7 @@ impl<N: Network> EventScanner<Live, N> {
     /// Can error out if the service fails to start.
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
-        let stream = client.stream_live(self.mode.block_confirmations).await?;
+        let stream = client.stream_live(self.config.block_confirmations).await?;
 
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
