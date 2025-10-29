@@ -1,11 +1,13 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::FixedBytes,
+    primitives::{FixedBytes, U256},
     providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
     rpc::types::anvil::{ReorgOptions, TransactionData},
     sol,
@@ -13,8 +15,8 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
-    EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
-    SyncEventScanner,
+    EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
+    SyncFromBlock, SyncFromLatestEvents, test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -58,10 +60,11 @@ where
     pub anvil: AnvilInstance,
 }
 
-pub type LiveScannerSetup<P> = ScannerSetup<LiveEventScanner<Ethereum>, P>;
-pub type HistoricScannerSetup<P> = ScannerSetup<HistoricEventScanner<Ethereum>, P>;
-pub type SyncScannerSetup<P> = ScannerSetup<SyncEventScanner<Ethereum>, P>;
-pub type LatestScannerSetup<P> = ScannerSetup<LatestEventScanner<Ethereum>, P>;
+pub type LiveScannerSetup<P> = ScannerSetup<EventScanner<Live>, P>;
+pub type HistoricScannerSetup<P> = ScannerSetup<EventScanner<Historic>, P>;
+pub type SyncScannerSetup<P> = ScannerSetup<EventScanner<SyncFromBlock>, P>;
+pub type SyncFromLatestScannerSetup<P> = ScannerSetup<EventScanner<SyncFromLatestEvents>, P>;
+pub type LatestScannerSetup<P> = ScannerSetup<EventScanner<LatestEvents>, P>;
 
 pub async fn setup_common(
     block_interval: Option<f64>,
@@ -92,7 +95,7 @@ pub async fn setup_live_scanner(
 ) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScanner::live()
+    let mut scanner = EventScannerBuilder::live()
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
@@ -105,11 +108,32 @@ pub async fn setup_live_scanner(
 pub async fn setup_sync_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
+    from: impl Into<BlockNumberOrTag>,
     confirmations: u64,
 ) -> anyhow::Result<SyncScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScanner::sync()
+    let mut scanner = EventScannerBuilder::sync()
+        .from_block(from)
+        .block_confirmations(confirmations)
+        .connect_ws(anvil.ws_endpoint_url())
+        .await?;
+
+    let stream = scanner.subscribe(filter);
+
+    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+}
+
+pub async fn setup_sync_from_latest_scanner(
+    block_interval: Option<f64>,
+    filter: Option<EventFilter>,
+    latest: usize,
+    confirmations: u64,
+) -> anyhow::Result<SyncFromLatestScannerSetup<impl Provider<Ethereum> + Clone>> {
+    let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+
+    let mut scanner = EventScannerBuilder::sync()
+        .from_latest(latest)
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
@@ -127,7 +151,7 @@ pub async fn setup_historic_scanner(
 ) -> anyhow::Result<HistoricScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScanner::historic()
+    let mut scanner = EventScannerBuilder::historic()
         .from_block(from)
         .to_block(to)
         .connect_ws(anvil.ws_endpoint_url())
@@ -146,7 +170,7 @@ pub async fn setup_latest_scanner(
     to: Option<BlockNumberOrTag>,
 ) -> anyhow::Result<LatestScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
-    let mut builder = EventScanner::latest().count(count);
+    let mut builder = EventScannerBuilder::latest(count);
     if let Some(f) = from {
         builder = builder.from_block(f);
     }
@@ -241,11 +265,48 @@ pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RootProvide
     Ok(provider.root().to_owned())
 }
 
-#[allow(clippy::missing_errors_doc)]
 pub async fn deploy_counter<P>(provider: P) -> anyhow::Result<TestCounter::TestCounterInstance<P>>
 where
     P: alloy::providers::Provider<Ethereum> + Clone,
 {
     let contract = TestCounter::deploy(provider).await?;
     Ok(contract)
+}
+
+#[allow(dead_code)]
+pub(crate) trait TestCounterExt {
+    async fn increase_and_get_meta(
+        &self,
+    ) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>>;
+    async fn decrease_and_get_meta(
+        &self,
+    ) -> anyhow::Result<LogMetadata<TestCounter::CountDecreased>>;
+}
+
+impl<P: Provider + Clone> TestCounterExt for TestCounter::TestCounterInstance<Arc<P>> {
+    async fn increase_and_get_meta(
+        &self,
+    ) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>> {
+        let receipt = self.increase().send().await?.get_receipt().await?;
+        let tx_hash = receipt.transaction_hash;
+        let new_count = receipt.decoded_log::<TestCounter::CountIncreased>().unwrap().data.newCount;
+        Ok(LogMetadata {
+            event: TestCounter::CountIncreased { newCount: U256::from(new_count) },
+            address: *self.address(),
+            tx_hash,
+        })
+    }
+
+    async fn decrease_and_get_meta(
+        &self,
+    ) -> anyhow::Result<LogMetadata<TestCounter::CountDecreased>> {
+        let receipt = self.decrease().send().await?.get_receipt().await?;
+        let tx_hash = receipt.transaction_hash;
+        let new_count = receipt.decoded_log::<TestCounter::CountDecreased>().unwrap().data.newCount;
+        Ok(LogMetadata {
+            event: TestCounter::CountDecreased { newCount: U256::from(new_count) },
+            address: *self.address(),
+            tx_hash,
+        })
+    }
 }

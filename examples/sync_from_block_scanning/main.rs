@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScanner, Message};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
@@ -56,7 +56,10 @@ async fn main() -> anyhow::Result<()> {
         info!("Historical event {} created", i + 1);
     }
 
-    let mut scanner = EventScanner::sync::<Ethereum>().connect_ws(anvil.ws_endpoint_url()).await?;
+    let mut scanner = EventScannerBuilder::sync()
+        .from_block(0)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
 
     let mut stream = scanner.subscribe(increase_filter);
 
