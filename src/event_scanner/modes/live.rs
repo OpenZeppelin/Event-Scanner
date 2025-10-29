@@ -53,6 +53,7 @@ impl<N: Network> LiveScannerBuilder<N> {
         self
     }
 
+    /// Adds a fallback provider (can add multiple)
     #[must_use]
     pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
         self.block_range_scanner.fallback_providers.push(provider);

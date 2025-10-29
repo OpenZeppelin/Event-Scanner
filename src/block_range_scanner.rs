@@ -79,7 +79,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    providers::{Provider, RootProvider},
+    providers::RootProvider,
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
@@ -182,13 +182,8 @@ impl<N: Network> BlockRangeScanner<N> {
     }
 
     /// Adds a fallback provider to the block range scanner
-    ///
-    /// # Errors
-    ///
-    /// Will panic if the provider does not implement pubsub
     #[must_use]
     pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
-        provider.client().expect_pubsub_frontend();
         self.fallback_providers.push(provider);
         self
     }
@@ -223,10 +218,9 @@ impl<N: Network> BlockRangeScanner<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails or provider does not support pubsub.
+    /// Returns an error if the connection fails
     #[must_use]
     pub fn connect(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        provider.client().expect_pubsub_frontend();
         let robust_provider = RobustProvider::new(provider)
             .max_timeout(self.max_timeout)
             .max_retries(self.max_retries)
