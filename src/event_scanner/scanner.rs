@@ -73,16 +73,152 @@ pub struct EventScannerBuilder<M> {
 }
 
 impl EventScannerBuilder<Unspecified> {
+    /// Streams events from a historical block range.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use alloy::network::Ethereum;
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use tokio_stream::StreamExt;
+    /// #
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let ws_url = "ws://localhost:8545".parse()?;
+    /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
+    /// // Stream all events from genesis to latest block
+    /// let mut scanner = EventScannerBuilder::historic()
+    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .await?;
+    ///
+    /// let filter = EventFilter::new().contract_address(contract_address);
+    /// let mut stream = scanner.subscribe(filter);
+    ///
+    /// scanner.start().await?;
+    ///
+    /// while let Some(Message::Data(logs)) = stream.next().await {
+    ///     println!("Received {} logs", logs.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Specifying a custom block range:
+    ///
+    /// ```no_run
+    /// # use alloy::network::Ethereum;
+    /// # use event_scanner::EventScannerBuilder;
+    /// #
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let ws_url = "ws://localhost:8545".parse()?;
+    /// // Stream events between blocks [1_000_000, 2_000_000]
+    /// let mut scanner = EventScannerBuilder::historic()
+    ///     .from_block(1_000_000)
+    ///     .to_block(2_000_000)
+    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # How it works
+    ///
+    /// The scanner streams events in chronological order (oldest to newest) within the specified
+    /// block range. Events are delivered in batches as they are fetched from the provider, with
+    /// batch sizes controlled by the `max_block_range` configuration.
+    ///
+    /// # Key behaviors
+    ///
+    /// - **Continuous streaming**: Events are delivered in multiple messages as they are fetched
+    /// - **Chronological order**: Events are always delivered oldest to newest
+    /// - **Default range**: By default, scans from `Earliest` to `Latest` block
+    /// - **Batch control**: Use `.max_block_range(n)` to control how many blocks are queried per
+    ///   RPC call
+    /// - **Completion**: The scanner completes when the entire range has been processed
     #[must_use]
     pub fn historic() -> EventScannerBuilder<Historic> {
         Default::default()
     }
 
+    /// Streams new events as blocks are produced on-chain.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use alloy::network::Ethereum;
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use tokio_stream::StreamExt;
+    /// #
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let ws_url = "ws://localhost:8545".parse()?;
+    /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
+    /// // Stream new events as they arrive
+    /// let mut scanner = EventScannerBuilder::live()
+    ///     .block_confirmations(20)
+    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .await?;
+    ///
+    /// let filter = EventFilter::new().contract_address(contract_address);
+    /// let mut stream = scanner.subscribe(filter);
+    ///
+    /// scanner.start().await?;
+    ///
+    /// while let Some(msg) = stream.next().await {
+    ///     match msg {
+    ///         Message::Data(logs) => {
+    ///             println!("Received {} new events", logs.len());
+    ///         }
+    ///         Message::Status(status) => {
+    ///             println!("Status: {:?}", status);
+    ///         }
+    ///         Message::Error(e) => {
+    ///             eprintln!("Error: {}", e);
+    ///         }
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # How it works
+    ///
+    /// The scanner subscribes to new blocks via WebSocket and streams events from confirmed
+    /// blocks. The `block_confirmations` setting determines how many blocks to wait before
+    /// considering a block confirmed, providing protection against chain reorganizations.
+    ///
+    /// # Key behaviors
+    ///
+    /// - **Real-time streaming**: Events are delivered as new blocks are confirmed
+    /// - **Reorg protection**: Waits for configured confirmations before emitting events
+    /// - **Continuous operation**: Runs indefinitely until the scanner is dropped or encounters an
+    ///   error
+    /// - **Default confirmations**: By default, waits for 12 block confirmations
+    ///
+    /// # Reorg behavior
+    ///
+    /// When a reorg is detected:
+    /// 1. Emits [`ScannerStatus::ReorgDetected`][reorg] to all listeners
+    /// 2. Adjusts the next confirmed range using `block_confirmations`
+    /// 3. Re-emits events from the corrected confirmed block range
+    /// 4. Continues streaming from the new chain state
+    ///
+    /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     #[must_use]
     pub fn live() -> EventScannerBuilder<Live> {
         Default::default()
     }
 
+    /// Creates a builder for sync mode scanners that combine historical catch-up with live
+    /// streaming.
+    ///
+    /// This method returns a builder that must be further narrowed down:
+    /// ```rust,no_run
+    /// // Sync from block mode
+    /// EventScannerBuilder::sync().from_block(1_000_000);
+    /// // Sync from latest events mode
+    /// EventScannerBuilder::sync().from_latest(10);
+    /// ```
+    ///
+    /// See the [sync module documentation](sync) for details on each mode.
     #[must_use]
     pub fn sync() -> EventScannerBuilder<Synchronize> {
         Default::default()
