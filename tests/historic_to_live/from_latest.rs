@@ -1,7 +1,7 @@
 use alloy::providers::ext::AnvilApi;
 
 use crate::common::{TestCounter, TestCounterExt, setup_sync_from_latest_scanner};
-use event_scanner::{assert_next, test_utils::LogMetadata, types::ScannerStatus};
+use event_scanner::{ScannerStatus, assert_next, test_utils::LogMetadata};
 
 #[tokio::test]
 async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> {

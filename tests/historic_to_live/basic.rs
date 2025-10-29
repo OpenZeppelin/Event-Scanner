@@ -1,5 +1,5 @@
 use alloy::{eips::BlockNumberOrTag, primitives::U256};
-use event_scanner::{assert_next, types::ScannerStatus};
+use event_scanner::{ScannerStatus, assert_next};
 
 use crate::common::{TestCounter, setup_sync_scanner};
 

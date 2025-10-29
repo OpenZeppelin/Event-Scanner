@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{eips::BlockNumberOrTag, providers::ext::AnvilApi};
-use event_scanner::{Message, types::ScannerStatus};
+use event_scanner::{Message, ScannerStatus};
 use tokio::{sync::Mutex, time::timeout};
 use tokio_stream::StreamExt;
 

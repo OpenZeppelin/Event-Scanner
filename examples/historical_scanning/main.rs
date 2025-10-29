@@ -1,7 +1,7 @@
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 
-use event_scanner::{EventFilter, EventScanner, Message};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
     let mut scanner =
-        EventScanner::historic().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+        EventScannerBuilder::historic().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
 
     let mut stream = scanner.subscribe(increase_filter);
 

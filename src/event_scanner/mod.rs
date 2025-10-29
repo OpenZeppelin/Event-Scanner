@@ -1,12 +1,12 @@
-pub mod error;
-pub mod filter;
-pub mod listener;
-pub mod message;
-pub mod modes;
+mod error;
+mod filter;
+mod listener;
+mod message;
+mod scanner;
 
 pub use filter::EventFilter;
 pub use message::Message;
-pub use modes::{
-    EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner,
-    SyncFromBlockEventScanner, SyncFromLatestEventScanner,
+pub use scanner::{
+    EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, SyncFromBlock,
+    SyncFromLatestEvents,
 };
