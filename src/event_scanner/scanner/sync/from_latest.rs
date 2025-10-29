@@ -2,8 +2,7 @@ use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network},
-    providers::{Provider, RootProvider},
-    transports::{TransportResult, http::reqwest::Url},
+    providers::Provider,
 };
 
 use tokio::sync::mpsc;
@@ -11,102 +10,26 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::info;
 
 use crate::{
-    ScannerError, ScannerStatus,
-    block_range_scanner::{
-        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
-        MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage,
-    },
+    EventScannerBuilder, ScannerError, ScannerStatus,
+    block_range_scanner::Message as BlockRangeMessage,
     event_scanner::{
-        filter::EventFilter,
-        listener::EventListener,
-        message::Message,
-        scanner::common::{ConsumerMode, handle_stream},
+        EventScanner,
+        scanner::{
+            SyncFromLatestEvents,
+            common::{ConsumerMode, handle_stream},
+        },
     },
 };
 
-pub struct SyncFromLatestScannerBuilder {
-    block_range_scanner: BlockRangeScanner,
-    latest_events_count: usize,
-    block_confirmations: u64,
-}
-
-pub struct SyncFromLatestEventScanner<N: Network> {
-    config: SyncFromLatestScannerBuilder,
-    block_range_scanner: ConnectedBlockRangeScanner<N>,
-    listeners: Vec<EventListener>,
-}
-
-impl SyncFromLatestScannerBuilder {
-    #[must_use]
-    pub(crate) fn new(count: usize) -> Self {
-        Self {
-            block_range_scanner: BlockRangeScanner::new(),
-            latest_events_count: count,
-            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-        }
-    }
-
+impl EventScannerBuilder<SyncFromLatestEvents> {
     #[must_use]
     pub fn block_confirmations(mut self, count: u64) -> Self {
-        self.block_confirmations = count;
+        self.config.block_confirmations = count;
         self
-    }
-
-    /// Connects to the provider via WebSocket.
-    ///
-    /// Final builder method: consumes the builder and returns the built
-    /// [`SyncFromLatestEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> TransportResult<SyncFromLatestEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(SyncFromLatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
-    }
-
-    /// Connects to the provider via IPC.
-    ///
-    /// Final builder method: consumes the builder and returns the built
-    /// [`SyncFromLatestEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> TransportResult<SyncFromLatestEventScanner<N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(SyncFromLatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() })
-    }
-
-    /// Connects to an existing provider.
-    ///
-    /// Final builder method: consumes the builder and returns the built
-    /// [`SyncFromLatestEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> SyncFromLatestEventScanner<N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
-        SyncFromLatestEventScanner { config: self, block_range_scanner, listeners: Vec::new() }
     }
 }
 
-impl<N: Network> SyncFromLatestEventScanner<N> {
-    #[must_use]
-    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
-        let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
-        self.listeners.push(EventListener { filter, sender });
-        ReceiverStream::new(receiver)
-    }
-
+impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
     /// Starts the scanner.
     ///
     /// # Errors
@@ -114,7 +37,7 @@ impl<N: Network> SyncFromLatestEventScanner<N> {
     /// Returns an error if the scanner fails to start.
     #[allow(clippy::missing_panics_doc)]
     pub async fn start(self) -> Result<(), ScannerError> {
-        let count = self.config.latest_events_count;
+        let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
 

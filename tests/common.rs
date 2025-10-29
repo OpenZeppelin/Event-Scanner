@@ -17,8 +17,7 @@ use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
     EventFilter, EventScannerBuilder, Message,
     event_scanner::{
-        EventScanner, Historic, LatestEvents, Live, SyncFromBlockEventScanner,
-        SyncFromLatestEventScanner,
+        EventScanner, Historic, LatestEvents, Live, SyncFromBlock, SyncFromLatestEvents,
     },
     test_utils::LogMetadata,
 };
@@ -66,8 +65,8 @@ where
 
 pub type LiveScannerSetup<P> = ScannerSetup<EventScanner<Live>, P>;
 pub type HistoricScannerSetup<P> = ScannerSetup<EventScanner<Historic>, P>;
-pub type SyncScannerSetup<P> = ScannerSetup<SyncFromBlockEventScanner<Ethereum>, P>;
-pub type SyncFromLatestScannerSetup<P> = ScannerSetup<SyncFromLatestEventScanner<Ethereum>, P>;
+pub type SyncScannerSetup<P> = ScannerSetup<EventScanner<SyncFromBlock>, P>;
+pub type SyncFromLatestScannerSetup<P> = ScannerSetup<EventScanner<SyncFromLatestEvents>, P>;
 pub type LatestScannerSetup<P> = ScannerSetup<EventScanner<LatestEvents>, P>;
 
 pub async fn setup_common(

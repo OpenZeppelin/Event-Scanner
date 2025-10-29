@@ -22,11 +22,6 @@ mod latest;
 mod live;
 mod sync;
 
-pub use sync::{
-    SyncScannerBuilder, from_block::SyncFromBlockEventScanner,
-    from_latest::SyncFromLatestEventScanner,
-};
-
 #[derive(Default)]
 pub struct Unspecified;
 pub struct Historic {
@@ -40,6 +35,16 @@ pub struct LatestEvents {
     pub(crate) count: usize,
     pub(crate) from_block: BlockNumberOrTag,
     pub(crate) to_block: BlockNumberOrTag,
+    pub(crate) block_confirmations: u64,
+}
+#[derive(Default)]
+pub struct Synchronize;
+pub struct SyncFromLatestEvents {
+    pub(crate) count: usize,
+    pub(crate) block_confirmations: u64,
+}
+pub struct SyncFromBlock {
+    pub(crate) from_block: BlockNumberOrTag,
     pub(crate) block_confirmations: u64,
 }
 
@@ -73,7 +78,7 @@ pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
 }
 
 #[derive(Default)]
-pub struct EventScannerBuilder<M: Default> {
+pub struct EventScannerBuilder<M> {
     pub(crate) config: M,
     pub(crate) block_range_scanner: BlockRangeScanner,
 }
@@ -90,8 +95,8 @@ impl EventScannerBuilder<Unspecified> {
     }
 
     #[must_use]
-    pub fn sync() -> SyncScannerBuilder {
-        SyncScannerBuilder::new()
+    pub fn sync() -> EventScannerBuilder<Synchronize> {
+        Default::default()
     }
 
     /// Streams the latest `count` matching events per registered listener.
@@ -202,7 +207,28 @@ impl EventScannerBuilder<Unspecified> {
     }
 }
 
-impl<M: Default> EventScannerBuilder<M> {
+impl EventScannerBuilder<SyncFromLatestEvents> {
+    pub fn new(count: usize) -> Self {
+        Self {
+            config: SyncFromLatestEvents {
+                count,
+                block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            },
+            block_range_scanner: BlockRangeScanner::default(),
+        }
+    }
+}
+
+impl EventScannerBuilder<SyncFromBlock> {
+    pub fn new(from_block: BlockNumberOrTag) -> Self {
+        Self {
+            config: SyncFromBlock { from_block, block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS },
+            block_range_scanner: BlockRangeScanner::default(),
+        }
+    }
+}
+
+impl<M> EventScannerBuilder<M> {
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
@@ -281,6 +307,14 @@ mod tests {
         assert_eq!(builder.config.count, 1);
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Latest));
         assert!(matches!(builder.config.to_block, BlockNumberOrTag::Earliest));
+        assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn sync_scanner_config_defaults() {
+        let builder = EventScannerBuilder::<SyncFromBlock>::new(BlockNumberOrTag::Earliest);
+
+        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
