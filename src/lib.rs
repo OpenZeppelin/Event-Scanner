@@ -1,11 +1,16 @@
 pub mod block_range_scanner;
-pub mod error;
-pub mod event_scanner;
+
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
-pub mod types;
+
+mod error;
+mod event_scanner;
+mod types;
 
 pub use error::ScannerError;
 pub use types::{ScannerMessage, ScannerStatus};
 
-pub use event_scanner::{EventFilter, EventScannerBuilder, Message};
+pub use event_scanner::{
+    EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
+    SyncFromBlock, SyncFromLatestEvents,
+};

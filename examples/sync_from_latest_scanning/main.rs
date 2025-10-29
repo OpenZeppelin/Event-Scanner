@@ -1,9 +1,6 @@
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
-use event_scanner::{
-    EventFilter,
-    event_scanner::{EventScannerBuilder, Message},
-};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
 
 use tokio_stream::StreamExt;
 use tracing::{error, info};

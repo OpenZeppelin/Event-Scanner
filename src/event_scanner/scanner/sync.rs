@@ -25,14 +25,14 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScanner, Message};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Fetch the latest 10 events, then stream new events continuously
-    /// let mut scanner = EventScanner::sync()
+    /// let mut scanner = EventScannerBuilder::sync()
     ///     .from_latest(10)
     ///     .connect_ws::<Ethereum>(ws_url)
     ///     .await?;

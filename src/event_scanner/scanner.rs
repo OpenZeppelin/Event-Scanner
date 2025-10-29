@@ -212,6 +212,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// This method returns a builder that must be further narrowed down:
     /// ```rust,no_run
+    /// # use event_scanner::EventScannerBuilder;
     /// // Sync from block mode
     /// EventScannerBuilder::sync().from_block(1_000_000);
     /// // Sync from latest events mode

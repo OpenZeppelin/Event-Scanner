@@ -15,11 +15,8 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
-    EventFilter, EventScannerBuilder, Message,
-    event_scanner::{
-        EventScanner, Historic, LatestEvents, Live, SyncFromBlock, SyncFromLatestEvents,
-    },
-    test_utils::LogMetadata,
+    EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
+    SyncFromBlock, SyncFromLatestEvents, test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
