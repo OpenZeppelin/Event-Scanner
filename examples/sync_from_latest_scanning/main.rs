@@ -2,7 +2,7 @@ use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEv
 use alloy_node_bindings::Anvil;
 use event_scanner::{
     EventFilter,
-    event_scanner::{EventScanner, Message},
+    event_scanner::{EventScannerBuilder, Message},
 };
 
 use tokio_stream::StreamExt;
@@ -51,8 +51,10 @@ async fn main() -> anyhow::Result<()> {
         .contract_address(*contract_address)
         .event(Counter::CountIncreased::SIGNATURE);
 
-    let mut client =
-        EventScanner::sync().from_latest(5).connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let mut client = EventScannerBuilder::sync()
+        .from_latest(5)
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
+        .await?;
 
     let mut stream = client.subscribe(increase_filter);
 

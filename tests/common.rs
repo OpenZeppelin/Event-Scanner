@@ -15,8 +15,10 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
-    EventFilter, EventScanner, HistoricEventScanner, LatestEventScanner, LiveEventScanner, Message,
-    SyncFromBlockEventScanner, SyncFromLatestEventScanner, test_utils::LogMetadata,
+    EventFilter, EventScannerBuilder, LatestEventScanner, LiveEventScanner, Message,
+    SyncFromBlockEventScanner, SyncFromLatestEventScanner,
+    event_scanner::modes::{EventScanner, Historic},
+    test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -61,7 +63,7 @@ where
 }
 
 pub type LiveScannerSetup<P> = ScannerSetup<LiveEventScanner<Ethereum>, P>;
-pub type HistoricScannerSetup<P> = ScannerSetup<HistoricEventScanner<Ethereum>, P>;
+pub type HistoricScannerSetup<P> = ScannerSetup<EventScanner<Historic, Ethereum>, P>;
 pub type SyncScannerSetup<P> = ScannerSetup<SyncFromBlockEventScanner<Ethereum>, P>;
 pub type SyncFromLatestScannerSetup<P> = ScannerSetup<SyncFromLatestEventScanner<Ethereum>, P>;
 pub type LatestScannerSetup<P> = ScannerSetup<LatestEventScanner<Ethereum>, P>;
@@ -95,7 +97,7 @@ pub async fn setup_live_scanner(
 ) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScanner::live()
+    let mut scanner = EventScannerBuilder::live()
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
         .await?;
@@ -113,7 +115,7 @@ pub async fn setup_sync_scanner(
 ) -> anyhow::Result<SyncScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScanner::sync()
+    let mut scanner = EventScannerBuilder::sync()
         .from_block(from)
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
@@ -132,7 +134,7 @@ pub async fn setup_sync_from_latest_scanner(
 ) -> anyhow::Result<SyncFromLatestScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScanner::sync()
+    let mut scanner = EventScannerBuilder::sync()
         .from_latest(latest)
         .block_confirmations(confirmations)
         .connect_ws(anvil.ws_endpoint_url())
@@ -151,7 +153,7 @@ pub async fn setup_historic_scanner(
 ) -> anyhow::Result<HistoricScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScanner::historic()
+    let mut scanner = EventScannerBuilder::historic()
         .from_block(from)
         .to_block(to)
         .connect_ws(anvil.ws_endpoint_url())
@@ -170,7 +172,7 @@ pub async fn setup_latest_scanner(
     to: Option<BlockNumberOrTag>,
 ) -> anyhow::Result<LatestScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
-    let mut builder = EventScanner::latest().count(count);
+    let mut builder = EventScannerBuilder::latest().count(count);
     if let Some(f) = from {
         builder = builder.from_block(f);
     }

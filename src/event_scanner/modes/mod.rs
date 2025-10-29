@@ -4,7 +4,12 @@ mod latest;
 mod live;
 mod sync;
 
-pub use historic::{HistoricEventScanner, HistoricScannerBuilder};
+use alloy::{
+    eips::BlockNumberOrTag,
+    network::{Ethereum, Network},
+    providers::RootProvider,
+    transports::{TransportResult, http::reqwest::Url},
+};
 pub use latest::{LatestEventScanner, LatestScannerBuilder};
 pub use live::{LiveEventScanner, LiveScannerBuilder};
 pub use sync::{
@@ -12,13 +17,36 @@ pub use sync::{
     from_block::{SyncFromBlockEventScanner, SyncFromBlockEventScannerBuilder},
     from_latest::{SyncFromLatestEventScanner, SyncFromLatestScannerBuilder},
 };
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
-pub struct EventScanner;
+use crate::{
+    EventFilter, Message,
+    block_range_scanner::{BlockRangeScanner, ConnectedBlockRangeScanner, MAX_BUFFERED_MESSAGES},
+    event_scanner::listener::EventListener,
+};
 
-impl EventScanner {
+pub struct Unspecified;
+pub struct Historic {
+    from_block: BlockNumberOrTag,
+    to_block: BlockNumberOrTag,
+}
+
+pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
+    mode: M,
+    block_range_scanner: ConnectedBlockRangeScanner<N>,
+    listeners: Vec<EventListener>,
+}
+
+pub struct EventScannerBuilder<M> {
+    mode: M,
+    block_range_scanner: BlockRangeScanner,
+}
+
+impl EventScannerBuilder<Unspecified> {
     #[must_use]
-    pub fn historic() -> HistoricScannerBuilder {
-        HistoricScannerBuilder::new()
+    pub fn historic() -> EventScannerBuilder<Historic> {
+        EventScannerBuilder::<Historic>::new()
     }
 
     #[must_use]
@@ -136,5 +164,89 @@ impl EventScanner {
     #[must_use]
     pub fn latest() -> LatestScannerBuilder {
         LatestScannerBuilder::new()
+    }
+}
+
+impl<M> EventScannerBuilder<M> {
+    /// Connects to the provider via WebSocket.
+    ///
+    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
+        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
+        Ok(EventScanner { mode: self.mode, block_range_scanner, listeners: Vec::new() })
+    }
+
+    /// Connects to the provider via IPC.
+    ///
+    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    pub async fn connect_ipc<N: Network>(
+        self,
+        ipc_path: String,
+    ) -> TransportResult<EventScanner<M, N>> {
+        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+        Ok(EventScanner { mode: self.mode, block_range_scanner, listeners: Vec::new() })
+    }
+
+    /// Connects to an existing provider.
+    ///
+    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails
+    #[must_use]
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
+        EventScanner { mode: self.mode, block_range_scanner, listeners: Vec::new() }
+    }
+}
+
+impl<M, N: Network> EventScanner<M, N> {
+    #[must_use]
+    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
+        let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
+        self.listeners.push(EventListener { filter, sender });
+        ReceiverStream::new(receiver)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy::{providers::mock::Asserter, rpc::client::RpcClient};
+
+    use super::*;
+
+    #[test]
+    fn test_historic_event_stream_listeners_vector_updates() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+
+        assert!(scanner.listeners.is_empty());
+
+        let _stream1 = scanner.subscribe(EventFilter::new());
+        assert_eq!(scanner.listeners.len(), 1);
+
+        let _stream2 = scanner.subscribe(EventFilter::new());
+        let _stream3 = scanner.subscribe(EventFilter::new());
+        assert_eq!(scanner.listeners.len(), 3);
+    }
+
+    #[test]
+    fn test_historic_event_stream_channel_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+
+        let _ = scanner.subscribe(EventFilter::new());
+
+        let sender = &scanner.listeners[0].sender;
+        assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
     }
 }
