@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_config_defaults() {
-        let builder = EventScannerBuilder::historic();
+        let builder = EventScannerBuilder::<Historic>::default();
 
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
         assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
@@ -431,14 +431,14 @@ mod tests {
 
     #[test]
     fn test_live_scanner_config_defaults() {
-        let builder = EventScannerBuilder::live();
+        let builder = EventScannerBuilder::<Live>::default();
 
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
     #[test]
     fn test_latest_scanner_config_defaults() {
-        let builder = EventScannerBuilder::latest(10);
+        let builder = EventScannerBuilder::<LatestEvents>::new(10);
 
         assert_eq!(builder.config.count, 10);
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Latest));
