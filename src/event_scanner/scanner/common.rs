@@ -47,7 +47,7 @@ pub enum ConsumerMode {
 /// Assumes it is running in a separate tokio task, so as to be non-blocking.
 pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unpin>(
     mut stream: S,
-    provider: &RootProvider<N>,
+    provider: &RobustProvider<N>,
     listeners: &[EventListener],
     mode: ConsumerMode,
 ) {

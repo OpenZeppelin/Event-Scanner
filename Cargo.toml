@@ -68,6 +68,7 @@ chrono.workspace = true
 alloy-node-bindings.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
+backon.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

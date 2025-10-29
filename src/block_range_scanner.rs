@@ -424,23 +424,14 @@ impl<N: Network> Service<N> {
         let get_start_block = async || -> Result<BlockNumber, ScannerError> {
             let block = match start_height {
                 BlockNumberOrTag::Number(num) => num,
-                block_tag => provider
-                    .get_block_by_number(block_tag)
-                    .await?
-                    .ok_or_else(|| ScannerError::BlockNotFound(block_tag))?
-                    .header()
-                    .number(),
+                block_tag => provider.get_block_by_number(block_tag).await?.header().number(),
             };
             Ok(block)
         };
 
         let get_latest_block = async || -> Result<BlockNumber, ScannerError> {
-            let block = provider
-                .get_block_by_number(BlockNumberOrTag::Latest)
-                .await?
-                .ok_or_else(|| ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
-                .header()
-                .number();
+            let block =
+                provider.get_block_by_number(BlockNumberOrTag::Latest).await?.header().number();
             Ok(block)
         };
 
