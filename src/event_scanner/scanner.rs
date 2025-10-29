@@ -136,7 +136,7 @@ impl EventScannerBuilder<Unspecified> {
     /// - **Completion**: The scanner completes when the entire range has been processed
     #[must_use]
     pub fn historic() -> EventScannerBuilder<Historic> {
-        Default::default()
+        EventScannerBuilder::default()
     }
 
     /// Streams new events as blocks are produced on-chain.
@@ -204,7 +204,7 @@ impl EventScannerBuilder<Unspecified> {
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     #[must_use]
     pub fn live() -> EventScannerBuilder<Live> {
-        Default::default()
+        EventScannerBuilder::default()
     }
 
     /// Creates a builder for sync mode scanners that combine historical catch-up with live
@@ -222,7 +222,7 @@ impl EventScannerBuilder<Unspecified> {
     /// See the [sync module documentation](sync) for details on each mode.
     #[must_use]
     pub fn sync() -> EventScannerBuilder<Synchronize> {
-        Default::default()
+        EventScannerBuilder::default()
     }
 
     /// Streams the latest `count` matching events per registered listener.
@@ -326,19 +326,8 @@ impl EventScannerBuilder<Unspecified> {
     }
 }
 
-impl EventScannerBuilder<SyncFromLatestEvents> {
-    pub fn new(count: usize) -> Self {
-        Self {
-            config: SyncFromLatestEvents {
-                count,
-                block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-            },
-            block_range_scanner: BlockRangeScanner::default(),
-        }
-    }
-}
-
 impl EventScannerBuilder<LatestEvents> {
+    #[must_use]
     pub fn new(count: usize) -> Self {
         Self {
             config: LatestEvents {
@@ -352,7 +341,21 @@ impl EventScannerBuilder<LatestEvents> {
     }
 }
 
+impl EventScannerBuilder<SyncFromLatestEvents> {
+    #[must_use]
+    pub fn new(count: usize) -> Self {
+        Self {
+            config: SyncFromLatestEvents {
+                count,
+                block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            },
+            block_range_scanner: BlockRangeScanner::default(),
+        }
+    }
+}
+
 impl EventScannerBuilder<SyncFromBlock> {
+    #[must_use]
     pub fn new(from_block: BlockNumberOrTag) -> Self {
         Self {
             config: SyncFromBlock { from_block, block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS },
