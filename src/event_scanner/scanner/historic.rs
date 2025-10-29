@@ -20,13 +20,13 @@ impl EventScannerBuilder<Historic> {
 
     #[must_use]
     pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
-        self.mode.from_block = block.into();
+        self.config.from_block = block.into();
         self
     }
 
     #[must_use]
     pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
-        self.mode.to_block = block.into();
+        self.config.to_block = block.into();
         self
     }
 }
@@ -65,8 +65,8 @@ mod tests {
             .max_block_range(50)
             .from_block(100);
 
-        assert!(matches!(config.mode.from_block, BlockNumberOrTag::Number(100)));
-        assert!(matches!(config.mode.to_block, BlockNumberOrTag::Number(200)));
+        assert!(matches!(config.config.from_block, BlockNumberOrTag::Number(100)));
+        assert!(matches!(config.config.to_block, BlockNumberOrTag::Number(200)));
         assert_eq!(config.block_range_scanner.max_block_range, 50);
     }
 
@@ -76,8 +76,8 @@ mod tests {
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest);
 
-        assert!(matches!(config.mode.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(config.mode.to_block, BlockNumberOrTag::Latest));
+        assert!(matches!(config.config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(config.config.to_block, BlockNumberOrTag::Latest));
     }
 
     #[test]
@@ -92,7 +92,7 @@ mod tests {
             .to_block(200);
 
         assert_eq!(config.block_range_scanner.max_block_range, 105);
-        assert!(matches!(config.mode.from_block, BlockNumberOrTag::Number(2)));
-        assert!(matches!(config.mode.to_block, BlockNumberOrTag::Number(200)));
+        assert!(matches!(config.config.from_block, BlockNumberOrTag::Number(2)));
+        assert!(matches!(config.config.to_block, BlockNumberOrTag::Number(200)));
     }
 }

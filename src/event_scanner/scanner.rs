@@ -58,7 +58,7 @@ pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
 
 #[derive(Default)]
 pub struct EventScannerBuilder<M: Default> {
-    pub(crate) mode: M,
+    pub(crate) config: M,
     pub(crate) block_range_scanner: BlockRangeScanner,
 }
 
@@ -196,7 +196,7 @@ impl<M: Default> EventScannerBuilder<M> {
     /// Returns an error if the connection fails
     pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
         let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(EventScanner { mode: self.mode, block_range_scanner, listeners: Vec::new() })
+        Ok(EventScanner { mode: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to the provider via IPC.
@@ -211,7 +211,7 @@ impl<M: Default> EventScannerBuilder<M> {
         ipc_path: String,
     ) -> TransportResult<EventScanner<M, N>> {
         let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(EventScanner { mode: self.mode, block_range_scanner, listeners: Vec::new() })
+        Ok(EventScanner { mode: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
     /// Connects to an existing provider.
@@ -224,7 +224,7 @@ impl<M: Default> EventScannerBuilder<M> {
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
-        EventScanner { mode: self.mode, block_range_scanner, listeners: Vec::new() }
+        EventScanner { mode: self.config, block_range_scanner, listeners: Vec::new() }
     }
 }
 
@@ -247,15 +247,15 @@ mod tests {
     fn test_historic_scanner_config_defaults() {
         let config = EventScannerBuilder::<Historic>::new();
 
-        assert!(matches!(config.mode.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(config.mode.to_block, BlockNumberOrTag::Latest));
+        assert!(matches!(config.config.from_block, BlockNumberOrTag::Earliest));
+        assert!(matches!(config.config.to_block, BlockNumberOrTag::Latest));
     }
 
     #[test]
     fn test_live_scanner_config_defaults() {
         let config = EventScannerBuilder::<Live>::new();
 
-        assert_eq!(config.mode.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert_eq!(config.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
     #[test]

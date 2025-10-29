@@ -20,7 +20,7 @@ impl EventScannerBuilder<Live> {
 
     #[must_use]
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
-        self.mode.block_confirmations = confirmations;
+        self.config.block_confirmations = confirmations;
         self
     }
 }
@@ -62,14 +62,14 @@ mod tests {
         let config = EventScannerBuilder::live().max_block_range(25).block_confirmations(5);
 
         assert_eq!(config.block_range_scanner.max_block_range, 25);
-        assert_eq!(config.mode.block_confirmations, 5);
+        assert_eq!(config.config.block_confirmations, 5);
     }
 
     #[test]
     fn test_live_scanner_builder_with_zero_confirmations() {
         let config = EventScannerBuilder::live().block_confirmations(0).max_block_range(100);
 
-        assert_eq!(config.mode.block_confirmations, 0);
+        assert_eq!(config.config.block_confirmations, 0);
         assert_eq!(config.block_range_scanner.max_block_range, 100);
     }
 
@@ -84,6 +84,6 @@ mod tests {
             .block_confirmations(8);
 
         assert_eq!(config.block_range_scanner.max_block_range, 105);
-        assert_eq!(config.mode.block_confirmations, 8);
+        assert_eq!(config.config.block_confirmations, 8);
     }
 }
