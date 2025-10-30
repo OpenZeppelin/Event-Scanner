@@ -400,9 +400,12 @@ impl<M> EventScannerBuilder<M> {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
-        EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
+    pub async fn connect<N: Network>(
+        self,
+        provider: RootProvider<N>,
+    ) -> TransportResult<EventScanner<M, N>> {
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
+        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 }
 
@@ -454,10 +457,10 @@ mod tests {
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
-    #[test]
-    fn test_historic_event_stream_listeners_vector_updates() {
+    #[tokio::test]
+    async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider).await?;
 
         assert!(scanner.listeners.is_empty());
 
@@ -467,16 +470,20 @@ mod tests {
         let _stream2 = scanner.subscribe(EventFilter::new());
         let _stream3 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 3);
+
+        Ok(())
     }
 
-    #[test]
-    fn test_historic_event_stream_channel_capacity() {
+    #[tokio::test]
+    async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider).await?;
 
         let _ = scanner.subscribe(EventFilter::new());
 
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+
+        Ok(())
     }
 }
