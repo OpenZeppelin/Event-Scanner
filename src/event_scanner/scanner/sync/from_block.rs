@@ -1,4 +1,4 @@
-use alloy::network::Network;
+use alloy::{network::Network, providers::RootProvider};
 
 use crate::{
     EventScannerBuilder, ScannerError,
@@ -8,7 +8,14 @@ use crate::{
     },
 };
 
-impl EventScannerBuilder<SyncFromBlock> {
+impl<N: Network> EventScannerBuilder<SyncFromBlock, N> {
+    /// Adds a fallback provider (can add multiple)
+    #[must_use]
+    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
+        self.block_range_scanner.fallback_providers.push(provider);
+        self
+    }
+
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.block_range_scanner.max_block_range = max_block_range;
@@ -16,8 +23,8 @@ impl EventScannerBuilder<SyncFromBlock> {
     }
 
     #[must_use]
-    pub fn block_confirmations(mut self, count: u64) -> Self {
-        self.config.block_confirmations = count;
+    pub fn block_confirmations(mut self, confirmations: u64) -> Self {
+        self.config.block_confirmations = confirmations;
         self
     }
 }

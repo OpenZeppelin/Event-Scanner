@@ -1,4 +1,4 @@
-use alloy::{eips::BlockNumberOrTag, network::Network};
+use alloy::{eips::BlockNumberOrTag, network::Network, providers::RootProvider};
 
 use super::common::{ConsumerMode, handle_stream};
 use crate::{
@@ -6,7 +6,14 @@ use crate::{
     event_scanner::scanner::{EventScanner, Historic},
 };
 
-impl EventScannerBuilder<Historic> {
+impl<N: Network> EventScannerBuilder<Historic, N> {
+    /// Adds a fallback provider (can add multiple)
+    #[must_use]
+    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
+        self.block_range_scanner.fallback_providers.push(provider);
+        self
+    }
+
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.block_range_scanner.max_block_range = max_block_range;

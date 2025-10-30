@@ -326,7 +326,7 @@ impl<N: Network> EventScannerBuilder<Unspecified, N> {
     }
 }
 
-impl EventScannerBuilder<LatestEvents> {
+impl<N: Network> EventScannerBuilder<LatestEvents, N> {
     #[must_use]
     pub fn new(count: usize) -> Self {
         Self {
@@ -341,7 +341,7 @@ impl EventScannerBuilder<LatestEvents> {
     }
 }
 
-impl EventScannerBuilder<SyncFromLatestEvents> {
+impl<N: Network> EventScannerBuilder<SyncFromLatestEvents, N> {
     #[must_use]
     pub fn new(count: usize) -> Self {
         Self {
@@ -354,7 +354,7 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
     }
 }
 
-impl EventScannerBuilder<SyncFromBlock> {
+impl<N: Network> EventScannerBuilder<SyncFromBlock, N> {
     #[must_use]
     pub fn new(from_block: BlockNumberOrTag) -> Self {
         Self {
@@ -364,7 +364,7 @@ impl EventScannerBuilder<SyncFromBlock> {
     }
 }
 
-impl<M> EventScannerBuilder<M> {
+impl<M, N: Network> EventScannerBuilder<M, N> {
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
@@ -372,8 +372,8 @@ impl<M> EventScannerBuilder<M> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
+    pub async fn connect_ws(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
+        let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -384,11 +384,8 @@ impl<M> EventScannerBuilder<M> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
+    pub async fn connect_ipc(self, ipc_path: String) -> TransportResult<EventScanner<M, N>> {
+        let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -400,8 +397,8 @@ impl<M> EventScannerBuilder<M> {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
+    pub fn connect(self, provider: RootProvider<N>) -> EventScanner<M, N> {
+        let block_range_scanner = self.block_range_scanner.connect(provider);
         EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -423,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_config_defaults() {
-        let builder = EventScannerBuilder::<Historic>::default();
+        let builder = EventScannerBuilder::<Historic, Ethereum>::default();
 
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
         assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));

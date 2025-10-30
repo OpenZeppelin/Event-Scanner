@@ -1,4 +1,4 @@
-use alloy::eips::BlockNumberOrTag;
+use alloy::{eips::BlockNumberOrTag, network::Network};
 
 pub(crate) mod from_block;
 pub(crate) mod from_latest;
@@ -8,7 +8,7 @@ use crate::{
     event_scanner::scanner::{SyncFromBlock, SyncFromLatestEvents, Synchronize},
 };
 
-impl EventScannerBuilder<Synchronize> {
+impl<N: Network> EventScannerBuilder<Synchronize, N> {
     /// Scans the latest `count` matching events per registered listener, then automatically
     /// transitions to live streaming mode.
     ///
@@ -101,8 +101,8 @@ impl EventScannerBuilder<Synchronize> {
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
     #[must_use]
-    pub fn from_latest(self, count: usize) -> EventScannerBuilder<SyncFromLatestEvents> {
-        EventScannerBuilder::<SyncFromLatestEvents>::new(count)
+    pub fn from_latest(self, count: usize) -> EventScannerBuilder<SyncFromLatestEvents, N> {
+        EventScannerBuilder::<SyncFromLatestEvents, N>::new(count)
     }
 
     /// Streams events from a specific starting block to the present, then automatically
@@ -209,7 +209,7 @@ impl EventScannerBuilder<Synchronize> {
     pub fn from_block(
         self,
         block: impl Into<BlockNumberOrTag>,
-    ) -> EventScannerBuilder<SyncFromBlock> {
-        EventScannerBuilder::<SyncFromBlock>::new(block.into())
+    ) -> EventScannerBuilder<SyncFromBlock, N> {
+        EventScannerBuilder::<SyncFromBlock, N>::new(block.into())
     }
 }

@@ -2,6 +2,7 @@ use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network},
+    providers::RootProvider,
 };
 
 use tokio::sync::mpsc;
@@ -20,10 +21,17 @@ use crate::{
     },
 };
 
-impl EventScannerBuilder<SyncFromLatestEvents> {
+impl<N: Network> EventScannerBuilder<SyncFromLatestEvents, N> {
+    /// Adds a fallback provider (can add multiple)
     #[must_use]
-    pub fn block_confirmations(mut self, count: u64) -> Self {
-        self.config.block_confirmations = count;
+    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
+        self.block_range_scanner.fallback_providers.push(provider);
+        self
+    }
+
+    #[must_use]
+    pub fn block_confirmations(mut self, confirmations: u64) -> Self {
+        self.config.block_confirmations = confirmations;
         self
     }
 }
