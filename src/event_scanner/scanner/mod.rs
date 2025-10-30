@@ -1,8 +1,6 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::{Ethereum, Network},
-    providers::RootProvider,
-    transports::{TransportResult, http::reqwest::Url},
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -369,8 +367,8 @@ impl<M> EventScannerBuilder<M> {
     /// Connects to an existing provider.
     ///
     /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    pub fn connect<N: Network>(self, provider: RobustProvider<N>) -> EventScanner<M, N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
+    pub fn connect<N: Network>(self, provider: impl Into<RobustProvider<N>>) -> EventScanner<M, N> {
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider.into());
         EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -386,7 +384,10 @@ impl<M, N: Network> EventScanner<M, N> {
 
 #[cfg(test)]
 mod tests {
-    use alloy::{providers::mock::Asserter, rpc::client::RpcClient};
+    use alloy::{
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
 
     use super::*;
 
@@ -443,7 +444,7 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider).await?;
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
 
         let _ = scanner.subscribe(EventFilter::new());
 

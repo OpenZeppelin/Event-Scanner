@@ -50,6 +50,12 @@ pub const DEFAULT_MAX_RETRIES: usize = 5;
 /// Default base delay between retries.
 pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
+impl<N: Network> From<RootProvider<N>> for RobustProvider<N> {
+    fn from(provider: RootProvider<N>) -> Self {
+        Self::new(provider)
+    }
+}
+
 impl<N: Network> RobustProvider<N> {
     /// Create a new `RobustProvider` with default settings.
     #[must_use]

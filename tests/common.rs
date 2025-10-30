@@ -97,8 +97,7 @@ pub async fn setup_live_scanner(
 
     let mut scanner = EventScannerBuilder::live()
         .block_confirmations(confirmations)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+        .connect::<Ethereum>(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -116,8 +115,7 @@ pub async fn setup_sync_scanner(
     let mut scanner = EventScannerBuilder::sync()
         .from_block(from)
         .block_confirmations(confirmations)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+        .connect::<Ethereum>(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -135,8 +133,7 @@ pub async fn setup_sync_from_latest_scanner(
     let mut scanner = EventScannerBuilder::sync()
         .from_latest(latest)
         .block_confirmations(confirmations)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+        .connect::<Ethereum>(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -154,8 +151,7 @@ pub async fn setup_historic_scanner(
     let mut scanner = EventScannerBuilder::historic()
         .from_block(from)
         .to_block(to)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+        .connect::<Ethereum>(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -178,7 +174,7 @@ pub async fn setup_latest_scanner(
         builder = builder.to_block(t);
     }
 
-    let mut scanner = builder.connect_ws(anvil.ws_endpoint_url()).await?;
+    let mut scanner = builder.connect::<Ethereum>(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -261,7 +257,8 @@ pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
 
 pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RootProvider> {
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
-    let provider = ProviderBuilder::new().wallet(wallet).connect(anvil.endpoint().as_str()).await?;
+    let provider =
+        ProviderBuilder::new().wallet(wallet).connect(anvil.ws_endpoint_url().as_str()).await?;
     Ok(provider.root().to_owned())
 }
 
