@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
 use alloy::{
-    eips::BlockNumberOrTag,
-    transports::{RpcError, TransportErrorKind, http::reqwest},
+    eips::BlockId,
+    transports::{RpcError, TransportErrorKind},
 };
 use thiserror::Error;
 
+use crate::robust_provider::Error as RobustProviderError;
+
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
-    #[error("HTTP request failed: {0}")]
-    HttpError(Arc<reqwest::Error>),
-
     // #[error("WebSocket error: {0}")]
     // WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("Serialization error: {0}")]
@@ -31,16 +30,23 @@ pub enum ScannerError {
     #[error("Historical sync failed: {0}")]
     HistoricalSyncError(String),
 
-    #[error("WebSocket connection failed after {0} attempts")]
-    WebSocketConnectionFailed(usize),
+    #[error("Block not found, Block Id: {0}")]
+    BlockNotFound(BlockId),
 
-    #[error("Block not found, block number: {0}")]
-    BlockNotFound(BlockNumberOrTag),
+    #[error("Operation timed out")]
+    Timeout,
+
+    #[error("RPC call failed after exhausting all retry attempts: {0}")]
+    RetryFailure(Arc<RpcError<TransportErrorKind>>),
 }
 
-impl From<reqwest::Error> for ScannerError {
-    fn from(error: reqwest::Error) -> Self {
-        ScannerError::HttpError(Arc::new(error))
+impl From<RobustProviderError> for ScannerError {
+    fn from(error: RobustProviderError) -> ScannerError {
+        match error {
+            RobustProviderError::Timeout => ScannerError::Timeout,
+            RobustProviderError::RetryFailure(err) => ScannerError::RetryFailure(err),
+            RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
+        }
     }
 }
 

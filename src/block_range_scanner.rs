@@ -41,11 +41,6 @@
 //!                 error!("Received error from subscription: {e}");
 //!                 match e {
 //!                     ScannerError::ServiceShutdown => break,
-//!                     ScannerError::WebSocketConnectionFailed(_) => {
-//!                         error!(
-//!                             "WebSocket connection failed, continuing to listen for reconnection"
-//!                         );
-//!                     }
 //!                     _ => {
 //!                         error!("Non-fatal error, continuing: {e}");
 //!                     }
@@ -63,16 +58,20 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive};
+use std::{cmp::Ordering, ops::RangeInclusive, time::Duration};
 use tokio::{
-    join,
     sync::{mpsc, oneshot},
+    try_join,
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
     ScannerMessage,
     error::ScannerError,
+    robust_provider::{
+        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL,
+        Error as RobustProviderError, RobustProvider,
+    },
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -80,7 +79,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    providers::{Provider, RootProvider},
+    providers::RootProvider,
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
@@ -113,6 +112,12 @@ impl PartialEq<RangeInclusive<BlockNumber>> for Message {
     }
 }
 
+impl From<RobustProviderError> for Message {
+    fn from(error: RobustProviderError) -> Self {
+        Message::Error(error.into())
+    }
+}
+
 impl From<RpcError<TransportErrorKind>> for Message {
     fn from(error: RpcError<TransportErrorKind>) -> Self {
         Message::Error(error.into())
@@ -128,6 +133,9 @@ impl From<ScannerError> for Message {
 #[derive(Clone, Copy)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
+    pub max_timeout: Duration,
+    pub max_retries: usize,
+    pub retry_interval: Duration,
 }
 
 impl Default for BlockRangeScanner {
@@ -139,12 +147,35 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
+        Self {
+            max_block_range: DEFAULT_MAX_BLOCK_RANGE,
+            max_timeout: DEFAULT_MAX_TIMEOUT,
+            max_retries: DEFAULT_MAX_RETRIES,
+            retry_interval: DEFAULT_RETRY_INTERVAL,
+        }
     }
 
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.max_block_range = max_block_range;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_timeout(mut self, rpc_timeout: Duration) -> Self {
+        self.max_timeout = rpc_timeout;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_retries(mut self, rpc_max_retries: usize) -> Self {
+        self.max_retries = rpc_max_retries;
+        self
+    }
+
+    #[must_use]
+    pub fn with_retry_interval(mut self, rpc_retry_interval: Duration) -> Self {
+        self.retry_interval = rpc_retry_interval;
         self
     }
 
@@ -182,19 +213,26 @@ impl BlockRangeScanner {
     /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
+        let robust_provider = RobustProvider::new(provider)
+            .max_timeout(self.max_timeout)
+            .max_retries(self.max_retries)
+            .retry_interval(self.retry_interval);
+        ConnectedBlockRangeScanner {
+            provider: robust_provider,
+            max_block_range: self.max_block_range,
+        }
     }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
-    provider: RootProvider<N>,
+    provider: RobustProvider<N>,
     max_block_range: u64,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
-    /// Returns the underlying Provider.
+    /// Returns the `RobustProvider`
     #[must_use]
-    pub fn provider(&self) -> &RootProvider<N> {
+    pub fn provider(&self) -> &RobustProvider<N> {
         &self.provider
     }
 
@@ -240,7 +278,7 @@ pub enum Command {
 }
 
 struct Service<N: Network> {
-    provider: RootProvider<N>,
+    provider: RobustProvider<N>,
     max_block_range: u64,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
@@ -248,7 +286,7 @@ struct Service<N: Network> {
 }
 
 impl<N: Network> Service<N> {
-    pub fn new(provider: RootProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(provider: RobustProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
@@ -351,10 +389,8 @@ impl<N: Network> Service<N> {
             self.provider.get_block_by_number(end_height)
         )?;
 
-        let start_block_num =
-            start_block.ok_or_else(|| ScannerError::BlockNotFound(start_height))?.header().number();
-        let end_block_num =
-            end_block.ok_or_else(|| ScannerError::BlockNotFound(end_height))?.header().number();
+        let start_block_num = start_block.header().number();
+        let end_block_num = end_block.header().number();
 
         let (start_block_num, end_block_num) = match start_block_num.cmp(&end_block_num) {
             Ordering::Greater => (end_block_num, start_block_num),
@@ -388,23 +424,14 @@ impl<N: Network> Service<N> {
         let get_start_block = async || -> Result<BlockNumber, ScannerError> {
             let block = match start_height {
                 BlockNumberOrTag::Number(num) => num,
-                block_tag => provider
-                    .get_block_by_number(block_tag)
-                    .await?
-                    .ok_or_else(|| ScannerError::BlockNotFound(block_tag))?
-                    .header()
-                    .number(),
+                block_tag => provider.get_block_by_number(block_tag).await?.header().number(),
             };
             Ok(block)
         };
 
         let get_latest_block = async || -> Result<BlockNumber, ScannerError> {
-            let block = provider
-                .get_block_by_number(BlockNumberOrTag::Latest)
-                .await?
-                .ok_or_else(|| ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
-                .header()
-                .number();
+            let block =
+                provider.get_block_by_number(BlockNumberOrTag::Latest).await?.header().number();
             Ok(block)
         };
 
@@ -496,13 +523,10 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
 
-        let (start_block, end_block) = join!(
+        let (start_block, end_block) = try_join!(
             self.provider.get_block_by_number(start_height),
             self.provider.get_block_by_number(end_height),
-        );
-
-        let start_block = start_block?.ok_or(ScannerError::BlockNotFound(start_height))?;
-        let end_block = end_block?.ok_or(ScannerError::BlockNotFound(end_height))?;
+        )?;
 
         // normalize block range
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
@@ -529,7 +553,7 @@ impl<N: Network> Service<N> {
         to: N::BlockResponse,
         max_block_range: u64,
         sender: &mpsc::Sender<Message>,
-        provider: &RootProvider<N>,
+        provider: &RobustProvider<N>,
     ) {
         let mut batch_count = 0;
 
@@ -584,12 +608,10 @@ impl<N: Network> Service<N> {
                 batch_from = from;
                 // store the updated end block hash
                 tip_hash = match provider.get_block_by_number(from.into()).await {
-                    Ok(block) => block
-                        .unwrap_or_else(|| {
-                            panic!("Block with number '{from}' should exist post-reorg")
-                        })
-                        .header()
-                        .hash(),
+                    Ok(block) => block.header().hash(),
+                    Err(RobustProviderError::BlockNotFound(_)) => {
+                        panic!("Block with number '{from}' should exist post-reorg");
+                    }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
                         _ = sender.try_stream(e);
@@ -644,9 +666,9 @@ impl<N: Network> Service<N> {
         info!(batch_count = batch_count, "Historical sync completed");
     }
 
-    async fn stream_live_blocks<P: Provider<N>>(
+    async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        provider: P,
+        provider: RobustProvider<N>,
         sender: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
@@ -749,22 +771,22 @@ impl<N: Network> Service<N> {
     }
 
     async fn get_block_subscription(
-        provider: &impl Provider<N>,
+        provider: &RobustProvider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, ScannerError> {
-        let ws_stream = provider
-            .subscribe_blocks()
-            .await
-            .map_err(|_| ScannerError::WebSocketConnectionFailed(1))?;
-
+        let ws_stream = provider.subscribe_blocks().await?;
         Ok(ws_stream)
     }
 }
 
 async fn reorg_detected<N: Network>(
-    provider: &RootProvider<N>,
+    provider: &RobustProvider<N>,
     hash_to_check: B256,
-) -> Result<bool, RpcError<TransportErrorKind>> {
-    Ok(provider.get_block_by_hash(hash_to_check).await?.is_none())
+) -> Result<bool, ScannerError> {
+    match provider.get_block_by_hash(hash_to_check).await {
+        Ok(_) => Ok(false),
+        Err(RobustProviderError::BlockNotFound(_)) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub struct BlockRangeScannerClient {
@@ -913,6 +935,7 @@ mod tests {
     use super::*;
     use crate::{assert_closed, assert_empty, assert_next};
     use alloy::{
+        eips::BlockId,
         network::Ethereum,
         providers::{ProviderBuilder, ext::AnvilApi},
         rpc::types::anvil::ReorgOptions,
@@ -1365,13 +1388,15 @@ mod tests {
 
     #[tokio::test]
     async fn try_send_forwards_errors_to_subscribers() {
-        let (tx, mut rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::channel::<Message>(1);
 
-        _ = tx.try_stream(ScannerError::WebSocketConnectionFailed(4)).await;
+        _ = tx.try_stream(ScannerError::BlockNotFound(4.into())).await;
 
         assert!(matches!(
             rx.recv().await,
-            Some(Message::Error(ScannerError::WebSocketConnectionFailed(4)))
+            Some(ScannerMessage::Error(ScannerError::BlockNotFound(BlockId::Number(
+                BlockNumberOrTag::Number(4)
+            ))))
         ));
     }
 
@@ -1566,7 +1591,10 @@ mod tests {
 
         let stream = client.rewind(0, 999).await;
 
-        assert!(matches!(stream, Err(ScannerError::BlockNotFound(BlockNumberOrTag::Number(999)))));
+        assert!(matches!(
+            stream,
+            Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(999))))
+        ));
 
         Ok(())
     }

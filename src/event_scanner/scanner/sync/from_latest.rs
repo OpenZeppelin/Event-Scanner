@@ -2,7 +2,6 @@ use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network},
-    providers::Provider,
 };
 
 use tokio::sync::mpsc;
@@ -57,12 +56,8 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         // This is used to determine the starting point for the rewind stream and the live
         // stream. We do this before starting the streams to avoid a race condition
         // where the latest block changes while we're setting up the streams.
-        let latest_block = provider
-            .get_block_by_number(BlockNumberOrTag::Latest)
-            .await?
-            .ok_or(ScannerError::BlockNotFound(BlockNumberOrTag::Latest))?
-            .header()
-            .number();
+        let latest_block =
+            provider.get_block_by_number(BlockNumberOrTag::Latest).await?.header().number();
 
         // Setup rewind and live streams to run in parallel.
         let rewind_stream = client.rewind(BlockNumberOrTag::Earliest, latest_block).await?;

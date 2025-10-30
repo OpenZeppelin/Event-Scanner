@@ -3,13 +3,12 @@ use std::ops::RangeInclusive;
 use crate::{
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener},
+    robust_provider::{Error as RobustProviderError, RobustProvider},
     types::TryStream,
 };
 use alloy::{
     network::Network,
-    providers::{Provider, RootProvider},
     rpc::types::{Filter, Log},
-    transports::{RpcError, TransportErrorKind},
 };
 use tokio::{
     sync::broadcast::{self, Sender, error::RecvError},
@@ -48,7 +47,7 @@ pub enum ConsumerMode {
 /// Assumes it is running in a separate tokio task, so as to be non-blocking.
 pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unpin>(
     mut stream: S,
-    provider: &RootProvider<N>,
+    provider: &RobustProvider<N>,
     listeners: &[EventListener],
     mode: ConsumerMode,
 ) {
@@ -72,7 +71,7 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unp
 
 #[must_use]
 pub fn spawn_log_consumers<N: Network>(
-    provider: &RootProvider<N>,
+    provider: &RobustProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockRangeMessage>,
     mode: ConsumerMode,
@@ -166,8 +165,8 @@ async fn get_logs<N: Network>(
     range: RangeInclusive<u64>,
     event_filter: &EventFilter,
     log_filter: &Filter,
-    provider: &RootProvider<N>,
-) -> Result<Vec<Log>, RpcError<TransportErrorKind>> {
+    provider: &RobustProvider<N>,
+) -> Result<Vec<Log>, RobustProviderError> {
     let log_filter = log_filter.clone().from_block(*range.start()).to_block(*range.end());
 
     match provider.get_logs(&log_filter).await {
