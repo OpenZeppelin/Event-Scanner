@@ -217,7 +217,7 @@ impl BlockRangeScanner {
         let provider =
             RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
 
-        let fallback_providers = self.connect_all_fallbacks::<N>().await;
+        let fallback_providers = self.connect_all_fallbacks::<N>().await?;
 
         Ok(self.connect_with_fallbacks(provider, fallback_providers))
     }
@@ -237,55 +237,49 @@ impl BlockRangeScanner {
         let provider =
             RootProvider::<N>::new(ClientBuilder::default().ipc(IpcConnect::new(ipc_path)).await?);
 
-        let fallback_providers = self.connect_all_fallbacks::<N>().await;
+        let fallback_providers = self.connect_all_fallbacks::<N>().await?;
 
         Ok(self.connect_with_fallbacks(provider, fallback_providers))
     }
 
     /// Connects to an existing provider
+    ///
+    /// This method also tries to connect any fallback providers (both WebSocket and IPC)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any fallback connection fails
     #[must_use]
     pub async fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
-    ) -> ConnectedBlockRangeScanner<N> {
-        let fallback_providers = self.connect_all_fallbacks::<N>().await;
-        self.connect_with_fallbacks(provider, fallback_providers)
+    ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
+        let fallback_providers = self.connect_all_fallbacks::<N>().await?;
+
+        Ok(self.connect_with_fallbacks(provider, fallback_providers))
     }
 
     /// Establishes connections to all configured fallback providers (both WebSocket and IPC).
     ///
-    /// Logs warnings for any fallback connections that fail, but continues attempting
-    /// to connect to remaining fallbacks.
-    async fn connect_all_fallbacks<N: Network>(&self) -> Vec<RootProvider<N>> {
+    /// # Errors
+    ///
+    /// Returns an error if any fallback connection fails
+    async fn connect_all_fallbacks<N: Network>(
+        &self,
+    ) -> Result<Vec<RootProvider<N>>, RpcError<TransportErrorKind>> {
         let mut fallback_providers = Vec::new();
 
-        // Connect to WebSocket fallbacks
         for url in &self.fallback_ws_urls {
-            match ClientBuilder::default().ws(WsConnect::new(url.clone())).await {
-                Ok(client) => {
-                    fallback_providers.push(RootProvider::<N>::new(client));
-                    info!("Successfully connected to fallback WebSocket: {}", url);
-                }
-                Err(e) => {
-                    warn!("Failed to connect to fallback WebSocket {}: {}", url, e);
-                }
-            }
+            let client = ClientBuilder::default().ws(WsConnect::new(url.clone())).await?;
+            fallback_providers.push(RootProvider::<N>::new(client));
         }
 
-        // Connect to IPC fallbacks
         for path in &self.fallback_ipc_paths {
-            match ClientBuilder::default().ipc(IpcConnect::new(path.clone())).await {
-                Ok(client) => {
-                    fallback_providers.push(RootProvider::<N>::new(client));
-                    info!("Successfully connected to fallback IPC: {}", path);
-                }
-                Err(e) => {
-                    warn!("Failed to connect to fallback IPC {}: {}", path, e);
-                }
-            }
+            let client = ClientBuilder::default().ipc(IpcConnect::new(path.clone())).await?;
+            fallback_providers.push(RootProvider::<N>::new(client));
         }
 
-        fallback_providers
+        Ok(fallback_providers)
     }
 
     /// Connects to an existing provider with fallback providers
