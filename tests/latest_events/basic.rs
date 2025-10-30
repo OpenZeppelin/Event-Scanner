@@ -85,7 +85,7 @@ async fn latest_scanner_no_events_returns_empty() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
-    let (_, provider, contract, default_filter) = setup_common(None, None).await?;
+    let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
     // Mine 6 events, one per tx (auto-mined), then manually mint 2 empty blocks to widen range
     _ = contract.increase_and_get_meta().await?;
     _ = contract.increase_and_get_meta().await?;
@@ -283,7 +283,7 @@ async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
 #[tokio::test]
 async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     // Manual setup to mine empty blocks
-    let (_, provider, contract, default_filter) = setup_common(None, None).await?;
+    let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     // Emit 2 events
     let mut log_meta = vec![];
@@ -315,7 +315,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
-    let (_, provider, contract, default_filter) = setup_common(None, None).await?;
+    let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     _ = contract.increase_and_get_meta().await?;
     let expected = &[contract.increase_and_get_meta().await?];
