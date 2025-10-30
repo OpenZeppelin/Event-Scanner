@@ -21,7 +21,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let same_block = true;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        anvil,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -84,7 +84,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let same_block = false;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        anvil,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -146,7 +146,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let same_block = true;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        anvil,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -208,7 +208,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 
     let same_block = true;
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        anvil,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -274,7 +274,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let same_block = true;
 
     let all_tx_hashes = reorg_with_new_count_incr_txs(
-        anvil,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,

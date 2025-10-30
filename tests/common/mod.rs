@@ -182,7 +182,7 @@ pub async fn setup_latest_scanner(
 }
 
 pub async fn reorg_with_new_count_incr_txs<P>(
-    anvil: AnvilInstance,
+    anvil: &AnvilInstance,
     contract: TestCounter::TestCounterInstance<Arc<P>>,
     num_initial_events: u64,
     num_new_events: u64,
