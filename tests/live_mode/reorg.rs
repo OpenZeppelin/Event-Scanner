@@ -62,9 +62,9 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
@@ -125,9 +125,9 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let _ = timeout(Duration::from_secs(10), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
@@ -187,9 +187,9 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
@@ -249,9 +249,9 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
