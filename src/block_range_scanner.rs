@@ -83,7 +83,8 @@ use alloy::{
     pubsub::Subscription,
     rpc::client::ClientBuilder,
     transports::{
-        RpcError, TransportErrorKind, TransportResult, http::reqwest::Url, ws::WsConnect,
+        RpcError, TransportErrorKind, TransportResult, http::reqwest::Url, ipc::IpcConnect,
+        ws::WsConnect,
     },
 };
 use tracing::{debug, error, info, warn};
@@ -131,21 +132,22 @@ impl From<ScannerError> for Message {
 }
 
 #[derive(Clone)]
-pub struct BlockRangeScanner<N: Network> {
+pub struct BlockRangeScanner {
     pub max_block_range: u64,
     pub max_timeout: Duration,
     pub max_retries: usize,
     pub retry_interval: Duration,
-    pub fallback_providers: Vec<RootProvider<N>>,
+    pub fallback_ws_urls: Vec<Url>,
+    pub fallback_ipc_paths: Vec<String>,
 }
 
-impl<N: Network> Default for BlockRangeScanner<N> {
+impl Default for BlockRangeScanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N: Network> BlockRangeScanner<N> {
+impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -153,7 +155,8 @@ impl<N: Network> BlockRangeScanner<N> {
             max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             retry_interval: DEFAULT_RETRY_INTERVAL,
-            fallback_providers: Vec::new(),
+            fallback_ws_urls: Vec::new(),
+            fallback_ipc_paths: Vec::new(),
         }
     }
 
@@ -181,50 +184,126 @@ impl<N: Network> BlockRangeScanner<N> {
         self
     }
 
-    /// Adds a fallback provider to the block range scanner
+    /// Adds a fallback WebSocket URL to the block range scanner
+    ///
+    /// The WebSocket connection will be established when calling the `connect` methods
     #[must_use]
-    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
-        self.fallback_providers.push(provider);
+    pub fn fallback_ws(mut self, url: Url) -> Self {
+        self.fallback_ws_urls.push(url);
+        self
+    }
+
+    /// Adds a fallback IPC path to the block range scanner
+    ///
+    /// The IPC connection will be established when calling the `connect` methods
+    #[must_use]
+    pub fn fallback_ipc(mut self, path: String) -> Self {
+        self.fallback_ipc_paths.push(path);
         self
     }
 
     /// Connects to the provider via WebSocket
     ///
+    /// This method establishes the primary WebSocket connection and all configured fallback
+    /// connections (both WebSocket and IPC).
+    ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws(self, ws_url: Url) -> TransportResult<ConnectedBlockRangeScanner<N>> {
+    /// Returns an error if the primary connection fails
+    pub async fn connect_ws<N: Network>(
+        self,
+        ws_url: Url,
+    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
         let provider =
             RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
-        Ok(self.connect(provider))
+
+        let fallback_providers = self.connect_all_fallbacks::<N>().await;
+
+        Ok(self.connect_with_fallbacks(provider, fallback_providers))
     }
 
     /// Connects to the provider via IPC
     ///
+    /// This method establishes the primary IPC connection and all configured fallback
+    /// connections (both WebSocket and IPC).
+    ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc(
+    /// Returns an error if the primary connection fails
+    pub async fn connect_ipc<N: Network>(
         self,
         ipc_path: String,
     ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
-        let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-        Ok(self.connect(provider))
+        let provider =
+            RootProvider::<N>::new(ClientBuilder::default().ipc(IpcConnect::new(ipc_path)).await?);
+
+        let fallback_providers = self.connect_all_fallbacks::<N>().await;
+
+        Ok(self.connect_with_fallbacks(provider, fallback_providers))
     }
 
-    // pub fn fallback_provider<N: Network>(self, provider: RootProvider<N>) -> Self {}
-
     /// Connects to an existing provider
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        let robust_provider = RobustProvider::new(provider)
+    pub async fn connect<N: Network>(
+        self,
+        provider: RootProvider<N>,
+    ) -> ConnectedBlockRangeScanner<N> {
+        let fallback_providers = self.connect_all_fallbacks::<N>().await;
+        self.connect_with_fallbacks(provider, fallback_providers)
+    }
+
+    /// Establishes connections to all configured fallback providers (both WebSocket and IPC).
+    ///
+    /// Logs warnings for any fallback connections that fail, but continues attempting
+    /// to connect to remaining fallbacks.
+    async fn connect_all_fallbacks<N: Network>(&self) -> Vec<RootProvider<N>> {
+        let mut fallback_providers = Vec::new();
+
+        // Connect to WebSocket fallbacks
+        for url in &self.fallback_ws_urls {
+            match ClientBuilder::default().ws(WsConnect::new(url.clone())).await {
+                Ok(client) => {
+                    fallback_providers.push(RootProvider::<N>::new(client));
+                    info!("Successfully connected to fallback WebSocket: {}", url);
+                }
+                Err(e) => {
+                    warn!("Failed to connect to fallback WebSocket {}: {}", url, e);
+                }
+            }
+        }
+
+        // Connect to IPC fallbacks
+        for path in &self.fallback_ipc_paths {
+            match ClientBuilder::default().ipc(IpcConnect::new(path.clone())).await {
+                Ok(client) => {
+                    fallback_providers.push(RootProvider::<N>::new(client));
+                    info!("Successfully connected to fallback IPC: {}", path);
+                }
+                Err(e) => {
+                    warn!("Failed to connect to fallback IPC {}: {}", path, e);
+                }
+            }
+        }
+
+        fallback_providers
+    }
+
+    /// Connects to an existing provider with fallback providers
+    #[must_use]
+    fn connect_with_fallbacks<N: Network>(
+        self,
+        provider: RootProvider<N>,
+        fallback_providers: Vec<RootProvider<N>>,
+    ) -> ConnectedBlockRangeScanner<N> {
+        let mut robust_provider = RobustProvider::new(provider)
             .max_timeout(self.max_timeout)
             .max_retries(self.max_retries)
             .retry_interval(self.retry_interval);
+
+        for fallback in fallback_providers {
+            robust_provider = robust_provider.fallback_provider(fallback);
+        }
+
         ConnectedBlockRangeScanner {
             provider: robust_provider,
             max_block_range: self.max_block_range,
@@ -954,7 +1033,7 @@ mod tests {
 
     #[test]
     fn block_range_scanner_defaults_match_constants() {
-        let scanner = BlockRangeScanner::<Ethereum>::new();
+        let scanner = BlockRangeScanner::new();
 
         assert_eq!(scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
     }
@@ -963,7 +1042,7 @@ mod tests {
     fn builder_methods_update_configuration() {
         let max_block_range = 42;
 
-        let scanner = BlockRangeScanner::<Ethereum>::new().max_block_range(max_block_range);
+        let scanner = BlockRangeScanner::new().max_block_range(max_block_range);
 
         assert_eq!(scanner.max_block_range, max_block_range);
     }
@@ -975,8 +1054,8 @@ mod tests {
 
         // --- Zero block confirmations -> stream immediately ---
 
-        let client = BlockRangeScanner::<Ethereum>::new()
-            .connect_ws(anvil.ws_endpoint_url())
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1026,8 +1105,8 @@ mod tests {
 
         let block_confirmations = 5;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
-            .connect_ws(anvil.ws_endpoint_url())
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1061,8 +1140,8 @@ mod tests {
 
         let block_confirmations = 5;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
-            .connect_ws(anvil.ws_endpoint_url())
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1105,8 +1184,8 @@ mod tests {
 
         let block_confirmations = 3;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
-            .connect_ws(anvil.ws_endpoint_url())
+        let client = BlockRangeScanner::new()
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1172,9 +1251,9 @@ mod tests {
 
         let end_num = 110;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(30)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1207,9 +1286,9 @@ mod tests {
 
         let end_num = 120;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(30)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1242,9 +1321,9 @@ mod tests {
 
         provider.anvil_mine(Some(100), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1273,9 +1352,9 @@ mod tests {
         assert_closed!(stream);
 
         // range where blocks per epoch is larger than the number of blocks on chain
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(200)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1297,9 +1376,9 @@ mod tests {
         let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
         provider.anvil_mine(Some(11), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1416,9 +1495,9 @@ mod tests {
 
         provider.anvil_mine(Some(150), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(100)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1440,9 +1519,9 @@ mod tests {
 
         provider.anvil_mine(Some(15), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1465,9 +1544,9 @@ mod tests {
 
         provider.anvil_mine(Some(15), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(4)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1490,9 +1569,9 @@ mod tests {
 
         provider.anvil_mine(Some(15), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1512,9 +1591,9 @@ mod tests {
 
         provider.anvil_mine(Some(15), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(1)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1538,9 +1617,9 @@ mod tests {
         // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
         provider.anvil_mine(Some(20), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(7)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1563,9 +1642,9 @@ mod tests {
         // Ensure blocks at 3 and 15 exist
         provider.anvil_mine(Some(16), None).await?;
 
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
@@ -1591,9 +1670,9 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
 
         // Do not mine up to 999 so start won't exist
-        let client = BlockRangeScanner::<Ethereum>::new()
+        let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws(anvil.ws_endpoint_url())
+            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
             .await?
             .run()?;
 
