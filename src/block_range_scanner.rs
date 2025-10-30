@@ -58,7 +58,7 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive, time::Duration};
+use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     sync::{mpsc, oneshot},
     try_join,
@@ -68,10 +68,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerMessage,
     error::ScannerError,
-    robust_provider::{
-        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL,
-        Error as RobustProviderError, RobustProvider,
-    },
+    robust_provider::{Error as RobustProviderError, RobustProvider},
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -79,13 +76,8 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    providers::RootProvider,
     pubsub::Subscription,
-    rpc::client::ClientBuilder,
-    transports::{
-        RpcError, TransportErrorKind, TransportResult, http::reqwest::Url, ipc::IpcConnect,
-        ws::WsConnect,
-    },
+    transports::{RpcError, TransportErrorKind},
 };
 use tracing::{debug, error, info, warn};
 
@@ -134,11 +126,6 @@ impl From<ScannerError> for Message {
 #[derive(Clone)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
-    pub max_timeout: Duration,
-    pub max_retries: usize,
-    pub retry_interval: Duration,
-    pub fallback_ws_urls: Vec<Url>,
-    pub fallback_ipc_paths: Vec<String>,
 }
 
 impl Default for BlockRangeScanner {
@@ -150,100 +137,13 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            max_block_range: DEFAULT_MAX_BLOCK_RANGE,
-            max_timeout: DEFAULT_MAX_TIMEOUT,
-            max_retries: DEFAULT_MAX_RETRIES,
-            retry_interval: DEFAULT_RETRY_INTERVAL,
-            fallback_ws_urls: Vec::new(),
-            fallback_ipc_paths: Vec::new(),
-        }
+        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
     }
 
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.max_block_range = max_block_range;
         self
-    }
-
-    #[must_use]
-    pub fn with_max_timeout(mut self, rpc_timeout: Duration) -> Self {
-        self.max_timeout = rpc_timeout;
-        self
-    }
-
-    #[must_use]
-    pub fn with_max_retries(mut self, rpc_max_retries: usize) -> Self {
-        self.max_retries = rpc_max_retries;
-        self
-    }
-
-    #[must_use]
-    pub fn with_retry_interval(mut self, rpc_retry_interval: Duration) -> Self {
-        self.retry_interval = rpc_retry_interval;
-        self
-    }
-
-    /// Adds a fallback WebSocket URL to the block range scanner
-    ///
-    /// The WebSocket connection will be established when calling the `connect` methods
-    #[must_use]
-    pub fn fallback_ws(mut self, url: Url) -> Self {
-        self.fallback_ws_urls.push(url);
-        self
-    }
-
-    /// Adds a fallback IPC path to the block range scanner
-    ///
-    /// The IPC connection will be established when calling the `connect` methods
-    #[must_use]
-    pub fn fallback_ipc(mut self, path: String) -> Self {
-        self.fallback_ipc_paths.push(path);
-        self
-    }
-
-    /// Connects to the provider via WebSocket
-    ///
-    /// This method establishes the primary WebSocket connection and all configured fallback
-    /// connections (both WebSocket and IPC).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the primary connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        let provider =
-            RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
-
-        let fallback_providers =
-            Self::connect_all_fallbacks::<N>(&self.fallback_ws_urls, &self.fallback_ipc_paths)
-                .await?;
-
-        Ok(self.connect_with_fallbacks(provider, fallback_providers))
-    }
-
-    /// Connects to the provider via IPC
-    ///
-    /// This method establishes the primary IPC connection and all configured fallback
-    /// connections (both WebSocket and IPC).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the primary connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
-        let provider =
-            RootProvider::<N>::new(ClientBuilder::default().ipc(IpcConnect::new(ipc_path)).await?);
-
-        let fallback_providers =
-            Self::connect_all_fallbacks::<N>(&self.fallback_ws_urls, &self.fallback_ipc_paths)
-                .await?;
-
-        Ok(self.connect_with_fallbacks(provider, fallback_providers))
     }
 
     /// Connects to an existing provider
@@ -253,61 +153,14 @@ impl BlockRangeScanner {
     /// # Errors
     ///
     /// Returns an error if any fallback connection fails
-    pub async fn connect<N: Network>(
+    pub fn connect<N: Network>(
         self,
-        provider: RootProvider<N>,
-    ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
-        let fallback_providers =
-            Self::connect_all_fallbacks::<N>(&self.fallback_ws_urls, &self.fallback_ipc_paths)
-                .await?;
-
-        Ok(self.connect_with_fallbacks(provider, fallback_providers))
-    }
-
-    /// Connects to an existing provider with fallback providers
-    #[must_use]
-    pub fn connect_with_fallbacks<N: Network>(
-        self,
-        provider: RootProvider<N>,
-        fallback_providers: Vec<RootProvider<N>>,
+        robust_provider: RobustProvider<N>,
     ) -> ConnectedBlockRangeScanner<N> {
-        let mut robust_provider = RobustProvider::new(provider)
-            .max_timeout(self.max_timeout)
-            .max_retries(self.max_retries)
-            .retry_interval(self.retry_interval);
-
-        for fallback in fallback_providers {
-            robust_provider = robust_provider.fallback_provider(fallback);
-        }
-
         ConnectedBlockRangeScanner {
             provider: robust_provider,
             max_block_range: self.max_block_range,
         }
-    }
-
-    /// Establishes connections to all configured fallback providers (both WebSocket and IPC).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any fallback connection fails
-    async fn connect_all_fallbacks<N: Network>(
-        fallback_ws_urls: &Vec<Url>,
-        fallback_ipc_paths: &Vec<String>,
-    ) -> Result<Vec<RootProvider<N>>, RpcError<TransportErrorKind>> {
-        let mut fallback_providers = Vec::new();
-
-        for url in fallback_ws_urls {
-            let client = ClientBuilder::default().ws(WsConnect::new(url.clone())).await?;
-            fallback_providers.push(RootProvider::<N>::new(client));
-        }
-
-        for path in fallback_ipc_paths {
-            let client = ClientBuilder::default().ipc(IpcConnect::new(path.clone())).await?;
-            fallback_providers.push(RootProvider::<N>::new(client));
-        }
-
-        Ok(fallback_providers)
     }
 }
 
@@ -1024,7 +877,7 @@ mod tests {
     use alloy::{
         eips::BlockId,
         network::Ethereum,
-        providers::{ProviderBuilder, ext::AnvilApi},
+        providers::{Provider, ProviderBuilder, ext::AnvilApi},
         rpc::types::anvil::ReorgOptions,
     };
     use alloy_node_bindings::Anvil;
@@ -1050,8 +903,9 @@ mod tests {
     #[tokio::test]
     async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
+        provider.subscribe_blocks();
         // --- Zero block confirmations -> stream immediately ---
 
         let client = BlockRangeScanner::new()
