@@ -399,7 +399,6 @@ impl<M> EventScannerBuilder<M> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    #[must_use]
     pub async fn connect<N: Network>(
         self,
         provider: RootProvider<N>,

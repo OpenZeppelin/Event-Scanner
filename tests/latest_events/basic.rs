@@ -107,7 +107,7 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let mut scanner_with_range = EventScannerBuilder::latest(10)
         .from_block(start)
         .to_block(end)
-        .connect_ws(anvil.ws_endpoint_url())
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
@@ -303,7 +303,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
-        .connect_ws(anvil.ws_endpoint_url())
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
@@ -336,7 +336,7 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
-        .connect_ws(anvil.ws_endpoint_url())
+        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
         .await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 

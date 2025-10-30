@@ -249,7 +249,6 @@ impl BlockRangeScanner {
     /// # Errors
     ///
     /// Returns an error if any fallback connection fails
-    #[must_use]
     pub async fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
