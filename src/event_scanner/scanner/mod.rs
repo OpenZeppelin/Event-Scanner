@@ -365,9 +365,62 @@ impl EventScannerBuilder<SyncFromBlock> {
 }
 
 impl<M> EventScannerBuilder<M> {
+    /// Adds a fallback WebSocket URL to the scanner.
+    ///
+    /// The WebSocket connection will be established when calling the `connect` methods.
+    /// Multiple fallback providers can be added by calling this method multiple times.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use alloy::network::Ethereum;
+    /// # use event_scanner::EventScannerBuilder;
+    /// #
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let ws_url = "ws://localhost:8545".parse()?;
+    /// # let fallback_url = "ws://fallback:8545".parse()?;
+    /// let scanner = EventScannerBuilder::historic()
+    ///     .fallback_ws(fallback_url)
+    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn fallback_ws(mut self, url: Url) -> Self {
+        self.block_range_scanner = self.block_range_scanner.fallback_ws(url);
+        self
+    }
+
+    /// Adds a fallback IPC path to the scanner.
+    ///
+    /// The IPC connection will be established when calling the `connect` methods.
+    /// Multiple fallback providers can be added by calling this method multiple times.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use alloy::network::Ethereum;
+    /// # use event_scanner::EventScannerBuilder;
+    /// #
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let ws_url = "ws://localhost:8545".parse()?;
+    /// let scanner = EventScannerBuilder::historic()
+    ///     .fallback_ipc("/tmp/fallback.ipc".to_string())
+    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn fallback_ipc(mut self, path: String) -> Self {
+        self.block_range_scanner = self.block_range_scanner.fallback_ipc(path);
+        self
+    }
+
     /// Connects to the provider via WebSocket.
     ///
-    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
+    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
     ///
     /// # Errors
     ///
@@ -379,7 +432,7 @@ impl<M> EventScannerBuilder<M> {
 
     /// Connects to the provider via IPC.
     ///
-    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
+    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
     ///
     /// # Errors
     ///
@@ -394,17 +447,30 @@ impl<M> EventScannerBuilder<M> {
 
     /// Connects to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
+    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails
+    /// Returns an error if any fallback connection fails
     pub async fn connect<N: Network>(
         self,
         provider: RootProvider<N>,
     ) -> TransportResult<EventScanner<M, N>> {
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
+    }
+
+    /// Connects to an existing provider with fallback providers
+    ///
+    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
+    pub fn connect_with_fallbacks<N: Network>(
+        self,
+        provider: RootProvider<N>,
+        fallback_providers: Vec<RootProvider<N>>,
+    ) -> EventScanner<M, N> {
+        let block_range_scanner =
+            self.block_range_scanner.connect_with_fallbacks::<N>(provider, fallback_providers);
+        EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
     }
 }
 
@@ -484,5 +550,41 @@ mod tests {
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_scanner_builder_fallback_methods() {
+        let ws_url: Url = "ws://fallback:8545".parse().unwrap();
+        let ipc_path = "/tmp/fallback.ipc".to_string();
+
+        let builder = EventScannerBuilder::historic()
+            .fallback_ws(ws_url.clone())
+            .fallback_ipc(ipc_path.clone());
+
+        assert_eq!(builder.block_range_scanner.fallback_ws_urls.len(), 1);
+        assert_eq!(builder.block_range_scanner.fallback_ws_urls[0], ws_url);
+        assert_eq!(builder.block_range_scanner.fallback_ipc_paths.len(), 1);
+        assert_eq!(builder.block_range_scanner.fallback_ipc_paths[0], ipc_path);
+    }
+
+    #[test]
+    fn test_scanner_builder_multiple_fallbacks() {
+        let ws_url1: Url = "ws://fallback1:8545".parse().unwrap();
+        let ws_url2: Url = "ws://fallback2:8545".parse().unwrap();
+        let ipc_path1 = "/tmp/fallback1.ipc".to_string();
+        let ipc_path2 = "/tmp/fallback2.ipc".to_string();
+
+        let builder = EventScannerBuilder::live()
+            .fallback_ws(ws_url1.clone())
+            .fallback_ws(ws_url2.clone())
+            .fallback_ipc(ipc_path1.clone())
+            .fallback_ipc(ipc_path2.clone());
+
+        assert_eq!(builder.block_range_scanner.fallback_ws_urls.len(), 2);
+        assert_eq!(builder.block_range_scanner.fallback_ws_urls[0], ws_url1);
+        assert_eq!(builder.block_range_scanner.fallback_ws_urls[1], ws_url2);
+        assert_eq!(builder.block_range_scanner.fallback_ipc_paths.len(), 2);
+        assert_eq!(builder.block_range_scanner.fallback_ipc_paths[0], ipc_path1);
+        assert_eq!(builder.block_range_scanner.fallback_ipc_paths[1], ipc_path2);
     }
 }
