@@ -67,12 +67,12 @@ pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
 }
 
 #[derive(Default)]
-pub struct EventScannerBuilder<M, N: Network> {
+pub struct EventScannerBuilder<M> {
     pub(crate) config: M,
-    pub(crate) block_range_scanner: BlockRangeScanner<N>,
+    pub(crate) block_range_scanner: BlockRangeScanner,
 }
 
-impl<N: Network> EventScannerBuilder<Unspecified, N> {
+impl EventScannerBuilder<Unspecified> {
     /// Streams events from a historical block range.
     ///
     /// # Example
@@ -135,7 +135,7 @@ impl<N: Network> EventScannerBuilder<Unspecified, N> {
     ///   RPC call
     /// - **Completion**: The scanner completes when the entire range has been processed
     #[must_use]
-    pub fn historic() -> EventScannerBuilder<Historic, N> {
+    pub fn historic() -> EventScannerBuilder<Historic> {
         EventScannerBuilder::default()
     }
 
@@ -326,7 +326,7 @@ impl<N: Network> EventScannerBuilder<Unspecified, N> {
     }
 }
 
-impl<N: Network> EventScannerBuilder<LatestEvents, N> {
+impl EventScannerBuilder<LatestEvents> {
     #[must_use]
     pub fn new(count: usize) -> Self {
         Self {
@@ -341,7 +341,7 @@ impl<N: Network> EventScannerBuilder<LatestEvents, N> {
     }
 }
 
-impl<N: Network> EventScannerBuilder<SyncFromLatestEvents, N> {
+impl EventScannerBuilder<SyncFromLatestEvents> {
     #[must_use]
     pub fn new(count: usize) -> Self {
         Self {
@@ -354,7 +354,7 @@ impl<N: Network> EventScannerBuilder<SyncFromLatestEvents, N> {
     }
 }
 
-impl<N: Network> EventScannerBuilder<SyncFromBlock, N> {
+impl EventScannerBuilder<SyncFromBlock> {
     #[must_use]
     pub fn new(from_block: BlockNumberOrTag) -> Self {
         Self {
@@ -364,7 +364,7 @@ impl<N: Network> EventScannerBuilder<SyncFromBlock, N> {
     }
 }
 
-impl<M, N: Network> EventScannerBuilder<M, N> {
+impl<M> EventScannerBuilder<M> {
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
@@ -372,8 +372,8 @@ impl<M, N: Network> EventScannerBuilder<M, N> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ws(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws(ws_url).await?;
+    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
+        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -384,8 +384,11 @@ impl<M, N: Network> EventScannerBuilder<M, N> {
     /// # Errors
     ///
     /// Returns an error if the connection fails
-    pub async fn connect_ipc(self, ipc_path: String) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc(ipc_path).await?;
+    pub async fn connect_ipc<N: Network>(
+        self,
+        ipc_path: String,
+    ) -> TransportResult<EventScanner<M, N>> {
+        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 
@@ -397,8 +400,8 @@ impl<M, N: Network> EventScannerBuilder<M, N> {
     ///
     /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect(self, provider: RootProvider<N>) -> EventScanner<M, N> {
-        let block_range_scanner = self.block_range_scanner.connect(provider);
+    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
         EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -420,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_config_defaults() {
-        let builder = EventScannerBuilder::<Historic, Ethereum>::default();
+        let builder = EventScannerBuilder::<Historic>::default();
 
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
         assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
