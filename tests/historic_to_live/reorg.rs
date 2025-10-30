@@ -32,7 +32,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     let same_block = false;
 
     let all_tx_hashes = reorg_with_new_count_incr_txs(
-        provider.clone(),
+        setup.anvil,
         contract.clone(),
         num_initial_events,
         num_new_events,

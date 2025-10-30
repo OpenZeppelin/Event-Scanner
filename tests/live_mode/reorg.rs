@@ -10,7 +10,7 @@ use event_scanner::{Message, ScannerStatus};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -21,7 +21,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let same_block = true;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -71,7 +71,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -84,7 +84,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let same_block = false;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -134,7 +134,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_depth_one() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -146,7 +146,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let same_block = true;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -196,7 +196,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_depth_two() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -208,7 +208,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 
     let same_block = true;
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -260,7 +260,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(1.0), Option::None, block_confirmations).await?;
 
     scanner.start().await?;
@@ -274,7 +274,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let same_block = true;
 
     let all_tx_hashes = reorg_with_new_count_incr_txs(
-        provider.clone(),
+        anvil,
         contract,
         num_initial_events,
         num_new_events,

@@ -182,7 +182,7 @@ pub async fn setup_latest_scanner(
 }
 
 pub async fn reorg_with_new_count_incr_txs<P>(
-    provider: RootProvider,
+    anvil: AnvilInstance,
     contract: TestCounter::TestCounterInstance<Arc<P>>,
     num_initial_events: u64,
     num_new_events: u64,
@@ -192,6 +192,8 @@ pub async fn reorg_with_new_count_incr_txs<P>(
 where
     P: Provider<Ethereum> + Clone,
 {
+    let wallet = anvil.wallet().expect("anvil should return a default wallet");
+    let provider = ProviderBuilder::new().wallet(wallet).connect(anvil.endpoint().as_str()).await?;
     let mut event_tx_hashes = vec![];
 
     for _ in 0..num_initial_events {
