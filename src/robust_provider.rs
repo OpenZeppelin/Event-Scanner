@@ -188,6 +188,8 @@ impl<N: Network> RobustProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
+        // We need this otherwise error is not clear
+        self.provider.client().expect_pubsub_frontend();
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
