@@ -2,7 +2,7 @@
 // `cargo test`. Without it, you'd need to manually specify `--features test-utils`
 // every time.
 mod common;
-mod historic_mode;
-mod historic_to_live;
+mod historic;
 mod latest_events;
-mod live_mode;
+mod live;
+mod sync;
