@@ -16,7 +16,7 @@ use alloy::{
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
-    SyncFromBlock, SyncFromLatestEvents, test_utils::LogMetadata,
+    SyncFromBlock, SyncFromLatestEvents, robust_provider::RobustProvider, test_utils::LogMetadata,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -95,9 +95,11 @@ pub async fn setup_live_scanner(
 ) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
+    let robust_provider = RobustProvider::new(provider.root().clone());
+
     let mut scanner = EventScannerBuilder::live()
         .block_confirmations(confirmations)
-        .connect::<Ethereum>(provider.clone());
+        .connect::<Ethereum>(robust_provider);
 
     let stream = scanner.subscribe(filter);
 
@@ -111,11 +113,12 @@ pub async fn setup_sync_scanner(
     confirmations: u64,
 ) -> anyhow::Result<SyncScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+    let robust_provider = RobustProvider::new(provider.root().clone());
 
     let mut scanner = EventScannerBuilder::sync()
         .from_block(from)
         .block_confirmations(confirmations)
-        .connect::<Ethereum>(provider.clone());
+        .connect::<Ethereum>(robust_provider);
 
     let stream = scanner.subscribe(filter);
 
@@ -129,11 +132,12 @@ pub async fn setup_sync_from_latest_scanner(
     confirmations: u64,
 ) -> anyhow::Result<SyncFromLatestScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
+    let robust_provider = RobustProvider::new(provider.root().clone());
 
     let mut scanner = EventScannerBuilder::sync()
         .from_latest(latest)
         .block_confirmations(confirmations)
-        .connect::<Ethereum>(provider.clone());
+        .connect::<Ethereum>(robust_provider);
 
     let stream = scanner.subscribe(filter);
 
@@ -147,11 +151,11 @@ pub async fn setup_historic_scanner(
     to: BlockNumberOrTag,
 ) -> anyhow::Result<HistoricScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
-
+    let robust_provider = RobustProvider::new(provider.clone());
     let mut scanner = EventScannerBuilder::historic()
         .from_block(from)
         .to_block(to)
-        .connect::<Ethereum>(provider.clone());
+        .connect::<Ethereum>(robust_provider);
 
     let stream = scanner.subscribe(filter);
 
@@ -174,7 +178,8 @@ pub async fn setup_latest_scanner(
         builder = builder.to_block(t);
     }
 
-    let mut scanner = builder.connect::<Ethereum>(provider.clone());
+    let robust_provider = RobustProvider::new(provider.clone());
+    let mut scanner = builder.connect::<Ethereum>(robust_provider);
 
     let stream = scanner.subscribe(filter);
 

@@ -367,8 +367,9 @@ impl<M> EventScannerBuilder<M> {
     /// Connects to an existing provider.
     ///
     /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    pub fn connect<N: Network>(self, provider: impl Into<RobustProvider<N>>) -> EventScanner<M, N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider.into());
+    #[must_use]
+    pub fn connect<N: Network>(self, provider: RobustProvider<N>) -> EventScanner<M, N> {
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
         EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
     }
 }
@@ -427,7 +428,8 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let robust_provider = RobustProvider::new(provider.clone());
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(robust_provider);
 
         assert!(scanner.listeners.is_empty());
 
@@ -444,7 +446,8 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let robust_provider = RobustProvider::new(provider.clone());
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(robust_provider);
 
         let _ = scanner.subscribe(EventFilter::new());
 

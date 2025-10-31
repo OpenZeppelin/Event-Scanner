@@ -7,7 +7,7 @@ use alloy::{
     sol_types::SolEvent,
 };
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScannerBuilder, Message};
+use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
@@ -63,8 +63,9 @@ async fn main() -> anyhow::Result<()> {
         info!("Historical event {} created", i + 1);
     }
 
+    let robust_provider = RobustProvider::new(provider.root().clone());
     let mut scanner =
-        EventScannerBuilder::sync().from_block(0).connect::<Ethereum>(provider.root().to_owned());
+        EventScannerBuilder::sync().from_block(0).connect::<Ethereum>(robust_provider);
 
     let mut stream = scanner.subscribe(increase_filter);
 

@@ -11,7 +11,8 @@ use crate::common::{
     TestCounter, TestCounterExt, deploy_counter, setup_common, setup_latest_scanner,
 };
 use event_scanner::{
-    EventFilter, EventScannerBuilder, assert_closed, assert_next, test_utils::LogMetadata,
+    EventFilter, EventScannerBuilder, assert_closed, assert_next, robust_provider::RobustProvider,
+    test_utils::LogMetadata,
 };
 
 #[tokio::test]
@@ -104,10 +105,12 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
+    let robust_provider = RobustProvider::new(provider.root().clone());
+
     let mut scanner_with_range = EventScannerBuilder::latest(10)
         .from_block(start)
         .to_block(end)
-        .connect::<Ethereum>(provider);
+        .connect::<Ethereum>(robust_provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -299,10 +302,11 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
+    let robust_provider = RobustProvider::new(provider.root().clone());
     let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
-        .connect::<Ethereum>(provider.root().to_owned());
+        .connect::<Ethereum>(robust_provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -331,10 +335,11 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
         .unwrap();
     let end = start;
 
+    let robust_provider = RobustProvider::new(provider.root().clone());
     let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
-        .connect::<Ethereum>(provider.root().to_owned());
+        .connect::<Ethereum>(robust_provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;

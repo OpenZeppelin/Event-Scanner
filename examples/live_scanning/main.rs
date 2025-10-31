@@ -5,7 +5,7 @@ use alloy::{
     sol_types::SolEvent,
 };
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScannerBuilder, Message};
+use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
 
 use tokio_stream::StreamExt;
 use tracing::{error, info};
@@ -55,7 +55,8 @@ async fn main() -> anyhow::Result<()> {
         .contract_address(*contract_address)
         .event(Counter::CountIncreased::SIGNATURE);
 
-    let mut scanner = EventScannerBuilder::live().connect::<Ethereum>(provider.root().to_owned());
+    let robust_provider = RobustProvider::new(provider.root().clone());
+    let mut scanner = EventScannerBuilder::live().connect::<Ethereum>(robust_provider);
 
     let mut stream = scanner.subscribe(increase_filter);
 
