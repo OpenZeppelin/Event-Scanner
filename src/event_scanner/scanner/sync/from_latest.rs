@@ -22,8 +22,8 @@ use crate::{
 
 impl EventScannerBuilder<SyncFromLatestEvents> {
     #[must_use]
-    pub fn block_confirmations(mut self, count: u64) -> Self {
-        self.config.block_confirmations = count;
+    pub fn block_confirmations(mut self, confirmations: u64) -> Self {
+        self.config.block_confirmations = confirmations;
         self
     }
 }

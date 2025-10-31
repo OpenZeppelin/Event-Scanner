@@ -10,7 +10,7 @@ use event_scanner::{Message, ScannerStatus};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -21,7 +21,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let same_block = true;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -62,16 +62,16 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -84,7 +84,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let same_block = false;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -125,16 +125,16 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let _ = timeout(Duration::from_secs(10), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn reorg_depth_one() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -146,7 +146,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let same_block = true;
 
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -187,16 +187,16 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn reorg_depth_two() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
 
     scanner.start().await?;
@@ -208,7 +208,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 
     let same_block = true;
     let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        provider,
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,
@@ -249,9 +249,9 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     _ = timeout(Duration::from_secs(5), event_counting).await;
 
     let final_blocks: Vec<_> = event_block_count.lock().await.clone();
+    assert!(*reorg_detected.lock().await);
     assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
     assert_eq!(final_blocks, expected_event_tx_hashes);
-    assert!(*reorg_detected.lock().await);
 
     Ok(())
 }
@@ -260,7 +260,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil } =
         setup_live_scanner(Option::Some(1.0), Option::None, block_confirmations).await?;
 
     scanner.start().await?;
@@ -274,7 +274,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let same_block = true;
 
     let all_tx_hashes = reorg_with_new_count_incr_txs(
-        provider.clone(),
+        &anvil,
         contract,
         num_initial_events,
         num_new_events,

@@ -58,7 +58,7 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive, time::Duration};
+use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     sync::{mpsc, oneshot},
     try_join,
@@ -68,10 +68,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerMessage,
     error::ScannerError,
-    robust_provider::{
-        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL,
-        Error as RobustProviderError, RobustProvider,
-    },
+    robust_provider::{Error as RobustProviderError, RobustProvider},
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -79,12 +76,8 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    providers::RootProvider,
     pubsub::Subscription,
-    rpc::client::ClientBuilder,
-    transports::{
-        RpcError, TransportErrorKind, TransportResult, http::reqwest::Url, ws::WsConnect,
-    },
+    transports::{RpcError, TransportErrorKind},
 };
 use tracing::{debug, error, info, warn};
 
@@ -130,12 +123,9 @@ impl From<ScannerError> for Message {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
-    pub max_timeout: Duration,
-    pub max_retries: usize,
-    pub retry_interval: Duration,
 }
 
 impl Default for BlockRangeScanner {
@@ -147,12 +137,7 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            max_block_range: DEFAULT_MAX_BLOCK_RANGE,
-            max_timeout: DEFAULT_MAX_TIMEOUT,
-            max_retries: DEFAULT_MAX_RETRIES,
-            retry_interval: DEFAULT_RETRY_INTERVAL,
-        }
+        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
     }
 
     #[must_use]
@@ -161,66 +146,10 @@ impl BlockRangeScanner {
         self
     }
 
-    #[must_use]
-    pub fn with_max_timeout(mut self, rpc_timeout: Duration) -> Self {
-        self.max_timeout = rpc_timeout;
-        self
-    }
-
-    #[must_use]
-    pub fn with_max_retries(mut self, rpc_max_retries: usize) -> Self {
-        self.max_retries = rpc_max_retries;
-        self
-    }
-
-    #[must_use]
-    pub fn with_retry_interval(mut self, rpc_retry_interval: Duration) -> Self {
-        self.retry_interval = rpc_retry_interval;
-        self
-    }
-
-    /// Connects to the provider via WebSocket
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        let provider =
-            RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
-        Ok(self.connect(provider))
-    }
-
-    /// Connects to the provider via IPC
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
-        let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-        Ok(self.connect(provider))
-    }
-
     /// Connects to an existing provider
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        let robust_provider = RobustProvider::new(provider)
-            .max_timeout(self.max_timeout)
-            .max_retries(self.max_retries)
-            .retry_interval(self.retry_interval);
-        ConnectedBlockRangeScanner {
-            provider: robust_provider,
-            max_block_range: self.max_block_range,
-        }
+    pub fn connect<N: Network>(self, provider: RobustProvider<N>) -> ConnectedBlockRangeScanner<N> {
+        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
     }
 }
 
@@ -937,7 +866,7 @@ mod tests {
     use alloy::{
         eips::BlockId,
         network::Ethereum,
-        providers::{ProviderBuilder, ext::AnvilApi},
+        providers::{Provider, ProviderBuilder, ext::AnvilApi},
         rpc::types::anvil::ReorgOptions,
     };
     use alloy_node_bindings::Anvil;
@@ -963,14 +892,14 @@ mod tests {
     #[tokio::test]
     async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
+        let robust_provider = RobustProvider::new(provider.root().clone());
+
+        provider.subscribe_blocks();
         // --- Zero block confirmations -> stream immediately ---
 
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
+        let client = BlockRangeScanner::new().connect::<Ethereum>(robust_provider).run()?;
 
         let mut stream = client.stream_live(0).await?;
 
@@ -1013,15 +942,13 @@ mod tests {
     async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
         provider.anvil_mine(Some(20), None).await?;
 
         let block_confirmations = 5;
 
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
+        let client = BlockRangeScanner::new().connect::<Ethereum>(robust_provider).run()?;
 
         let stream = client.stream_from(BlockNumberOrTag::Latest, block_confirmations).await?;
 
@@ -1049,14 +976,12 @@ mod tests {
     async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         let block_confirmations = 5;
 
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
+        let client = BlockRangeScanner::new().connect::<Ethereum>(robust_provider).run()?;
 
         let mut receiver = client.stream_live(block_confirmations).await?;
 
@@ -1093,14 +1018,12 @@ mod tests {
     async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
         let anvil = Anvil::new().block_time(1).try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         let block_confirmations = 3;
 
-        let client = BlockRangeScanner::new()
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
-            .run()?;
+        let client = BlockRangeScanner::new().connect::<Ethereum>(robust_provider).run()?;
 
         let mut receiver = client.stream_live(block_confirmations).await?;
 
@@ -1159,6 +1082,7 @@ mod tests {
     async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         provider.anvil_mine(Some(120), None).await?;
 
@@ -1166,8 +1090,7 @@ mod tests {
 
         let client = BlockRangeScanner::new()
             .max_block_range(30)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client
@@ -1194,6 +1117,7 @@ mod tests {
     async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         provider.anvil_mine(Some(120), None).await?;
 
@@ -1201,8 +1125,7 @@ mod tests {
 
         let client = BlockRangeScanner::new()
             .max_block_range(30)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client
@@ -1230,14 +1153,14 @@ mod tests {
     async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         provider.anvil_mine(Some(100), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider.clone())
             .run()?;
 
         // ranges where each batch is of max blocks per epoch size
@@ -1267,8 +1190,7 @@ mod tests {
         // range where blocks per epoch is larger than the number of blocks on chain
         let client = BlockRangeScanner::new()
             .max_block_range(200)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.stream_historical(0, 20).await?;
@@ -1286,13 +1208,13 @@ mod tests {
     async fn historic_mode_normalises_start_and_end_block() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
         provider.anvil_mine(Some(11), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.stream_historical(10, 0).await?;
@@ -1404,14 +1326,14 @@ mod tests {
     async fn rewind_single_batch_when_epoch_larger_than_range() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         provider.anvil_mine(Some(150), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(100)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.rewind(100, 150).await?;
@@ -1428,14 +1350,14 @@ mod tests {
     {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.rewind(0, 14).await?;
@@ -1453,14 +1375,14 @@ mod tests {
     async fn rewind_with_remainder_trims_first_batch_to_stream_start() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(4)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.rewind(3, 12).await?;
@@ -1478,14 +1400,14 @@ mod tests {
     async fn rewind_single_block_range() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
 
         provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.rewind(7, 7).await?;
@@ -1500,14 +1422,14 @@ mod tests {
     async fn rewind_epoch_of_one_sends_each_block_in_reverse_order() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().to_owned());
 
         provider.anvil_mine(Some(15), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(1)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.rewind(5, 8).await?;
@@ -1526,14 +1448,14 @@ mod tests {
     async fn command_rewind_defaults_latest_to_earliest_batches_correctly() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
         // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
         provider.anvil_mine(Some(20), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(7)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream =
@@ -1551,14 +1473,14 @@ mod tests {
     async fn command_rewind_handles_start_and_end_in_any_order() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
-        let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().clone());
         // Ensure blocks at 3 and 15 exist
         provider.anvil_mine(Some(16), None).await?;
 
         let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let mut stream = client.rewind(15, 3).await?;
@@ -1582,11 +1504,13 @@ mod tests {
     async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
+        let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+        let robust_provider = RobustProvider::new(provider.root().to_owned());
+
         // Do not mine up to 999 so start won't exist
         let client = BlockRangeScanner::new()
             .max_block_range(5)
-            .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-            .await?
+            .connect::<Ethereum>(robust_provider)
             .run()?;
 
         let stream = client.rewind(0, 999).await;

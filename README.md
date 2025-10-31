@@ -113,7 +113,7 @@ Once configured, connect using one of:
 
 - `connect_ws::<Ethereum>(ws_url)`
 - `connect_ipc::<Ethereum>(path)`
-- `connect::<Ethereum>(provider)`
+- `connect::<Ethereum>(robust_provider)`
 
 This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 

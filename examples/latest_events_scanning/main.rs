@@ -1,6 +1,11 @@
-use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
+use alloy::{
+    network::Ethereum,
+    providers::{Provider, ProviderBuilder},
+    sol,
+    sol_types::SolEvent,
+};
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScannerBuilder, Message};
+use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -37,9 +42,11 @@ async fn main() -> anyhow::Result<()> {
 
     let anvil = Anvil::new().block_time_f64(0.5).try_spawn()?;
     let wallet = anvil.wallet();
-    let provider =
-        ProviderBuilder::new().wallet(wallet.unwrap()).connect(anvil.endpoint().as_str()).await?;
-    let counter_contract = Counter::deploy(provider).await?;
+    let provider = ProviderBuilder::new()
+        .wallet(wallet.unwrap())
+        .connect(anvil.ws_endpoint_url().as_str())
+        .await?;
+    let counter_contract = Counter::deploy(provider.clone()).await?;
 
     let contract_address = counter_contract.address();
 
@@ -47,8 +54,8 @@ async fn main() -> anyhow::Result<()> {
         .contract_address(*contract_address)
         .event(Counter::CountIncreased::SIGNATURE);
 
-    let mut scanner =
-        EventScannerBuilder::latest(5).connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?;
+    let robust_provider = RobustProvider::new(provider.root().clone());
+    let mut scanner = EventScannerBuilder::latest(5).connect::<Ethereum>(robust_provider);
 
     let mut stream = scanner.subscribe(increase_filter);
 

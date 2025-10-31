@@ -1,8 +1,6 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::{Ethereum, Network},
-    providers::RootProvider,
-    transports::{TransportResult, http::reqwest::Url},
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -14,6 +12,7 @@ use crate::{
         MAX_BUFFERED_MESSAGES,
     },
     event_scanner::listener::EventListener,
+    robust_provider::RobustProvider,
 };
 
 mod common;
@@ -365,42 +364,11 @@ impl EventScannerBuilder<SyncFromBlock> {
 }
 
 impl<M> EventScannerBuilder<M> {
-    /// Connects to the provider via WebSocket.
-    ///
-    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
-    }
-
-    /// Connects to the provider via IPC.
-    ///
-    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
-    }
-
     /// Connects to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the built [`HistoricEventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
+    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
+    pub fn connect<N: Network>(self, provider: RobustProvider<N>) -> EventScanner<M, N> {
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
         EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
     }
@@ -417,7 +385,10 @@ impl<M, N: Network> EventScanner<M, N> {
 
 #[cfg(test)]
 mod tests {
-    use alloy::{providers::mock::Asserter, rpc::client::RpcClient};
+    use alloy::{
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
 
     use super::*;
 
@@ -454,10 +425,11 @@ mod tests {
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
-    #[test]
-    fn test_historic_event_stream_listeners_vector_updates() {
+    #[tokio::test]
+    async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let robust_provider = RobustProvider::new(provider.clone());
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(robust_provider);
 
         assert!(scanner.listeners.is_empty());
 
@@ -467,16 +439,21 @@ mod tests {
         let _stream2 = scanner.subscribe(EventFilter::new());
         let _stream3 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 3);
+
+        Ok(())
     }
 
-    #[test]
-    fn test_historic_event_stream_channel_capacity() {
+    #[tokio::test]
+    async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let robust_provider = RobustProvider::new(provider.clone());
+        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(robust_provider);
 
         let _ = scanner.subscribe(EventFilter::new());
 
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+
+        Ok(())
     }
 }
