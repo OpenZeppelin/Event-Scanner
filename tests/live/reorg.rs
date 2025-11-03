@@ -45,7 +45,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
         .map(|_| (TransactionData::JSON(contract.increase().into_transaction_request()), 0))
         .collect();
 
-    provider.anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
+    provider.inner().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
     assert_next!(stream, ScannerStatus::ReorgDetected);
