@@ -87,9 +87,10 @@ impl<N: Network> RobustProvider<N> {
         self
     }
 
+    /// Get a reference to the inner provider
     #[must_use]
-    pub fn inner(self) -> RootProvider<N> {
-        self.provider
+    pub fn inner(&self) -> &RootProvider<N> {
+        &self.provider
     }
 
     /// Add a fallback provider to the list.
