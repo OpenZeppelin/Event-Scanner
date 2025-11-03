@@ -84,7 +84,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     let provider = setup.provider.clone();
     let contract = setup.contract.clone();
 
-    provider.anvil_mine(Some(10), None).await?;
+    provider.inner().anvil_mine(Some(10), None).await?;
 
     let scanner = setup.scanner;
     let mut stream = setup.stream;
@@ -107,7 +107,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     )
     .await?;
 
-    provider.anvil_mine(Some(10), None).await?;
+    provider.inner().anvil_mine(Some(10), None).await?;
 
     let observed_tx_hashes = Arc::new(Mutex::new(Vec::new()));
     let observed_tx_hashes_clone = Arc::clone(&observed_tx_hashes);

@@ -126,12 +126,12 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
     let mut expected_latest = vec![];
     expected_latest.push(contract.increase_and_get_meta().await?);
 
-    provider.anvil_mine(Some(1), None).await?;
+    provider.inner().anvil_mine(Some(1), None).await?;
 
     expected_latest.push(contract.increase_and_get_meta().await?);
     expected_latest.push(contract.increase_and_get_meta().await?);
 
-    provider.anvil_mine(Some(1), None).await?;
+    provider.inner().anvil_mine(Some(1), None).await?;
 
     scanner.start().await?;
 
