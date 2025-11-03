@@ -27,6 +27,7 @@ where
     pub contract: TestCounter::TestCounterInstance<Arc<P>>,
     pub scanner: S,
     pub stream: ReceiverStream<Message>,
+    #[allow(dead_code)]
     pub anvil: AnvilInstance,
 }
 
