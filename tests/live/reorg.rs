@@ -1,27 +1,23 @@
-use anyhow::Ok;
 use std::{sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
+use anyhow::Ok;
 use tokio::{sync::Mutex, time::timeout};
 
 use crate::common::{
-    LiveScannerSetup, TestCounter::CountIncreased, reorg_with_new_count_incr_txs, setup_common,
-    setup_live_scanner,
+    TestCounter::CountIncreased, reorg_with_new_count_incr_txs, setup_common, setup_live_scanner,
+    setup_scanner::LiveScannerSetup,
 };
 use alloy::{
     primitives::U256,
-    providers::{Provider, ext::AnvilApi},
+    providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{
-    EventScannerBuilder, Message, ScannerStatus, assert_empty, assert_next,
-    robust_provider::RobustProvider,
-};
+use event_scanner::{EventScannerBuilder, Message, ScannerStatus, assert_empty, assert_next};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let (_anvil, provider, contract, filter) = setup_common(None, None).await?;
-    let provider = RobustProvider::new(provider.root().clone());
     let mut scanner = EventScannerBuilder::live().block_confirmations(0).connect(provider.clone());
     let mut stream = scanner.subscribe(filter);
 
@@ -64,125 +60,74 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
-        setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
+    let (_anvil, provider, contract, filter) = setup_common(None, None).await?;
+    let mut scanner = EventScannerBuilder::live().block_confirmations(0).connect(provider.clone());
+    let mut stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
-    let num_initial_events = 5;
+    // emit initial events
+    for _ in 0..5 {
+        contract.increase().send().await?.watch().await?;
+    }
 
-    let reorg_depth = 5;
-    let num_new_events = 3;
-    // add events in ascending blocks from reorg point
-    let same_block = false;
+    // assert initial events are emitted as expected
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(5) }]);
+    let mut stream = assert_empty!(stream);
 
-    let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        &anvil,
-        contract,
-        num_initial_events,
-        num_new_events,
-        reorg_depth,
-        same_block,
-    )
-    .await?;
+    // reorg the chain - new events in ascending blocks
+    let tx_block_pairs = vec![
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 1),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 2),
+    ];
 
-    let event_block_count = Arc::new(Mutex::new(Vec::new()));
-    let event_block_count_clone = Arc::clone(&event_block_count);
+    provider.inner().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
-    let reorg_detected = Arc::new(Mutex::new(false));
-    let reorg_detected_clone = reorg_detected.clone();
-
-    let event_counting = async move {
-        while let Some(message) = stream.next().await {
-            match message {
-                Message::Data(logs) => {
-                    let mut guard = event_block_count_clone.lock().await;
-                    for log in logs {
-                        if let Some(n) = log.transaction_hash {
-                            guard.push(n);
-                        }
-                    }
-                }
-                Message::Error(e) => {
-                    panic!("panic with error {e}");
-                }
-                Message::Status(status) => {
-                    if matches!(status, ScannerStatus::ReorgDetected) {
-                        *reorg_detected_clone.lock().await = true;
-                    }
-                }
-            }
-        }
-    };
-
-    let _ = timeout(Duration::from_secs(10), event_counting).await;
-
-    let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert!(*reorg_detected.lock().await);
-    assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
-    assert_eq!(final_blocks, expected_event_tx_hashes);
+    // assert expected messages post-reorg
+    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    assert_empty!(stream);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn reorg_depth_one() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider: _provider, contract, scanner, mut stream, anvil } =
-        setup_live_scanner(Option::Some(0.1), Option::None, 0).await?;
+    let (_anvil, provider, contract, filter) = setup_common(None, None).await?;
+    let mut scanner = EventScannerBuilder::live().block_confirmations(0).connect(provider.clone());
+    let mut stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
-    let num_initial_events = 4;
+    // emit initial events
+    for _ in 0..4 {
+        contract.increase().send().await?.watch().await?;
+    }
 
-    let reorg_depth = 1;
-    let num_new_events = 1;
-    let same_block = true;
+    // assert initial events are emitted as expected
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    let mut stream = assert_empty!(stream);
 
-    let expected_event_tx_hashes = reorg_with_new_count_incr_txs(
-        &anvil,
-        contract,
-        num_initial_events,
-        num_new_events,
-        reorg_depth,
-        same_block,
-    )
-    .await?;
+    // reorg the chain with depth 1
+    let tx_block_pairs =
+        vec![(TransactionData::JSON(contract.increase().into_transaction_request()), 0)];
 
-    let event_block_count = Arc::new(Mutex::new(Vec::new()));
-    let event_block_count_clone = Arc::clone(&event_block_count);
+    provider.inner().anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs }).await?;
 
-    let reorg_detected = Arc::new(Mutex::new(false));
-    let reorg_detected_clone = reorg_detected.clone();
-
-    let event_counting = async move {
-        while let Some(message) = stream.next().await {
-            match message {
-                Message::Data(logs) => {
-                    let mut guard = event_block_count_clone.lock().await;
-                    for log in logs {
-                        if let Some(n) = log.transaction_hash {
-                            guard.push(n);
-                        }
-                    }
-                }
-                Message::Error(e) => {
-                    panic!("panic with error {e}");
-                }
-                Message::Status(info) => {
-                    if matches!(info, ScannerStatus::ReorgDetected) {
-                        *reorg_detected_clone.lock().await = true;
-                    }
-                }
-            }
-        }
-    };
-
-    _ = timeout(Duration::from_secs(5), event_counting).await;
-
-    let final_blocks: Vec<_> = event_block_count.lock().await.clone();
-    assert!(*reorg_detected.lock().await);
-    assert_eq!(final_blocks.len() as u64, num_initial_events + num_new_events);
-    assert_eq!(final_blocks, expected_event_tx_hashes);
+    // assert expected messages post-reorg
+    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    assert_empty!(stream);
 
     Ok(())
 }
@@ -258,7 +203,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    provider.anvil_mine(Some(10), None).await?;
+    provider.inner().anvil_mine(Some(10), None).await?;
 
     let num_initial_events = 4_u64;
     let num_new_events = 2_u64;
@@ -276,7 +221,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     )
     .await?;
 
-    provider.anvil_mine(Some(10), None).await?;
+    provider.inner().anvil_mine(Some(10), None).await?;
 
     let observed_tx_hashes = Arc::new(Mutex::new(Vec::new()));
     let observed_tx_hashes_clone = Arc::clone(&observed_tx_hashes);
