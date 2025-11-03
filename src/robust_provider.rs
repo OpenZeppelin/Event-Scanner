@@ -3,10 +3,10 @@ use std::{future::Future, sync::Arc, time::Duration};
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
     network::Network,
-    providers::{Provider, RootProvider},
+    providers::{Provider, RootProvider, ext::AnvilApi},
     pubsub::Subscription,
-    rpc::types::{Filter, Log},
-    transports::{RpcError, TransportErrorKind},
+    rpc::types::{Filter, Log, anvil::ReorgOptions},
+    transports::{RpcError, TransportErrorKind, TransportResult},
 };
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
@@ -136,6 +136,10 @@ impl<N: Network> RobustProvider<N> {
             error!(error = %e, "eth_getBlockNumber failed");
         }
         result
+    }
+
+    pub async fn anvil_reorg(&self, options: ReorgOptions) -> TransportResult<()> {
+        self.provider.anvil_reorg(options).await
     }
 
     /// Fetch a block by hash with retry and timeout.
