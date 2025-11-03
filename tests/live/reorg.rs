@@ -36,9 +36,11 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let mut stream = assert_empty!(stream);
 
     // reorg the chain
-    let tx_block_pairs = (0..3)
-        .map(|_| (TransactionData::JSON(contract.increase().into_transaction_request()), 0))
-        .collect();
+    let tx_block_pairs = vec![
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+    ];
 
     provider.anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await.unwrap();
 
