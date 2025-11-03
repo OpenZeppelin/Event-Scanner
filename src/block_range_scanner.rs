@@ -363,7 +363,6 @@ impl<N: Network> Service<N> {
         sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
-        let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
         let reorg_handler = self.reorg_handler.clone();
 
@@ -372,10 +371,12 @@ impl<N: Network> Service<N> {
         // blocks have been mined
         let range_start = (latest + 1).saturating_sub(block_confirmations);
 
+        let ws_stream = self.provider.subscribe_blocks().await?;
+
         tokio::spawn(async move {
             Self::stream_live_blocks(
                 range_start,
-                provider,
+                ws_stream,
                 &sender,
                 block_confirmations,
                 max_block_range,
@@ -453,6 +454,8 @@ impl<N: Network> Service<N> {
 
         let confirmed_tip = latest_block.saturating_sub(block_confirmations);
 
+        let ws_stream = self.provider.subscribe_blocks().await?;
+
         // If start is beyond confirmed tip, skip historical and go straight to live
         if start_block > confirmed_tip {
             info!(
@@ -464,7 +467,7 @@ impl<N: Network> Service<N> {
             tokio::spawn(async move {
                 Self::stream_live_blocks(
                     start_block,
-                    provider,
+                    ws_stream,
                     &sender,
                     block_confirmations,
                     max_block_range,
@@ -491,7 +494,7 @@ impl<N: Network> Service<N> {
         tokio::spawn(async move {
             Self::stream_live_blocks(
                 cutoff + 1,
-                provider,
+                ws_stream,
                 &live_block_buffer_sender,
                 block_confirmations,
                 max_block_range,
@@ -682,21 +685,12 @@ impl<N: Network> Service<N> {
 
     async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        provider: RobustProvider<N>,
+        ws_stream: Subscription<N::HeaderResponse>,
         sender: &mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
         mut reorg_handler: ReorgHandler<N>,
     ) {
-        let ws_stream = match Self::get_block_subscription(&provider).await {
-            Ok(stream) => stream,
-            Err(e) => {
-                error!(error = %e, "Error establishing subscription");
-                _ = sender.try_stream(e).await;
-                return;
-            }
-        };
-
         // ensure we start streaming only after the expected_next_block cutoff
         let cutoff = range_start;
         let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cutoff);
@@ -786,15 +780,6 @@ impl<N: Network> Service<N> {
         }
 
         info!(processed = processed, discarded = discarded, "Finished processing live messages");
-    }
-
-    async fn get_block_subscription(
-        provider: &RobustProvider<N>,
-    ) -> Result<Subscription<N::HeaderResponse>, ScannerError> {
-        info!("Establishing subscription to live blocks...");
-        let ws_stream = provider.subscribe_blocks().await?;
-        info!("Subscription established");
-        Ok(ws_stream)
     }
 }
 
