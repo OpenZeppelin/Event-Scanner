@@ -14,16 +14,16 @@ use tokio_stream::StreamExt;
 #[tokio::test]
 async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint().as_str()).await?;
     let robust_provider = RobustProvider::new(provider.root().to_owned());
 
     // --- Zero block confirmations -> stream immediately ---
 
-    let client = BlockRangeScanner::new().connect(robust_provider).run()?;
+    let client = BlockRangeScanner::new().connect(robust_provider.clone()).run()?;
 
     let mut stream = client.stream_live(0).await?;
 
-    provider.anvil_mine(Some(5), None).await?;
+    robust_provider.inner().anvil_mine(Some(5), None).await?;
 
     assert_next!(stream, 1..=1);
     assert_next!(stream, 2..=2);
@@ -32,7 +32,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
     assert_next!(stream, 5..=5);
     let mut stream = assert_empty!(stream);
 
-    provider.anvil_mine(Some(1), None).await?;
+    robust_provider.inner().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 6..=6);
     assert_empty!(stream);
@@ -41,7 +41,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     let mut stream = client.stream_live(1).await?;
 
-    provider.anvil_mine(Some(5), None).await?;
+    robust_provider.inner().anvil_mine(Some(5), None).await?;
 
     assert_next!(stream, 6..=6);
     assert_next!(stream, 7..=7);
@@ -50,7 +50,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
     assert_next!(stream, 10..=10);
     let mut stream = assert_empty!(stream);
 
-    provider.anvil_mine(Some(1), None).await?;
+    robust_provider.inner().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 11..=11);
     assert_empty!(stream);
@@ -62,29 +62,29 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
 
-    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint().as_str()).await?;
     provider.anvil_mine(Some(20), None).await?;
 
     let block_confirmations = 5;
 
     let robust_provider = RobustProvider::new(provider.root().to_owned());
 
-    let client = BlockRangeScanner::new().connect(robust_provider).run()?;
+    let client = BlockRangeScanner::new().connect(robust_provider.clone()).run()?;
 
     let stream = client.stream_from(BlockNumberOrTag::Latest, block_confirmations).await?;
 
     let stream = assert_empty!(stream);
 
-    provider.anvil_mine(Some(4), None).await?;
+    robust_provider.inner().anvil_mine(Some(4), None).await?;
 
     let mut stream = assert_empty!(stream);
 
-    provider.anvil_mine(Some(1), None).await?;
+    robust_provider.inner().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 20..=20);
     let mut stream = assert_empty!(stream);
 
-    provider.anvil_mine(Some(1), None).await?;
+    robust_provider.inner().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 21..=21);
     assert_empty!(stream);
@@ -97,7 +97,7 @@ async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> 
 async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
 
-    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint().as_str()).await?;
 
     let block_confirmations = 5;
 
@@ -140,7 +140,7 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
 async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
     let anvil = Anvil::new().block_time(1).try_spawn()?;
 
-    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint().as_str()).await?;
 
     let block_confirmations = 3;
 
