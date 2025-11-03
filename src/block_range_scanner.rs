@@ -88,6 +88,11 @@ use alloy::{
 };
 use tracing::{debug, error, info, warn};
 
+mod reorg_handler;
+mod ring_buffer;
+
+use reorg_handler::ReorgHandler;
+
 pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
@@ -155,6 +160,7 @@ impl BlockRangeScanner {
         }
     }
 
+    /// Sets the maximum block range per RPC call for the scanner.
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.max_block_range = max_block_range;
@@ -279,6 +285,7 @@ pub enum Command {
 
 struct Service<N: Network> {
     provider: RobustProvider<N>,
+    reorg_handler: ReorgHandler<N>,
     max_block_range: u64,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
@@ -288,9 +295,11 @@ struct Service<N: Network> {
 impl<N: Network> Service<N> {
     pub fn new(provider: RobustProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
+        let reorg_handler = ReorgHandler::new(provider.clone());
 
         let service = Self {
             provider,
+            reorg_handler,
             max_block_range,
             error_count: 0,
             command_receiver: cmd_rx,
@@ -356,6 +365,7 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
         let latest = self.provider.get_block_number().await?;
+        let reorg_handler = self.reorg_handler.clone();
 
         // the next block returned by the underlying subscription will always be `latest + 1`,
         // because `latest` was already mined and subscription by definition only streams after new
@@ -366,9 +376,10 @@ impl<N: Network> Service<N> {
             Self::stream_live_blocks(
                 range_start,
                 provider,
-                sender,
+                &sender,
                 block_confirmations,
                 max_block_range,
+                reorg_handler,
             )
             .await;
         });
@@ -420,6 +431,7 @@ impl<N: Network> Service<N> {
     ) -> Result<(), ScannerError> {
         let provider = self.provider.clone();
         let max_block_range = self.max_block_range;
+        let reorg_handler = self.reorg_handler.clone();
 
         let get_start_block = async || -> Result<BlockNumber, ScannerError> {
             let block = match start_height {
@@ -453,9 +465,10 @@ impl<N: Network> Service<N> {
                 Self::stream_live_blocks(
                     start_block,
                     provider,
-                    sender,
+                    &sender,
                     block_confirmations,
                     max_block_range,
+                    reorg_handler,
                 )
                 .await;
             });
@@ -479,9 +492,10 @@ impl<N: Network> Service<N> {
             Self::stream_live_blocks(
                 cutoff + 1,
                 provider,
-                live_block_buffer_sender,
+                &live_block_buffer_sender,
                 block_confirmations,
                 max_block_range,
+                reorg_handler,
             )
             .await;
         });
@@ -669,61 +683,65 @@ impl<N: Network> Service<N> {
     async fn stream_live_blocks(
         mut range_start: BlockNumber,
         provider: RobustProvider<N>,
-        sender: mpsc::Sender<Message>,
+        sender: &mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
+        mut reorg_handler: ReorgHandler<N>,
     ) {
-        match Self::get_block_subscription(&provider).await {
-            Ok(ws_stream) => {
-                info!("WebSocket connected for live blocks");
-
-                // ensure we start streaming only after the expected_next_block cutoff
-                let cutoff = range_start;
-                let mut stream =
-                    ws_stream.into_stream().skip_while(|header| header.number() < cutoff);
-
-                while let Some(incoming_block) = stream.next().await {
-                    let incoming_block_num = incoming_block.number();
-                    info!(block_number = incoming_block_num, "Received block header");
-
-                    if incoming_block_num < range_start {
-                        warn!("Reorg detected: sending forked range");
-                        if !sender.try_stream(ScannerStatus::ReorgDetected).await {
-                            return;
-                        }
-
-                        // Calculate the confirmed block position for the incoming block
-                        let incoming_confirmed =
-                            incoming_block_num.saturating_sub(block_confirmations);
-
-                        // updated expected block to updated confirmed
-                        range_start = incoming_confirmed;
-                    }
-
-                    let confirmed = incoming_block_num.saturating_sub(block_confirmations);
-                    if confirmed >= range_start {
-                        // NOTE: Edge case when difference between range end and range start >= max
-                        // reads
-                        let range_end =
-                            confirmed.min(range_start.saturating_add(max_block_range - 1));
-
-                        info!(
-                            range_start = range_start,
-                            range_end = range_end,
-                            "Sending live block range"
-                        );
-
-                        if !sender.try_stream(range_start..=range_end).await {
-                            return;
-                        }
-
-                        // Overflow can not realistically happen
-                        range_start = range_end + 1;
-                    }
-                }
-            }
+        let ws_stream = match Self::get_block_subscription(&provider).await {
+            Ok(stream) => stream,
             Err(e) => {
+                error!(error = %e, "Error establishing subscription");
                 _ = sender.try_stream(e).await;
+                return;
+            }
+        };
+
+        // ensure we start streaming only after the expected_next_block cutoff
+        let cutoff = range_start;
+        let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cutoff);
+
+        while let Some(incoming_block) = stream.next().await {
+            let incoming_block_num = incoming_block.number();
+            info!(block_number = incoming_block_num, "Received block header");
+
+            let reorged_opt = match reorg_handler.check(incoming_block).await {
+                Ok(opt) => opt,
+                Err(e) => {
+                    error!(error = %e, "Failed to perform reorg check");
+                    _ = sender.try_stream(e).await;
+                    return;
+                }
+            };
+
+            if let Some(reorged_from) = reorged_opt {
+                if !sender.try_stream(ScannerStatus::ReorgDetected).await {
+                    break;
+                }
+
+                // TODO: explain in docs that the returned block after a reorg will be the
+                // first confirmed block that is smaller between:
+                // - the first post-reorg block
+                // - the previous range_start
+
+                // updated expected block to updated confirmed
+                range_start = range_start.min(reorged_from);
+            }
+
+            let confirmed = incoming_block_num.saturating_sub(block_confirmations);
+            if confirmed >= range_start {
+                // NOTE: Edge case when difference between range end and range start >= max
+                // reads
+                let range_end = confirmed.min(range_start.saturating_add(max_block_range - 1));
+
+                info!(range_start = range_start, range_end = range_end, "Sending live block range");
+
+                if !sender.try_stream(range_start..=range_end).await {
+                    break;
+                }
+
+                // Overflow can not realistically happen
+                range_start = range_end + 1;
             }
         }
     }
@@ -767,13 +785,15 @@ impl<N: Network> Service<N> {
             }
         }
 
-        info!(processed = processed, discarded = discarded, "Processed buffered messages");
+        info!(processed = processed, discarded = discarded, "Finished processing live messages");
     }
 
     async fn get_block_subscription(
         provider: &RobustProvider<N>,
     ) -> Result<Subscription<N::HeaderResponse>, ScannerError> {
+        info!("Establishing subscription to live blocks...");
         let ws_stream = provider.subscribe_blocks().await?;
+        info!("Subscription established");
         Ok(ws_stream)
     }
 }
