@@ -1,19 +1,12 @@
-use std::{sync::Arc, time::Duration};
-use tokio_stream::StreamExt;
-
 use anyhow::Ok;
-use tokio::{sync::Mutex, time::timeout};
 
-use crate::common::{
-    TestCounter::CountIncreased, reorg_with_new_count_incr_txs, setup_common, setup_live_scanner,
-    setup_scanner::LiveScannerSetup,
-};
+use crate::common::{TestCounter::CountIncreased, setup_common};
 use alloy::{
     primitives::U256,
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{EventScannerBuilder, Message, ScannerStatus, assert_empty, assert_next};
+use event_scanner::{EventScannerBuilder, ScannerStatus, assert_empty, assert_next};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
@@ -172,99 +165,51 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
     let block_confirmations = 5;
-    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil } =
-        setup_live_scanner(Option::Some(1.0), Option::None, block_confirmations).await?;
+    let (_anvil, provider, contract, filter) = setup_common(None, None).await?;
+    let mut scanner = EventScannerBuilder::live()
+        .block_confirmations(block_confirmations)
+        .connect(provider.clone());
+    let mut stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
-    provider.inner().anvil_mine(Some(10), None).await?;
+    // mine some blocks to establish a baseline
+    provider.clone().inner().anvil_mine(Some(10), None).await?;
 
-    let num_initial_events = 4_u64;
-    let num_new_events = 2_u64;
-    // reorg depth is less than confirmations -> mitigated
-    let reorg_depth = 2_u64;
-    let same_block = true;
+    // emit initial events
+    for _ in 0..4 {
+        contract.increase().send().await?.watch().await?;
+    }
 
-    let all_tx_hashes = reorg_with_new_count_incr_txs(
-        &anvil,
-        contract,
-        num_initial_events,
-        num_new_events,
-        reorg_depth,
-        same_block,
-    )
-    .await?;
+    // mine enough blocks to confirm first 2 events (but not events 3 and 4)
+    // Events are in blocks 11, 12, 13, 14. After mining 7 blocks, we're at block 21.
+    // Block 11 needs to reach block 16 for confirmation (5 confirmations)
+    // Block 12 needs to reach block 17 for confirmation
+    // So after 7 more blocks, events 1 and 2 are confirmed, but not 3 and 4
+    provider.clone().inner().anvil_mine(Some(7), None).await?;
 
-    provider.inner().anvil_mine(Some(10), None).await?;
+    // assert first 2 events are emitted (confirmed)
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
+    let mut stream = assert_empty!(stream);
 
-    let observed_tx_hashes = Arc::new(Mutex::new(Vec::new()));
-    let observed_tx_hashes_clone = Arc::clone(&observed_tx_hashes);
+    // Now do a reorg of depth 2 (removes blocks with events 3 and 4, which weren't confirmed yet)
+    // Add 2 new events in the reorged chain
+    let tx_block_pairs = vec![
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+    ];
 
-    // With sufficient confirmations, a shallow reorg should be fully masked
-    let reorg_detected = Arc::new(Mutex::new(false));
-    let reorg_detected_clone = reorg_detected.clone();
+    provider.clone().inner().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
-    let event_counting = async move {
-        while let Some(message) = stream.next().await {
-            match message {
-                Message::Data(logs) => {
-                    let mut guard = observed_tx_hashes_clone.lock().await;
-                    for log in logs {
-                        if let Some(n) = log.transaction_hash {
-                            guard.push(n);
-                        }
-                    }
-                }
-                Message::Error(e) => {
-                    panic!("panic with error {e}");
-                }
-                Message::Status(info) => {
-                    if matches!(info, ScannerStatus::ReorgDetected) {
-                        *reorg_detected_clone.lock().await = true;
-                    }
-                }
-            }
-        }
-    };
+    // mine enough blocks to confirm the new events
+    provider.clone().inner().anvil_mine(Some(10), None).await?;
 
-    _ = timeout(Duration::from_secs(10), event_counting).await;
-
-    let final_hashes: Vec<_> = observed_tx_hashes.lock().await.clone();
-
-    // Split tx hashes [initial_before_reorg | post_reorg]
-    let (initial_before_reorg, post_reorg) =
-        all_tx_hashes.split_at(num_initial_events.try_into().unwrap());
-
-    // Keep only the confirmed portion of the pre-reorg events
-    let kept_initial = &initial_before_reorg
-        [..initial_before_reorg.len().saturating_sub(reorg_depth.try_into().unwrap())];
-
-    // Keep all post-reorg events we injected
-    let kept_post_reorg = &post_reorg[..num_new_events.try_into().unwrap()];
-
-    // sanity checks
-    assert_eq!(
-        final_hashes.len(),
-        kept_initial.len() + kept_post_reorg.len(),
-        "expected count = confirmed pre-reorg + all post-reorg events",
-    );
-
-    assert!(final_hashes.starts_with(kept_initial), "prefix should be confirmed pre-reorg events",);
-    assert!(
-        final_hashes.ends_with(kept_post_reorg),
-        "suffix should be post-reorg events on new chain",
-    );
-
-    // Full equality for completeness
-    let mut expected = kept_initial.to_owned().clone();
-    let mut post_reorg_clone = kept_post_reorg.to_owned().clone();
-    expected.append(&mut post_reorg_clone);
-    assert_eq!(final_hashes, expected);
-
-    assert!(
-        !*reorg_detected.lock().await,
-        "reorg should be fully mitigated by confirmations (no status emitted)",
-    );
+    // assert the new events from the reorged chain
+    // No ReorgDetected should be emitted because the reorg happened before confirmation
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    assert_empty!(stream);
 
     Ok(())
 }
