@@ -18,7 +18,7 @@ use event_scanner::{
     robust_provider::RobustProvider,
 };
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     let (_anvil, provider, contract, filter) = setup_common(None, None).await?;
     let provider = RobustProvider::new(provider.root().clone());
