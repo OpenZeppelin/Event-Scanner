@@ -11,8 +11,7 @@ use crate::common::{
     TestCounter, TestCounterExt, deploy_counter, setup_common, setup_latest_scanner,
 };
 use event_scanner::{
-    EventFilter, EventScannerBuilder, assert_closed, assert_next, robust_provider::RobustProvider,
-    test_utils::LogMetadata,
+    EventFilter, EventScannerBuilder, assert_closed, assert_next, test_utils::LogMetadata,
 };
 
 #[tokio::test]
@@ -98,19 +97,17 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     expected.push(contract.increase_and_get_meta().await?);
 
     // manual empty block minting
-    provider.anvil_mine(Some(2), None).await?;
+    provider.inner().anvil_mine(Some(2), None).await?;
 
     let head = provider.get_block_number().await?;
     // Choose a subrange covering last 4 blocks
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
-    let robust_provider = RobustProvider::new(provider.root().clone());
-
     let mut scanner_with_range = EventScannerBuilder::latest(10)
         .from_block(start)
         .to_block(end)
-        .connect::<Ethereum>(robust_provider);
+        .connect::<Ethereum>(provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -257,8 +254,8 @@ async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
     let provider = setup.provider;
     let mut scanner = setup.scanner;
 
-    let contract_a = deploy_counter(Arc::new(provider.clone())).await?;
-    let contract_b = deploy_counter(Arc::new(provider.clone())).await?;
+    let contract_a = deploy_counter(Arc::new(provider.inner())).await?;
+    let contract_b = deploy_counter(Arc::new(provider.inner())).await?;
 
     // Listener only for contract A CountIncreased
     let filter_a = EventFilter::new()
@@ -294,7 +291,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     log_meta.push(contract.increase_and_get_meta().await?);
 
     // Mine 10 empty blocks
-    provider.anvil_mine(Some(10), None).await?;
+    provider.inner().anvil_mine(Some(10), None).await?;
     // Emit 1 more event
     log_meta.push(contract.increase_and_get_meta().await?);
 
@@ -302,11 +299,10 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
-    let robust_provider = RobustProvider::new(provider.root().clone());
     let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
-        .connect::<Ethereum>(robust_provider);
+        .connect::<Ethereum>(provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -328,6 +324,7 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     // Pick the expected tx's block number as the block range
     let expected_tx_hash = expected[0].tx_hash;
     let start = provider
+        .inner()
         .get_transaction_by_hash(expected_tx_hash)
         .await?
         .map(|t| t.block_number.unwrap())
@@ -335,11 +332,10 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
         .unwrap();
     let end = start;
 
-    let robust_provider = RobustProvider::new(provider.root().clone());
     let mut scanner_with_range = EventScannerBuilder::latest(5)
         .from_block(start)
         .to_block(end)
-        .connect::<Ethereum>(robust_provider);
+        .connect::<Ethereum>(provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
