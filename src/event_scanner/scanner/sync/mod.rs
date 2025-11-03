@@ -24,18 +24,18 @@ impl EventScannerBuilder<Synchronize> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Fetch the latest 10 events, then stream new events continuously
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProvider::new(provider.root().to_owned());
     /// let mut scanner = EventScannerBuilder::sync()
     ///     .from_latest(10)
-    ///     .connect_ws::<Ethereum>(ws_url)
-    ///     .await?;
+    ///     .connect(robust_provider);
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let mut stream = scanner.subscribe(filter);
@@ -120,18 +120,18 @@ impl EventScannerBuilder<Synchronize> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Sync from block 1_000_000 to present, then stream new events
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProvider::new(provider.root().to_owned());
     /// let mut scanner = EventScannerBuilder::sync()
     ///     .from_block(1_000_000)
-    ///     .connect_ws::<Ethereum>(ws_url)
-    ///     .await?;
+    ///     .connect(robust_provider);
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let mut stream = scanner.subscribe(filter);
@@ -159,16 +159,16 @@ impl EventScannerBuilder<Synchronize> {
     /// Using block tags:
     ///
     /// ```no_run
-    /// # use alloy::{network::Ethereum, eips::BlockNumberOrTag};
-    /// # use event_scanner::EventScannerBuilder;
+    /// # use alloy::{network::Ethereum, eips::BlockNumberOrTag, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProvider};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// // Sync from genesis block
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProvider::new(provider.root().to_owned());
     /// let mut scanner = EventScannerBuilder::sync()
     ///     .from_block(BlockNumberOrTag::Earliest)
-    ///     .connect_ws::<Ethereum>(ws_url)
-    ///     .await?;
+    ///     .connect(robust_provider);
     /// # Ok(())
     /// # }
     /// ```

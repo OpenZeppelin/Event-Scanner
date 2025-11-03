@@ -5,13 +5,14 @@
 //! use std::ops::RangeInclusive;
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
-//! use alloy::transports::http::reqwest::Url;
+//! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
 //!     ScannerError,
 //!     block_range_scanner::{
 //!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
 //!         DEFAULT_MAX_BLOCK_RANGE, Message,
 //!     },
+//!     robust_provider::RobustProvider,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -22,9 +23,9 @@
 //!     tracing_subscriber::fmt::init();
 //!
 //!     // Configuration
-//!     let block_range_scanner = BlockRangeScanner::new()
-//!         .connect_ws::<Ethereum>(Url::parse("ws://localhost:8546").unwrap())
-//!         .await?;
+//!     let provider = ProviderBuilder::new().connect("ws://localhost:8546").await?;
+//!     let robust_provider = RobustProvider::new(provider.root().to_owned());
+//!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider);
 //!
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
