@@ -35,12 +35,6 @@ impl<E: SolEvent, const N: usize> PartialEq<&[E; N]> for Message {
     }
 }
 
-impl<E: SolEvent, const N: usize> PartialEq<[E; N]> for Message {
-    fn eq(&self, other: &[E; N]) -> bool {
-        self.eq(&other)
-    }
-}
-
 impl<E: SolEvent> PartialEq<&[E]> for Message {
     fn eq(&self, other: &&[E]) -> bool {
         if let Message::Data(logs) = self {
