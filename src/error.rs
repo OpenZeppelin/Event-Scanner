@@ -38,6 +38,9 @@ pub enum ScannerError {
 
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
     RetryFailure(Arc<RpcError<TransportErrorKind>>),
+
+    #[error("No RPC providers support pubsub")]
+    PubSubNotSupported,
 }
 
 impl From<RobustProviderError> for ScannerError {
@@ -46,6 +49,7 @@ impl From<RobustProviderError> for ScannerError {
             RobustProviderError::Timeout => ScannerError::Timeout,
             RobustProviderError::RetryFailure(err) => ScannerError::RetryFailure(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
+            RobustProviderError::PubSubNotSupported => ScannerError::PubSubNotSupported,
         }
     }
 }

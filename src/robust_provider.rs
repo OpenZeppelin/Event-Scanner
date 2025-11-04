@@ -21,6 +21,8 @@ pub enum Error {
     RetryFailure(Arc<RpcError<TransportErrorKind>>),
     #[error("Block not found, Block Id: {0}")]
     BlockNotFound(BlockId),
+    #[error("No RPC providers support pubsub")]
+    PubSubNotSupported,
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {
@@ -258,8 +260,8 @@ impl<N: Network> RobustProvider<N> {
             }
         }
 
-        error!("All providers failed or timed out");
         // Return the last error encountered
+        error!("All providers failed or timed out");
         Err(last_error.unwrap_or(Error::Timeout))
     }
 
