@@ -1,7 +1,12 @@
 #[macro_export]
 macro_rules! assert_next {
     ($stream: expr, $expected: expr) => {
-        let message = tokio_stream::StreamExt::next(&mut $stream).await;
+        let message = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio_stream::StreamExt::next(&mut $stream),
+        )
+        .await
+        .expect("timed out");
         if let Some(msg) = message {
             assert_eq!(msg, $expected)
         } else {
