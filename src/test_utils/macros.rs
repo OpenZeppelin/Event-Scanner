@@ -18,7 +18,12 @@ macro_rules! assert_next {
 #[macro_export]
 macro_rules! assert_closed {
     ($stream: expr) => {
-        let message = tokio_stream::StreamExt::next(&mut $stream).await;
+        let message = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio_stream::StreamExt::next(&mut $stream),
+        )
+        .await
+        .expect("timed out");
         assert!(message.is_none())
     };
 }
