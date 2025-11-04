@@ -207,10 +207,6 @@ impl BlockRangeScanner {
     }
 
     /// Connects to an existing provider
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
     #[must_use]
     pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
         let robust_provider = RobustProvider::new(provider)
