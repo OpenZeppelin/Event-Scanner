@@ -6,8 +6,8 @@ pub mod setup_scanner;
 pub mod test_counter;
 
 pub(crate) use setup_scanner::{
-    setup_common, setup_historic_scanner, setup_latest_scanner, setup_live_scanner,
-    setup_sync_from_latest_scanner, setup_sync_scanner,
+    LiveScannerSetup, setup_common, setup_historic_scanner, setup_latest_scanner,
+    setup_live_scanner, setup_sync_from_latest_scanner, setup_sync_scanner,
 };
 pub(crate) use test_counter::{TestCounter, TestCounterExt, deploy_counter};
 

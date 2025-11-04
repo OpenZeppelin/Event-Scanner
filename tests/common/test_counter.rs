@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use alloy::{network::Ethereum, primitives::U256, providers::Provider, sol};
 use event_scanner::test_utils::LogMetadata;
 
@@ -34,7 +32,7 @@ sol! {
 
 pub async fn deploy_counter<P>(provider: P) -> anyhow::Result<TestCounter::TestCounterInstance<P>>
 where
-    P: alloy::providers::Provider<Ethereum> + Clone,
+    P: alloy::providers::Provider<Ethereum>,
 {
     let contract = TestCounter::deploy(provider).await?;
     Ok(contract)
@@ -50,7 +48,7 @@ pub(crate) trait TestCounterExt {
     ) -> anyhow::Result<LogMetadata<TestCounter::CountDecreased>>;
 }
 
-impl<P: Provider + Clone> TestCounterExt for TestCounter::TestCounterInstance<Arc<P>> {
+impl<P: Provider + Clone> TestCounterExt for TestCounter::TestCounterInstance<P> {
     async fn increase_and_get_meta(
         &self,
     ) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>> {

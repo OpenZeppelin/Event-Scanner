@@ -252,8 +252,8 @@ async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
     let provider = setup.provider;
     let mut scanner = setup.scanner;
 
-    let contract_a = deploy_counter(provider.clone()).await?;
-    let contract_b = deploy_counter(provider.clone()).await?;
+    let contract_a = deploy_counter(provider.inner().clone()).await?;
+    let contract_b = deploy_counter(provider.inner().clone()).await?;
 
     // Listener only for contract A CountIncreased
     let filter_a = EventFilter::new()

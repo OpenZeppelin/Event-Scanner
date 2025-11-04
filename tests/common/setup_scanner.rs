@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
@@ -24,7 +22,7 @@ where
     P: Provider<Ethereum> + Clone,
 {
     pub provider: RobustProvider<Ethereum>,
-    pub contract: TestCounter::TestCounterInstance<Arc<P>>,
+    pub contract: TestCounter::TestCounterInstance<P>,
     pub scanner: S,
     pub stream: ReceiverStream<Message>,
     #[allow(dead_code)]
@@ -43,12 +41,12 @@ pub async fn setup_common(
 ) -> anyhow::Result<(
     AnvilInstance,
     RobustProvider<Ethereum>,
-    TestCounter::TestCounterInstance<Arc<RootProvider>>,
+    TestCounter::TestCounterInstance<RootProvider>,
     EventFilter,
 )> {
     let anvil = spawn_anvil(block_interval)?;
     let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(Arc::new(provider.inner().clone())).await?;
+    let contract = deploy_counter(provider.inner().clone()).await?;
 
     let default_filter =
         EventFilter::new().contract_address(*contract.address()).event(CountIncreased::SIGNATURE);
