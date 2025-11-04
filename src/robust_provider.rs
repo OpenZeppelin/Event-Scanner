@@ -279,7 +279,12 @@ impl<N: Network> RobustProvider<N> {
 
         match timeout(
             self.max_timeout,
-            (|| operation(provider.clone())).retry(retry_strategy).sleep(tokio::time::sleep),
+            (|| operation(provider.clone()))
+                .retry(retry_strategy)
+                .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
+                    info!(error = %err, "RPC error retrying after {:?}", dur);
+                })
+                .sleep(tokio::time::sleep),
         )
         .await
         {
