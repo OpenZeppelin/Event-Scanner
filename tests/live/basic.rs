@@ -65,7 +65,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let setup = setup_live_scanner(Some(0.1), None, 0).await?;
     let provider = setup.provider.clone();
     let a = setup.contract.clone();
-    let b = deploy_counter(Arc::new(provider.inner())).await?;
+    let b = deploy_counter(provider.clone()).await?;
 
     let a_filter = EventFilter::new()
         .contract_address(*a.address())
