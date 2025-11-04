@@ -1,4 +1,4 @@
-use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
+use alloy::{providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 
 use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
     let robust_provider = RobustProvider::new(provider.clone());
-    let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(robust_provider);
+    let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
 
     let mut stream = scanner.subscribe(increase_filter);
 

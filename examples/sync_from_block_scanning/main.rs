@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use alloy::{network::Ethereum, providers::ProviderBuilder, sol, sol_types::SolEvent};
+use alloy::{providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
 use tokio::time::sleep;
@@ -59,8 +59,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let robust_provider = RobustProvider::new(provider.clone());
-    let mut scanner =
-        EventScannerBuilder::sync().from_block(0).connect::<Ethereum>(robust_provider);
+    let mut scanner = EventScannerBuilder::sync().from_block(0).connect(robust_provider);
 
     let mut stream = scanner.subscribe(increase_filter);
 

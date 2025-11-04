@@ -424,10 +424,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
+    async fn test_historic_event_stream_listeners_vector_updates() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let robust_provider = RobustProvider::new(provider.clone());
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(robust_provider);
+        let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
 
         assert!(scanner.listeners.is_empty());
 
@@ -437,21 +437,17 @@ mod tests {
         let _stream2 = scanner.subscribe(EventFilter::new());
         let _stream3 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 3);
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
+    async fn test_historic_event_stream_channel_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let robust_provider = RobustProvider::new(provider.clone());
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(robust_provider);
+        let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
 
         let _ = scanner.subscribe(EventFilter::new());
 
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
-
-        Ok(())
     }
 }

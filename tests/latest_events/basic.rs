@@ -1,6 +1,5 @@
 use alloy::{
     eips::BlockNumberOrTag,
-    network::Ethereum,
     providers::{Provider, ext::AnvilApi},
     sol_types::SolEvent,
 };
@@ -102,10 +101,8 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScannerBuilder::latest(10)
-        .from_block(start)
-        .to_block(end)
-        .connect::<Ethereum>(provider);
+    let mut scanner_with_range =
+        EventScannerBuilder::latest(10).from_block(start).to_block(end).connect(provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -297,10 +294,8 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScannerBuilder::latest(5)
-        .from_block(start)
-        .to_block(end)
-        .connect::<Ethereum>(provider);
+    let mut scanner_with_range =
+        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -330,10 +325,8 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
         .unwrap();
     let end = start;
 
-    let mut scanner_with_range = EventScannerBuilder::latest(5)
-        .from_block(start)
-        .to_block(end)
-        .connect::<Ethereum>(provider);
+    let mut scanner_with_range =
+        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider);
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
