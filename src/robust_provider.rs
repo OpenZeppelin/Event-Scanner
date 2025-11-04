@@ -384,4 +384,19 @@ mod tests {
 
         assert!(matches!(result, Err(Error::Timeout)));
     }
+
+    #[tokio::test]
+    async fn test_http_provider_skipped_when_pubsub_required() {
+        let provider = test_provider(100, 3, 10);
+
+        let result: Result<(), Error> = provider
+            .retry_with_total_timeout(
+                |_| async { Ok(()) },
+                true, // require pubsub
+            )
+            .await;
+
+        // Should get PubSubNotSupported error
+        assert!(matches!(result, Err(Error::PubSubNotSupported)));
+    }
 }
