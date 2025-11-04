@@ -33,13 +33,13 @@ impl From<RpcError<TransportErrorKind>> for Error {
 ///
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
+/// The first provider in the vector is treated as the primary provider.
 #[derive(Clone)]
 pub struct RobustProvider<N: Network> {
-    provider: RootProvider<N>,
+    providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
     max_retries: usize,
     retry_interval: Duration,
-    fallback_providers: Vec<RootProvider<N>>,
 }
 
 // RPC retry and timeout settings
@@ -52,14 +52,14 @@ pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 impl<N: Network> RobustProvider<N> {
     /// Create a new `RobustProvider` with default settings.
+    /// The provided provider is treated as the primary provider.
     #[must_use]
     pub fn new(provider: impl Provider<N>) -> Self {
         Self {
-            provider: provider.root().to_owned(),
+            providers: vec![provider.root().to_owned()],
             max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             retry_interval: DEFAULT_RETRY_INTERVAL,
-            fallback_providers: Vec::new(),
         }
     }
 
@@ -81,18 +81,23 @@ impl<N: Network> RobustProvider<N> {
         self
     }
 
-    /// Get a reference to the primary provider
+    /// Get a reference to the primary provider (the first provider in the list)
+    ///
+    /// # Panics
+    ///
+    /// If there are no providers set (this should never happen)
     #[must_use]
     pub fn root(&self) -> &RootProvider<N> {
-        &self.provider
+        // Safe to unwrap because we always have at least one provider
+        self.providers.first().expect("providers vector should never be empty")
     }
 
     /// Add a fallback provider to the list.
     ///
-    /// Fallback providers are used when the primary provider times out.
+    /// Fallback providers are used when the primary provider times out or fails.
     #[must_use]
     pub fn fallback(mut self, provider: RootProvider<N>) -> Self {
-        self.fallback_providers.push(provider);
+        self.providers.push(provider);
         self
     }
 
@@ -189,7 +194,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
         // We need this otherwise error is not clear
-        self.provider.client().expect_pubsub_frontend();
+        self.root().client().expect_pubsub_frontend();
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
@@ -221,43 +226,41 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        // Try primary provider first
-        let result = self.try_provider_with_timeout(&self.provider, &operation).await;
+        let mut last_error = None;
 
-        if let Ok(value) = result {
-            return Ok(value);
-        }
+        // Try each provider in sequence (first one is primary)
+        for (idx, provider) in self.providers.iter().enumerate() {
+            if idx == 0 {
+                info!("Attempting primary provider");
+            } else {
+                info!("Attempting fallback provider {} out of {}", idx, self.providers.len() - 1);
+            }
 
-        if self.fallback_providers.is_empty() {
-            return result;
-        }
+            let result = self.try_provider_with_timeout(provider, &operation).await;
 
-        info!("Primary provider failed, trying fallback provider(s)");
-
-        // Try each fallback provider
-        for (idx, fallback_provider) in self.fallback_providers.iter().enumerate() {
-            info!(
-                "Attempting fallback provider {} out of {}",
-                idx + 1,
-                self.fallback_providers.len()
-            );
-
-            let fallback_result =
-                self.try_provider_with_timeout(fallback_provider, &operation).await;
-
-            match fallback_result {
+            match result {
                 Ok(value) => {
-                    info!(provider_num = idx + 1, "Fallback provider succeeded");
+                    if idx > 0 {
+                        info!(provider_num = idx, "Fallback provider succeeded");
+                    }
                     return Ok(value);
                 }
                 Err(e) => {
-                    error!(provider_num = idx + 1, err = %e, "Fallback provider failed with error");
+                    last_error = Some(e);
+                    if idx == 0 {
+                        if self.providers.len() > 1 {
+                            info!("Primary provider failed, trying fallback provider(s)");
+                        }
+                    } else {
+                        error!(provider_num = idx, err = %last_error.as_ref().unwrap(), "Fallback provider failed with error");
+                    }
                 }
             }
         }
 
-        error!("All fallback providers failed or timed out");
-        Err(Error::Timeout)
+        error!("All providers failed or timed out");
+        // Return the last error encountered
+        Err(last_error.unwrap_or(Error::Timeout))
     }
 
     /// Try executing an operation with a specific provider with retry and timeout.
@@ -299,11 +302,10 @@ mod tests {
         retry_interval: u64,
     ) -> RobustProvider<Ethereum> {
         RobustProvider {
-            provider: RootProvider::new_http("http://localhost:8545".parse().unwrap()),
+            providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
             max_retries,
             retry_interval: Duration::from_millis(retry_interval),
-            fallback_providers: Vec::new(),
         }
     }
 
