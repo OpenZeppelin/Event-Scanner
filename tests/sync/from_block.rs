@@ -1,27 +1,27 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{eips::BlockNumberOrTag, primitives::U256, providers::ext::AnvilApi};
-use event_scanner::{Message, ScannerStatus, assert_next};
+use event_scanner::{Message, ScannerStatus, assert_empty, assert_next};
 use tokio::{sync::Mutex, time::timeout};
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio_stream::StreamExt;
 
-use crate::common::{
-    TestCounter, TestCounterExt, reorg_with_new_count_incr_txs, setup_sync_scanner,
-};
+use crate::common::{TestCounter, reorg_with_new_count_incr_txs, setup_sync_scanner};
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
-    let setup = setup_sync_scanner(Some(0.1), None, BlockNumberOrTag::Earliest, 0).await?;
+    let setup = setup_sync_scanner(None, None, BlockNumberOrTag::Earliest, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
     let mut stream = setup.stream;
 
+    // emit "historic" events
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
+    // now emit new events
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
@@ -39,8 +39,9 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // live events
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) },]);
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) },]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) }]);
+    assert_empty!(stream);
 
     Ok(())
 }
@@ -51,24 +52,24 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     let setup = setup_sync_scanner(None, None, future_start_block, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
+    let stream = setup.stream;
 
     // Start the scanner in sync mode from the future block
     scanner.start().await?;
 
     // Send 2 transactions that should not appear in the stream
-    _ = contract.increase_and_get_meta().await?;
-    _ = contract.increase_and_get_meta().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     // Assert: no messages should be received before reaching the start height
-    let inner = setup.stream.into_inner();
-    assert!(inner.is_empty());
-    let mut stream = ReceiverStream::new(inner);
+    let mut stream = assert_empty!(stream);
 
     // Act: emit an event that will be mined in block == future_start
-    let expected = &[contract.increase_and_get_meta().await?];
+    contract.increase().send().await?.watch().await?;
 
     // Assert: the first streamed message arrives and contains the expected event
-    assert_next!(stream, expected);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
+    assert_empty!(stream);
 
     Ok(())
 }
