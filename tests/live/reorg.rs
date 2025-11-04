@@ -5,7 +5,7 @@ use tokio_stream::StreamExt;
 use tokio::{sync::Mutex, time::timeout};
 
 use crate::common::{
-    LiveScannerSetup, TestCounter::CountIncreased, reorg_with_new_count_incr_txs, setup_common,
+    LiveScannerSetup, TestCounter::CountIncreased, reorg_with_new_count_incr_txs,
     setup_live_scanner,
 };
 use alloy::{
@@ -13,13 +13,12 @@ use alloy::{
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{EventScannerBuilder, Message, ScannerStatus, assert_empty, assert_next};
+use event_scanner::{Message, ScannerStatus, assert_empty, assert_next};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
-    let (_anvil, provider, contract, filter) = setup_common(None, None).await?;
-    let mut scanner = EventScannerBuilder::live().block_confirmations(0).connect(provider.clone());
-    let mut stream = scanner.subscribe(filter);
+    let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+        setup_live_scanner(None, None, 0).await?;
 
     scanner.start().await?;
 
