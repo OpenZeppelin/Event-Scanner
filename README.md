@@ -1,5 +1,6 @@
 # Event Scanner
 
+[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://opensource.org/licenses/MIT)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner/badge)](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner)
 
 > ⚠️ **WARNING: ACTIVE DEVELOPMENT** ⚠️
