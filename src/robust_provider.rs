@@ -228,7 +228,7 @@ impl<N: Network> RobustProvider<N> {
             return Ok(value);
         }
 
-        if result.is_err() && self.fallback_providers.is_empty() {
+        if self.fallback_providers.is_empty() {
             return result;
         }
 
