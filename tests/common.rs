@@ -2,8 +2,6 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(missing_docs)]
 
-use std::sync::Arc;
-
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
@@ -54,7 +52,7 @@ where
     P: Provider<Ethereum> + Clone,
 {
     pub provider: RootProvider,
-    pub contract: TestCounter::TestCounterInstance<Arc<P>>,
+    pub contract: TestCounter::TestCounterInstance<P>,
     pub scanner: S,
     pub stream: ReceiverStream<Message>,
     pub anvil: AnvilInstance,
@@ -72,12 +70,12 @@ pub async fn setup_common(
 ) -> anyhow::Result<(
     AnvilInstance,
     RootProvider,
-    TestCounter::TestCounterInstance<Arc<RootProvider>>,
+    TestCounter::TestCounterInstance<RootProvider>,
     EventFilter,
 )> {
     let anvil = spawn_anvil(block_interval)?;
     let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(Arc::new(provider.clone())).await?;
+    let contract = deploy_counter(provider.clone()).await?;
 
     let default_filter = EventFilter::new()
         .contract_address(*contract.address())
@@ -95,10 +93,8 @@ pub async fn setup_live_scanner(
 ) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScannerBuilder::live()
-        .block_confirmations(confirmations)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+    let mut scanner =
+        EventScannerBuilder::live().block_confirmations(confirmations).connect(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -116,8 +112,7 @@ pub async fn setup_sync_scanner(
     let mut scanner = EventScannerBuilder::sync()
         .from_block(from)
         .block_confirmations(confirmations)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+        .connect(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -135,8 +130,7 @@ pub async fn setup_sync_from_latest_scanner(
     let mut scanner = EventScannerBuilder::sync()
         .from_latest(latest)
         .block_confirmations(confirmations)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+        .connect(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -151,11 +145,8 @@ pub async fn setup_historic_scanner(
 ) -> anyhow::Result<HistoricScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner = EventScannerBuilder::historic()
-        .from_block(from)
-        .to_block(to)
-        .connect_ws(anvil.ws_endpoint_url())
-        .await?;
+    let mut scanner =
+        EventScannerBuilder::historic().from_block(from).to_block(to).connect(provider.clone());
 
     let stream = scanner.subscribe(filter);
 
@@ -187,7 +178,7 @@ pub async fn setup_latest_scanner(
 
 pub async fn reorg_with_new_count_incr_txs<P>(
     provider: RootProvider,
-    contract: TestCounter::TestCounterInstance<Arc<P>>,
+    contract: TestCounter::TestCounterInstance<P>,
     num_initial_events: u64,
     num_new_events: u64,
     reorg_depth: u64,
@@ -261,13 +252,14 @@ pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
 
 pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RootProvider> {
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
-    let provider = ProviderBuilder::new().wallet(wallet).connect(anvil.endpoint().as_str()).await?;
+    let provider =
+        ProviderBuilder::new().wallet(wallet).connect(anvil.ws_endpoint_url().as_str()).await?;
     Ok(provider.root().to_owned())
 }
 
 pub async fn deploy_counter<P>(provider: P) -> anyhow::Result<TestCounter::TestCounterInstance<P>>
 where
-    P: alloy::providers::Provider<Ethereum> + Clone,
+    P: alloy::providers::Provider<Ethereum>,
 {
     let contract = TestCounter::deploy(provider).await?;
     Ok(contract)
@@ -283,7 +275,7 @@ pub(crate) trait TestCounterExt {
     ) -> anyhow::Result<LogMetadata<TestCounter::CountDecreased>>;
 }
 
-impl<P: Provider + Clone> TestCounterExt for TestCounter::TestCounterInstance<Arc<P>> {
+impl<P: Provider + Clone> TestCounterExt for TestCounter::TestCounterInstance<P> {
     async fn increase_and_get_meta(
         &self,
     ) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>> {
