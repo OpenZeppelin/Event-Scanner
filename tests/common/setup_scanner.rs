@@ -46,7 +46,7 @@ pub async fn setup_common(
 )> {
     let anvil = spawn_anvil(block_interval)?;
     let provider = build_provider(&anvil).await?;
-    let contract = deploy_counter(provider.inner().clone()).await?;
+    let contract = deploy_counter(provider.root().clone()).await?;
 
     let default_filter =
         EventFilter::new().contract_address(*contract.address()).event(CountIncreased::SIGNATURE);

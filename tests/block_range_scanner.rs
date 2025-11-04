@@ -23,7 +23,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     let mut stream = client.stream_live(0).await?;
 
-    robust_provider.inner().anvil_mine(Some(5), None).await?;
+    robust_provider.root().anvil_mine(Some(5), None).await?;
 
     assert_next!(stream, 1..=1);
     assert_next!(stream, 2..=2);
@@ -32,7 +32,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
     assert_next!(stream, 5..=5);
     let mut stream = assert_empty!(stream);
 
-    robust_provider.inner().anvil_mine(Some(1), None).await?;
+    robust_provider.root().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 6..=6);
     assert_empty!(stream);
@@ -41,7 +41,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     let mut stream = client.stream_live(1).await?;
 
-    robust_provider.inner().anvil_mine(Some(5), None).await?;
+    robust_provider.root().anvil_mine(Some(5), None).await?;
 
     assert_next!(stream, 6..=6);
     assert_next!(stream, 7..=7);
@@ -50,7 +50,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
     assert_next!(stream, 10..=10);
     let mut stream = assert_empty!(stream);
 
-    robust_provider.inner().anvil_mine(Some(1), None).await?;
+    robust_provider.root().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 11..=11);
     assert_empty!(stream);
@@ -75,16 +75,16 @@ async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> 
 
     let stream = assert_empty!(stream);
 
-    robust_provider.inner().anvil_mine(Some(4), None).await?;
+    robust_provider.root().anvil_mine(Some(4), None).await?;
 
     let mut stream = assert_empty!(stream);
 
-    robust_provider.inner().anvil_mine(Some(1), None).await?;
+    robust_provider.root().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 20..=20);
     let mut stream = assert_empty!(stream);
 
-    robust_provider.inner().anvil_mine(Some(1), None).await?;
+    robust_provider.root().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 21..=21);
     assert_empty!(stream);

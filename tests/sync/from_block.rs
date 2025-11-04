@@ -85,7 +85,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     let contract = setup.contract.clone();
 
     // mine some blocks to establish a baseline
-    provider.clone().inner().anvil_mine(Some(10), None).await?;
+    provider.clone().root().anvil_mine(Some(10), None).await?;
 
     let scanner = setup.scanner;
     let mut stream = setup.stream;
@@ -98,7 +98,7 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
     }
 
     // mine enough blocks to confirm first 2 events (but not events 3 and 4)
-    provider.clone().inner().anvil_mine(Some(7), None).await?;
+    provider.clone().root().anvil_mine(Some(7), None).await?;
 
     // assert first 2 events are emitted (confirmed)
     assert_next!(stream, ScannerStatus::SwitchingToLive);
@@ -113,10 +113,10 @@ async fn block_confirmations_mitigate_reorgs_historic_to_live() -> anyhow::Resul
         (TransactionData::JSON(contract.increase().into_transaction_request()), 1),
     ];
 
-    provider.clone().inner().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
+    provider.clone().root().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
     // mine enough blocks to confirm the new events
-    provider.clone().inner().anvil_mine(Some(10), None).await?;
+    provider.clone().root().anvil_mine(Some(10), None).await?;
 
     // assert the new events from the reorged chain
     // No ReorgDetected should be emitted because the reorg happened before confirmation

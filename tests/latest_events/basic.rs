@@ -94,7 +94,7 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     expected.push(contract.increase_and_get_meta().await?);
 
     // manual empty block minting
-    provider.inner().anvil_mine(Some(2), None).await?;
+    provider.root().anvil_mine(Some(2), None).await?;
 
     let head = provider.get_block_number().await?;
     // Choose a subrange covering last 4 blocks
@@ -249,8 +249,8 @@ async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
     let provider = setup.provider;
     let mut scanner = setup.scanner;
 
-    let contract_a = deploy_counter(provider.inner().clone()).await?;
-    let contract_b = deploy_counter(provider.inner().clone()).await?;
+    let contract_a = deploy_counter(provider.root().clone()).await?;
+    let contract_b = deploy_counter(provider.root().clone()).await?;
 
     // Listener only for contract A CountIncreased
     let filter_a = EventFilter::new()
@@ -286,7 +286,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     log_meta.push(contract.increase_and_get_meta().await?);
 
     // Mine 10 empty blocks
-    provider.inner().anvil_mine(Some(10), None).await?;
+    provider.root().anvil_mine(Some(10), None).await?;
     // Emit 1 more event
     log_meta.push(contract.increase_and_get_meta().await?);
 
@@ -317,7 +317,7 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     // Pick the expected tx's block number as the block range
     let expected_tx_hash = expected[0].tx_hash;
     let start = provider
-        .inner()
+        .root()
         .get_transaction_by_hash(expected_tx_hash)
         .await?
         .map(|t| t.block_number.unwrap())

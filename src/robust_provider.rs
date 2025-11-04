@@ -81,9 +81,9 @@ impl<N: Network> RobustProvider<N> {
         self
     }
 
-    /// Get a reference to the inner provider
+    /// Get a reference to the primary provider
     #[must_use]
-    pub fn inner(&self) -> &RootProvider<N> {
+    pub fn root(&self) -> &RootProvider<N> {
         &self.provider
     }
 
@@ -91,7 +91,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// Fallback providers are used when the primary provider times out.
     #[must_use]
-    pub fn fallback_provider(mut self, provider: RootProvider<N>) -> Self {
+    pub fn fallback(mut self, provider: RootProvider<N>) -> Self {
         self.fallback_providers.push(provider);
         self
     }
