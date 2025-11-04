@@ -188,11 +188,11 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     provider.anvil_mine(Some(10), None).await?;
 
     // no `ReorgDetected` should be emitted
-    assert_next!(stream, [CountIncreased { newCount: U256::from(1) }]);
-    assert_next!(stream, [CountIncreased { newCount: U256::from(2) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
     assert_next!(
         stream,
-        [CountIncreased { newCount: U256::from(3) }, CountIncreased { newCount: U256::from(4) }]
+        &[CountIncreased { newCount: U256::from(3) }, CountIncreased { newCount: U256::from(4) }]
     );
     assert_empty!(stream);
 
