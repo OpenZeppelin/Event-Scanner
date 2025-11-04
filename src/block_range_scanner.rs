@@ -24,7 +24,7 @@
 //!
 //!     // Configuration
 //!     let provider = ProviderBuilder::new().connect("ws://localhost:8546").await?;
-//!     let robust_provider = RobustProvider::new(provider.root().to_owned());
+//!     let robust_provider = RobustProvider::new(provider);
 //!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider);
 //!
 //!     // Create client to send subscribe command to block scanner
