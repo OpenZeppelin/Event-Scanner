@@ -86,14 +86,28 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     // mine some initial "historic" blocks
     contract.increase().send().await?.watch().await?;
-    provider.anvil_mine(Some(5), None).await?;
+    provider.root().anvil_mine(Some(5), None).await?;
 
     scanner.start().await?;
 
-    // emit initial events
+    // emit "live" events
     for _ in 0..4 {
         contract.increase().send().await?.watch().await?;
     }
+
+    // assert only the first events has enough confirmations to be streamed
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    let stream = assert_empty!(stream);
+
+    // Perform a shallow reorg on the live tail
+    // note: we include new txs in the same post-reorg block to showcase that the scanner
+    // only streams the post-reorg, confirmed logs
+    let tx_block_pairs = vec![
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+    ];
+    provider.root().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
     // assert that still no events have been streamed
     let mut stream = assert_empty!(stream);
