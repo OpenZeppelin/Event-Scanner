@@ -31,6 +31,7 @@ This document outlines the input validation rules we plan to add to ensure the l
 - **Rationale:** Can't scan less than one block
 
 **Implementation approach:**
-- Add `assert!(max_block_range > 0, "max_block_range must be greater than 0")`
-- Add `tracing::warn!()` if `max_block_range > 10_000`
-- Message: "max_block_range set to {n} which is very large. This may cause RPC timeouts or rate limiting issues. Consider using a smaller value (default: 1000)."
+
+### Question
+
+Should we add info! tracing on 'abnormal' values i.e >64 block confirmations 
