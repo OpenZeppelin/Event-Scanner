@@ -426,4 +426,45 @@ mod tests {
 
         assert!(result.is_ok(), "Expected success with WS fallback, got: {result:?}");
     }
+
+    #[tokio::test]
+    async fn test_ws_fails_http_fallback_returns_primary_error() {
+        use alloy::providers::ProviderBuilder;
+        use alloy_node_bindings::Anvil;
+
+        let anvil_1 = Anvil::new().port(2222_u16).try_spawn().expect("Failed to start anvil");
+
+        let ws_provider = ProviderBuilder::new()
+            .connect_ws(WsConnect::new(anvil_1.ws_endpoint_url().as_str()))
+            .await
+            .expect("Failed to connect to WS");
+
+        let anvil = Anvil::new().port(1111_u16).try_spawn().expect("Failed to start anvil");
+        let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let robust = RobustProvider::new(ws_provider)
+            .fallback(http_provider.root().to_owned())
+            .max_timeout(Duration::from_secs(5))
+            .max_retries(1)
+            .retry_interval(Duration::from_millis(10));
+
+        drop(anvil_1);
+        let result = robust.subscribe_blocks().await;
+
+        let Err(err) = result else {
+            panic!("Expected error, got success");
+        };
+
+        if let Error::RpcError(rpc_err) = err {
+            assert!(
+                !matches!(
+                    rpc_err.as_ref(),
+                    RpcError::Transport(TransportErrorKind::PubsubUnavailable)
+                ),
+                "Should return primary provider's error (timeout/connection), not fallback's PubsubUnavailable error. Got: {rpc_err:?}",
+            );
+        } else {
+            //
+        }
+    }
 }
