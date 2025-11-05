@@ -451,20 +451,18 @@ mod tests {
         drop(anvil_1);
         let result = robust.subscribe_blocks().await;
 
-        let Err(err) = result else {
-            panic!("Expected error, got success");
-        };
+        assert!(result.is_err(), "Expected error when WS fails and HTTP fallback used");
 
-        if let Error::RpcError(rpc_err) = err {
-            assert!(
-                !matches!(
+        let err = result.unwrap_err();
+
+        match err {
+            Error::RpcError(rpc_err) => {
+                assert!(matches!(
                     rpc_err.as_ref(),
-                    RpcError::Transport(TransportErrorKind::PubsubUnavailable)
-                ),
-                "Should return primary provider's error (timeout/connection), not fallback's PubsubUnavailable error. Got: {rpc_err:?}",
-            );
-        } else {
-            //
+                    RpcError::Transport(TransportErrorKind::BackendGone)
+                ),);
+            }
+            _ => panic!("Expected Error::RpcError, got: {err:?}"),
         }
     }
 }
