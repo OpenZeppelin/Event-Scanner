@@ -5,9 +5,8 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::{FixedBytes, U256},
-    providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
-    rpc::types::anvil::{ReorgOptions, TransactionData},
+    primitives::U256,
+    providers::{Provider, ProviderBuilder, RootProvider},
     sol,
     sol_types::SolEvent,
 };
@@ -174,72 +173,6 @@ pub async fn setup_latest_scanner(
     let stream = scanner.subscribe(filter);
 
     Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
-}
-
-pub async fn reorg_with_new_count_incr_txs<P>(
-    provider: RootProvider,
-    contract: TestCounter::TestCounterInstance<P>,
-    num_initial_events: u64,
-    num_new_events: u64,
-    reorg_depth: u64,
-    same_block: bool,
-) -> anyhow::Result<Vec<FixedBytes<32>>>
-where
-    P: Provider<Ethereum> + Clone,
-{
-    let mut event_tx_hashes = vec![];
-
-    for _ in 0..num_initial_events {
-        let receipt = contract.increase().send().await.unwrap().get_receipt().await.unwrap();
-        event_tx_hashes.push(receipt.transaction_hash);
-    }
-
-    let mut tx_block_pairs = vec![];
-    for i in 0..num_new_events {
-        let tx = contract.increase().into_transaction_request();
-        tx_block_pairs.push((TransactionData::JSON(tx), if same_block { 0 } else { i }));
-    }
-
-    let pre_reorg_block = provider.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap();
-
-    provider.anvil_reorg(ReorgOptions { depth: reorg_depth, tx_block_pairs }).await.unwrap();
-
-    let post_reorg_block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(pre_reorg_block.number()))
-        .full()
-        .await?
-        .unwrap();
-
-    assert_eq!(post_reorg_block.header.number, pre_reorg_block.header.number);
-    assert_ne!(post_reorg_block.header.hash, pre_reorg_block.header.hash);
-
-    if same_block {
-        let new_block = provider
-            .get_block_by_number(BlockNumberOrTag::Number(
-                post_reorg_block.header.number - reorg_depth + 1,
-            ))
-            .await?
-            .unwrap();
-        assert_eq!(new_block.transactions.len() as u64, num_new_events);
-        for tx_hash in new_block.transactions.hashes() {
-            event_tx_hashes.push(tx_hash);
-        }
-    } else {
-        for i in 0..num_new_events {
-            let new_block = provider
-                .get_block_by_number(BlockNumberOrTag::Number(
-                    post_reorg_block.header.number - reorg_depth + 1 + i,
-                ))
-                .await?
-                .unwrap();
-            assert_eq!(new_block.transactions.len() as u64, 1);
-            for tx_hash in new_block.transactions.hashes() {
-                event_tx_hashes.push(tx_hash);
-            }
-        }
-    }
-
-    Ok(event_tx_hashes)
 }
 
 pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {

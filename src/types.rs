@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, fmt::Debug};
 
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -32,13 +32,14 @@ pub(crate) trait TryStream<T: Clone, E: Error + Clone> {
     async fn try_stream<M: Into<ScannerMessage<T, E>>>(&self, msg: M) -> bool;
 }
 
-impl<T: Clone, E: Error + Clone> TryStream<T, E> for mpsc::Sender<ScannerMessage<T, E>> {
+impl<T: Clone + Debug, E: Error + Clone> TryStream<T, E> for mpsc::Sender<ScannerMessage<T, E>> {
     async fn try_stream<M: Into<ScannerMessage<T, E>>>(&self, msg: M) -> bool {
-        if let Err(err) = self.send(msg.into()).await {
+        let msg = msg.into();
+        info!(msg = ?msg, "Sending message");
+        if let Err(err) = self.send(msg).await {
             warn!(error = %err, "Downstream channel closed, stopping stream");
             return false;
         }
-        info!("Message sent");
         true
     }
 }

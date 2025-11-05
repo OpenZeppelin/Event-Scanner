@@ -181,10 +181,10 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     ];
     provider.anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
-    // assert no events have still been streamed
+    // assert that still no events have been streamed
     let mut stream = assert_empty!(stream);
 
-    // mine some additional post-reorg blocks
+    // mine some additional post-reorg blocks to confirm previous blocks with logs
     provider.anvil_mine(Some(10), None).await?;
 
     // no `ReorgDetected` should be emitted
