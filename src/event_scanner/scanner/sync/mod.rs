@@ -96,8 +96,8 @@ impl EventScannerBuilder<Synchronize> {
     ///   confirmations. On reorg, emits [`ScannerStatus::ReorgDetected`][reorg], adjusts the next
     ///   confirmed window (possibly re-emitting confirmed portions), and continues streaming.
     ///
-    /// [subscribe]: from_latest::SyncFromLatestEventScanner::subscribe
-    /// [start]: from_latest::SyncFromLatestEventScanner::start
+    /// [subscribe]: crate::EventScanner::subscribe
+    /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
     #[must_use]
@@ -201,8 +201,8 @@ impl EventScannerBuilder<Synchronize> {
     ///   [`ScannerStatus::ReorgDetected`][reorg], adjusts the next confirmed window (possibly
     ///   re-emitting confirmed portions), and continues streaming.
     ///
-    /// [subscribe]: from_latest::SyncFromLatestEventScanner::subscribe
-    /// [start]: from_latest::SyncFromLatestEventScanner::start
+    /// [subscribe]: crate::EventScanner::subscribe
+    /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
     #[must_use]
