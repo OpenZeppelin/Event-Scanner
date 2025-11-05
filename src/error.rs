@@ -35,21 +35,14 @@ pub enum ScannerError {
 
     #[error("Operation timed out")]
     Timeout,
-
-    #[error("RPC call failed after exhausting all retry attempts: {0}")]
-    RetryFailure(Arc<RpcError<TransportErrorKind>>),
-
-    #[error("No RPC providers support pubsub")]
-    PubSubNotSupported,
 }
 
 impl From<RobustProviderError> for ScannerError {
     fn from(error: RobustProviderError) -> ScannerError {
         match error {
             RobustProviderError::Timeout => ScannerError::Timeout,
-            RobustProviderError::RetryFailure(err) => ScannerError::RetryFailure(err),
+            RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
-            RobustProviderError::PubSubNotSupported => ScannerError::PubSubNotSupported,
         }
     }
 }

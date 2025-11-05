@@ -18,16 +18,14 @@ pub enum Error {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
-    RetryFailure(Arc<RpcError<TransportErrorKind>>),
+    RpcError(Arc<RpcError<TransportErrorKind>>),
     #[error("Block not found, Block Id: {0}")]
     BlockNotFound(BlockId),
-    #[error("No RPC providers support pubsub")]
-    PubSubNotSupported,
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {
     fn from(err: RpcError<TransportErrorKind>) -> Self {
-        Error::RetryFailure(Arc::new(err))
+        Error::RpcError(Arc::new(err))
     }
 }
 
@@ -195,8 +193,11 @@ impl<N: Network> RobustProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
-        // We need this otherwise error is not clear
-        self.root().client().expect_pubsub_frontend();
+
+        self.root().client().pubsub_frontend().ok_or_else(|| {
+            Error::from(RpcError::Transport(TransportErrorKind::PubsubUnavailable))
+        })?;
+
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
@@ -366,7 +367,7 @@ mod tests {
             })
             .await;
 
-        assert!(matches!(result, Err(Error::RetryFailure(_))));
+        assert!(matches!(result, Err(Error::RpcError(_))));
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
@@ -389,14 +390,15 @@ mod tests {
     async fn test_http_provider_skipped_when_pubsub_required() {
         let provider = test_provider(100, 3, 10);
 
-        let result: Result<(), Error> = provider
-            .retry_with_total_timeout(
-                |_| async { Ok(()) },
-                true, // require pubsub
-            )
-            .await;
+        let result = provider.subscribe_blocks().await;
 
-        // Should get PubSubNotSupported error
-        assert!(matches!(result, Err(Error::PubSubNotSupported)));
+        let Err(Error::RpcError(err)) = result else {
+            panic!("Expected Error::RpcError, got: {result:?}");
+        };
+
+        assert!(
+            matches!(err.as_ref(), RpcError::Transport(TransportErrorKind::PubsubUnavailable)),
+            "Expected PubsubUnavailable error, got: {err:?}",
+        );
     }
 }
