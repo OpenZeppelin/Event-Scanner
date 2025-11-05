@@ -6,10 +6,8 @@ use alloy::{
 use alloy_node_bindings::Anvil;
 use event_scanner::{
     ScannerError, ScannerStatus, assert_closed, assert_empty, assert_next,
-    block_range_scanner::{BlockRangeScanner, Message},
-    robust_provider::RobustProvider,
+    block_range_scanner::BlockRangeScanner, robust_provider::RobustProvider,
 };
-use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyhow::Result<()> {
@@ -61,31 +59,25 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 #[tokio::test]
 async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
-    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint().as_str()).await?;
-    provider.anvil_mine(Some(20), None).await?;
-
-    let block_confirmations = 5;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
     let robust_provider = RobustProvider::new(provider);
-
     let client = BlockRangeScanner::new().connect(robust_provider.clone()).run()?;
 
-    let stream = client.stream_from(BlockNumberOrTag::Latest, block_confirmations).await?;
+    robust_provider.root().anvil_mine(Some(20), None).await?;
+
+    let stream = client.stream_from(BlockNumberOrTag::Latest, 5).await?;
 
     let stream = assert_empty!(stream);
 
     robust_provider.root().anvil_mine(Some(4), None).await?;
-
     let mut stream = assert_empty!(stream);
 
     robust_provider.root().anvil_mine(Some(1), None).await?;
-
     assert_next!(stream, 20..=20);
     let mut stream = assert_empty!(stream);
 
     robust_provider.root().anvil_mine(Some(1), None).await?;
-
     assert_next!(stream, 21..=21);
     assert_empty!(stream);
 
@@ -93,118 +85,100 @@ async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> 
 }
 
 #[tokio::test]
-#[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
 async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint().as_str()).await?;
+    let robust_provider = RobustProvider::new(provider);
+    let client = BlockRangeScanner::new().connect(robust_provider.clone()).run()?;
 
-    let block_confirmations = 5;
+    let mut stream = client.stream_live(5).await?;
 
-    let robust_provider = RobustProvider::new(provider.clone());
+    // mine initial blocks
+    robust_provider.root().anvil_mine(Some(10), None).await?;
 
-    let client = BlockRangeScanner::new().connect(robust_provider).run()?;
+    // assert initial block ranges immediately to avoid Anvil race condition:
+    //
+    // when a reorg happens after anvil_mine, Anvil occasionally first streams a non-zero block
+    // number, which makes it impossible to deterministically assert the next expected block range
+    // streamed by the scanner
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=1);
+    assert_next!(stream, 2..=2);
+    assert_next!(stream, 3..=3);
+    assert_next!(stream, 4..=4);
+    assert_next!(stream, 5..=5);
 
-    let mut receiver = client.stream_live(block_confirmations).await?;
+    // reorg less blocks than the block_confirmation config
+    robust_provider.root().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs: vec![] }).await?;
+    // mint additional blocks so the scanner processes reorged blocks
+    robust_provider.root().anvil_mine(Some(5), None).await?;
 
-    provider.anvil_mine(Some(10), None).await?;
+    // no ReorgDetected should be emitted
+    assert_next!(stream, 6..=6);
+    assert_next!(stream, 7..=7);
+    assert_next!(stream, 8..=8);
+    assert_next!(stream, 9..=9);
+    assert_next!(stream, 10..=10);
+    assert_empty!(stream);
 
-    provider
-        .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
-        .await?;
-
-    provider.anvil_mine(Some(20), None).await?;
-
-    let mut block_range_start = 0;
-
-    let end_loop = 20;
-    let mut i = 0;
-    while let Some(Message::Data(range)) = receiver.next().await {
-        if block_range_start == 0 {
-            block_range_start = *range.start();
-        }
-
-        assert_eq!(block_range_start, *range.start());
-        assert!(range.end() >= range.start());
-        block_range_start = *range.end() + 1;
-        i += 1;
-        if i == end_loop {
-            break;
-        }
-    }
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
 async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
-    let anvil = Anvil::new().block_time(1).try_spawn()?;
-
-    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint().as_str()).await?;
-
-    let block_confirmations = 3;
-
-    let robust_provider = RobustProvider::new(provider.clone());
-
-    let client = BlockRangeScanner::new().connect(robust_provider).run()?;
-
-    let mut receiver = client.stream_live(block_confirmations).await?;
-
-    provider.anvil_mine(Some(10), None).await?;
-
-    provider
-        .anvil_reorg(ReorgOptions { depth: block_confirmations + 5, tx_block_pairs: vec![] })
-        .await?;
-
-    provider.anvil_mine(Some(30), None).await?;
-    receiver.close();
-
-    let mut block_range_start = 0;
-
-    let mut block_num = vec![];
-    let mut reorg_detected = false;
-    while let Some(msg) = receiver.next().await {
-        match msg {
-            Message::Data(range) => {
-                if block_range_start == 0 {
-                    block_range_start = *range.start();
-                }
-                block_num.push(range);
-                if block_num.len() == 15 {
-                    break;
-                }
-            }
-            Message::Status(ScannerStatus::ReorgDetected) => {
-                reorg_detected = true;
-            }
-            _ => {
-                break;
-            }
-        }
-    }
-    assert!(reorg_detected, "Reorg should have been detected");
-
-    // Generally check that there is a reorg in the range i.e.
-    //                                                        REORG
-    // [0..=0, 1..=1, 2..=2, 3..=3, 4..=4, 5..=5, 6..=6, 7..=7, 3..=3, 4..=4, 5..=5, 6..=6,
-    // 7..=7, 8..=8, 9..=9] (Less flaky to assert this way)
-    let mut found_reorg_pattern = false;
-    for window in block_num.windows(2) {
-        if window[1].start() < window[0].end() {
-            found_reorg_pattern = true;
-            break;
-        }
-    }
-    assert!(found_reorg_pattern,);
-
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "too flaky, un-ignore once a full local node is used: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
-async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+    let robust_provider = RobustProvider::new(provider);
+    let client = BlockRangeScanner::new().connect(robust_provider.clone()).run()?;
+
+    let mut stream = client.stream_live(3).await?;
+
+    // mine initial blocks
+    robust_provider.root().anvil_mine(Some(10), None).await?;
+
+    // assert initial block ranges immediately to avoid Anvil race condition:
+    //
+    // when a reorg happens after anvil_mine, Anvil occasionally first streams a non-zero block
+    // number, which makes it impossible to deterministically assert the next expected block range
+    // streamed by the scanner
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=1);
+    assert_next!(stream, 2..=2);
+    assert_next!(stream, 3..=3);
+    assert_next!(stream, 4..=4);
+    assert_next!(stream, 5..=5);
+    assert_next!(stream, 6..=6);
+    assert_next!(stream, 7..=7);
+
+    // reorg more blocks than the block_confirmation config
+    robust_provider.root().anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
+    // mint additional blocks
+    robust_provider.root().anvil_mine(Some(3), None).await?;
+
+    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=1);
+    assert_next!(stream, 2..=2);
+    assert_next!(stream, 3..=3);
+    assert_next!(stream, 4..=4);
+    assert_next!(stream, 5..=5);
+    assert_next!(stream, 6..=6);
+    assert_next!(stream, 7..=7);
+    assert_next!(stream, 8..=8);
+    assert_next!(stream, 9..=9);
+    assert_next!(stream, 10..=10);
+    assert_empty!(stream);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "historical currently has no reorg logic: https://github.com/OpenZeppelin/Event-Scanner/issues/56"]
+async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
     provider.anvil_mine(Some(120), None).await?;
 
@@ -234,7 +208,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
 }
 
 #[tokio::test]
-#[ignore = "too flaky, un-ignore once a full local node is used: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
+#[ignore = "historical currently has no reorg logic: https://github.com/OpenZeppelin/Event-Scanner/issues/56"]
 async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
@@ -270,7 +244,6 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 #[tokio::test]
 async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
     provider.anvil_mine(Some(100), None).await?;
@@ -320,8 +293,8 @@ async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
 #[tokio::test]
 async fn historic_mode_normalises_start_and_end_block() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
     provider.anvil_mine(Some(11), None).await?;
 
     let robust_provider = RobustProvider::new(provider);
@@ -333,13 +306,18 @@ async fn historic_mode_normalises_start_and_end_block() -> anyhow::Result<()> {
     assert_next!(stream, 10..=10);
     assert_closed!(stream);
 
+    let mut stream = client.stream_historical(0, 10).await?;
+    assert_next!(stream, 0..=4);
+    assert_next!(stream, 5..=9);
+    assert_next!(stream, 10..=10);
+    assert_closed!(stream);
+
     Ok(())
 }
 
 #[tokio::test]
 async fn rewind_single_batch_when_epoch_larger_than_range() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
     provider.anvil_mine(Some(150), None).await?;
@@ -359,7 +337,6 @@ async fn rewind_single_batch_when_epoch_larger_than_range() -> anyhow::Result<()
 #[tokio::test]
 async fn rewind_exact_multiple_of_epoch_creates_full_batches_in_reverse() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
     provider.anvil_mine(Some(15), None).await?;
@@ -381,7 +358,6 @@ async fn rewind_exact_multiple_of_epoch_creates_full_batches_in_reverse() -> any
 #[tokio::test]
 async fn rewind_with_remainder_trims_first_batch_to_stream_start() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
     provider.anvil_mine(Some(15), None).await?;
@@ -403,7 +379,6 @@ async fn rewind_with_remainder_trims_first_batch_to_stream_start() -> anyhow::Re
 #[tokio::test]
 async fn rewind_single_block_range() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
     provider.anvil_mine(Some(15), None).await?;
@@ -422,7 +397,6 @@ async fn rewind_single_block_range() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rewind_epoch_of_one_sends_each_block_in_reverse_order() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
 
     provider.anvil_mine(Some(15), None).await?;
@@ -445,8 +419,8 @@ async fn rewind_epoch_of_one_sends_each_block_in_reverse_order() -> anyhow::Resu
 #[tokio::test]
 async fn command_rewind_defaults_latest_to_earliest_batches_correctly() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
     // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
     provider.anvil_mine(Some(20), None).await?;
 
@@ -466,8 +440,8 @@ async fn command_rewind_defaults_latest_to_earliest_batches_correctly() -> anyho
 #[tokio::test]
 async fn command_rewind_handles_start_and_end_in_any_order() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
     // Ensure blocks at 3 and 15 exist
     provider.anvil_mine(Some(16), None).await?;
 
