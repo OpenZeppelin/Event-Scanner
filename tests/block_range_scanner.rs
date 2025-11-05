@@ -7,9 +7,8 @@ use alloy::{
 use alloy_node_bindings::Anvil;
 use event_scanner::{
     ScannerError, ScannerStatus, assert_closed, assert_empty, assert_next,
-    block_range_scanner::{BlockRangeScanner, Message},
+    block_range_scanner::BlockRangeScanner,
 };
-use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyhow::Result<()> {
@@ -95,21 +94,73 @@ async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> 
 async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
-
-    let block_confirmations = 5;
-
     let client = BlockRangeScanner::new().connect::<Ethereum>(provider.root().clone()).run()?;
 
-    let mut stream = client.stream_live(block_confirmations).await?;
+    let mut stream = client.stream_live(5).await?;
 
+    // mine initial blocks
     provider.anvil_mine(Some(10), None).await?;
 
-    provider
-        .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
-        .await?;
+    // assert initial block ranges immediately to avoid Anvil race condition:
+    //
+    // when a reorg happens after anvil_mine, Anvil occasionally first streams a non-zero block
+    // number, which makes it impossible to deterministically assert the next expected block range
+    // streamed by the scanner
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=1);
+    assert_next!(stream, 2..=2);
+    assert_next!(stream, 3..=3);
+    assert_next!(stream, 4..=4);
+    assert_next!(stream, 5..=5);
 
+    // reorg less blocks than the block_confirmation config
+    provider.anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs: vec![] }).await?;
+    // mint additional blocks so the scanner processes reorged blocks
     provider.anvil_mine(Some(5), None).await?;
 
+    // no ReorgDetected should be emitted
+    assert_next!(stream, 6..=6);
+    assert_next!(stream, 7..=7);
+    assert_next!(stream, 8..=8);
+    assert_next!(stream, 9..=9);
+    assert_next!(stream, 10..=10);
+    assert_empty!(stream);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+    let client =
+        BlockRangeScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?.run()?;
+
+    let mut stream = client.stream_live(3).await?;
+
+    // mine initial blocks
+    provider.anvil_mine(Some(10), None).await?;
+
+    // assert initial block ranges immediately to avoid Anvil race condition:
+    //
+    // when a reorg happens after anvil_mine, Anvil occasionally first streams a non-zero block
+    // number, which makes it impossible to deterministically assert the next expected block range
+    // streamed by the scanner
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=1);
+    assert_next!(stream, 2..=2);
+    assert_next!(stream, 3..=3);
+    assert_next!(stream, 4..=4);
+    assert_next!(stream, 5..=5);
+    assert_next!(stream, 6..=6);
+    assert_next!(stream, 7..=7);
+
+    // reorg more blocks than the block_confirmation config
+    provider.anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
+    // mint additional blocks
+    provider.anvil_mine(Some(3), None).await?;
+
+    assert_next!(stream, ScannerStatus::ReorgDetected);
     assert_next!(stream, 0..=0);
     assert_next!(stream, 1..=1);
     assert_next!(stream, 2..=2);
@@ -122,70 +173,6 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
     assert_next!(stream, 9..=9);
     assert_next!(stream, 10..=10);
     assert_empty!(stream);
-
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
-async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<()> {
-    let anvil = Anvil::new().block_time(1).try_spawn()?;
-
-    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-
-    let block_confirmations = 3;
-
-    let client =
-        BlockRangeScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?.run()?;
-
-    let mut receiver = client.stream_live(block_confirmations).await?;
-
-    provider.anvil_mine(Some(10), None).await?;
-
-    provider
-        .anvil_reorg(ReorgOptions { depth: block_confirmations + 5, tx_block_pairs: vec![] })
-        .await?;
-
-    provider.anvil_mine(Some(30), None).await?;
-    receiver.close();
-
-    let mut block_range_start = 0;
-
-    let mut block_num = vec![];
-    let mut reorg_detected = false;
-    while let Some(msg) = receiver.next().await {
-        match msg {
-            Message::Data(range) => {
-                if block_range_start == 0 {
-                    block_range_start = *range.start();
-                }
-                block_num.push(range);
-                if block_num.len() == 15 {
-                    break;
-                }
-            }
-            Message::Status(ScannerStatus::ReorgDetected) => {
-                reorg_detected = true;
-            }
-            _ => {
-                break;
-            }
-        }
-    }
-    assert!(reorg_detected, "Reorg should have been detected");
-
-    // Generally check that there is a reorg in the range i.e.
-    //                                                        REORG
-    // [0..=0, 1..=1, 2..=2, 3..=3, 4..=4, 5..=5, 6..=6, 7..=7, 3..=3, 4..=4, 5..=5, 6..=6,
-    // 7..=7, 8..=8, 9..=9] (Less flaky to assert this way)
-    let mut found_reorg_pattern = false;
-    for window in block_num.windows(2) {
-        if window[1].start() < window[0].end() {
-            found_reorg_pattern = true;
-            break;
-        }
-    }
-    assert!(found_reorg_pattern,);
 
     Ok(())
 }
