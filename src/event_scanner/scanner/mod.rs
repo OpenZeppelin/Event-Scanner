@@ -217,7 +217,8 @@ impl EventScannerBuilder<Unspecified> {
     /// EventScannerBuilder::sync().from_latest(10);
     /// ```
     ///
-    /// See the [sync module documentation](sync) for details on each mode.
+    /// See [`from_block`](EventScannerBuilder::from_block) and
+    /// [`from_latest`](EventScannerBuilder::from_latest) for details on each mode.
     #[must_use]
     pub fn sync() -> EventScannerBuilder<Synchronize> {
         EventScannerBuilder::default()
@@ -316,7 +317,7 @@ impl EventScannerBuilder<Unspecified> {
     /// [subscribe]: EventScanner::subscribe
     /// [start]: EventScanner::start
     /// [sync_from_latest]: EventScannerBuilder::from_latest
-    /// [reorg]: ScannerStatus::ReorgDetected
+    /// [reorg]: crate::ScannerStatus::ReorgDetected
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
         EventScannerBuilder::<LatestEvents>::new(count)
