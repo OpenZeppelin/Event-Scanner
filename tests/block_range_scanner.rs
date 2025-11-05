@@ -1,7 +1,7 @@
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
     network::Ethereum,
-    providers::{ProviderBuilder, ext::AnvilApi},
+    providers::{Provider, ProviderBuilder, ext::AnvilApi},
     rpc::types::anvil::ReorgOptions,
 };
 use alloy_node_bindings::Anvil;
@@ -92,18 +92,15 @@ async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> 
 }
 
 #[tokio::test]
-#[ignore = "Flaky test, see: https://github.com/OpenZeppelin/Event-Scanner/issues/109"]
 async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
-
-    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
     let block_confirmations = 5;
 
-    let client =
-        BlockRangeScanner::new().connect_ws::<Ethereum>(anvil.ws_endpoint_url()).await?.run()?;
+    let client = BlockRangeScanner::new().connect::<Ethereum>(provider.root().clone()).run()?;
 
-    let mut receiver = client.stream_live(block_confirmations).await?;
+    let mut stream = client.stream_live(block_confirmations).await?;
 
     provider.anvil_mine(Some(10), None).await?;
 
@@ -111,25 +108,21 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
         .anvil_reorg(ReorgOptions { depth: block_confirmations - 1, tx_block_pairs: vec![] })
         .await?;
 
-    provider.anvil_mine(Some(20), None).await?;
+    provider.anvil_mine(Some(5), None).await?;
 
-    let mut block_range_start = 0;
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=1);
+    assert_next!(stream, 2..=2);
+    assert_next!(stream, 3..=3);
+    assert_next!(stream, 4..=4);
+    assert_next!(stream, 5..=5);
+    assert_next!(stream, 6..=6);
+    assert_next!(stream, 7..=7);
+    assert_next!(stream, 8..=8);
+    assert_next!(stream, 9..=9);
+    assert_next!(stream, 10..=10);
+    assert_empty!(stream);
 
-    let end_loop = 20;
-    let mut i = 0;
-    while let Some(Message::Data(range)) = receiver.next().await {
-        if block_range_start == 0 {
-            block_range_start = *range.start();
-        }
-
-        assert_eq!(block_range_start, *range.start());
-        assert!(range.end() >= range.start());
-        block_range_start = *range.end() + 1;
-        i += 1;
-        if i == end_loop {
-            break;
-        }
-    }
     Ok(())
 }
 
