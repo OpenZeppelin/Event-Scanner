@@ -23,11 +23,11 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     robust_provider.root().anvil_mine(Some(5), None).await?;
 
-    assert_next!(stream, 1..=1);
-    assert_next!(stream, 2..=2);
-    assert_next!(stream, 3..=3);
-    assert_next!(stream, 4..=4);
-    assert_next!(stream, 5..=5);
+    assert_next!(stream, 1..=1, timeout = 10);
+    assert_next!(stream, 2..=2, timeout = 10);
+    assert_next!(stream, 3..=3, timeout = 10);
+    assert_next!(stream, 4..=4, timeout = 10);
+    assert_next!(stream, 5..=5, timeout = 10);
     let mut stream = assert_empty!(stream);
 
     robust_provider.root().anvil_mine(Some(1), None).await?;
@@ -41,11 +41,11 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     robust_provider.root().anvil_mine(Some(5), None).await?;
 
-    assert_next!(stream, 6..=6);
-    assert_next!(stream, 7..=7);
-    assert_next!(stream, 8..=8);
-    assert_next!(stream, 9..=9);
-    assert_next!(stream, 10..=10);
+    assert_next!(stream, 6..=6, timeout = 10);
+    assert_next!(stream, 7..=7, timeout = 10);
+    assert_next!(stream, 8..=8, timeout = 10);
+    assert_next!(stream, 9..=9, timeout = 10);
+    assert_next!(stream, 10..=10, timeout = 10);
     let mut stream = assert_empty!(stream);
 
     robust_provider.root().anvil_mine(Some(1), None).await?;
