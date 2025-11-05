@@ -10,7 +10,7 @@ use alloy::{
 };
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
-use tokio::time::timeout;
+use tokio::time::{error as TokioError, timeout};
 use tracing::{error, info};
 
 #[derive(Error, Debug, Clone)]
@@ -29,6 +29,12 @@ impl From<RpcError<TransportErrorKind>> for Error {
     }
 }
 
+impl From<TokioError::Elapsed> for Error {
+    fn from(_: TokioError::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
+
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
 /// This wrapper around Alloy providers automatically handles retries,
@@ -44,9 +50,9 @@ pub struct RobustProvider<N: Network> {
 
 // RPC retry and timeout settings
 /// Default timeout used by `RobustProvider`
-pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default maximum number of retry attempts.
-pub const DEFAULT_MAX_RETRIES: usize = 5;
+pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
 pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -247,10 +253,8 @@ impl<N: Network> RobustProvider<N> {
                 }
                 Err(e) => {
                     last_error = Some(e);
-                    if idx == 0 {
-                        if self.providers.len() > 1 {
-                            info!("Primary provider failed, trying fallback provider(s)");
-                        }
+                    if idx == 0 && self.providers.len() > 1 {
+                        info!("Primary provider failed, trying fallback provider(s)");
                     } else {
                         error!(provider_num = idx, err = %last_error.as_ref().unwrap(), "Fallback provider failed with error");
                     }
@@ -277,7 +281,7 @@ impl<N: Network> RobustProvider<N> {
             .with_max_times(self.max_retries)
             .with_min_delay(self.retry_interval);
 
-        match timeout(
+        timeout(
             self.max_timeout,
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
@@ -287,10 +291,8 @@ impl<N: Network> RobustProvider<N> {
                 .sleep(tokio::time::sleep),
         )
         .await
-        {
-            Ok(res) => res.map_err(Error::from),
-            Err(_) => Err(Error::Timeout),
-        }
+        .map_err(Error::from)?
+        .map_err(Error::from)
     }
 }
 
