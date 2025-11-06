@@ -10,8 +10,6 @@ use crate::robust_provider::Error as RobustProviderError;
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
-    // #[error("WebSocket error: {0}")]
-    // WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("Serialization error: {0}")]
     SerializationError(Arc<serde_json::Error>),
 
