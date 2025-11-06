@@ -1,14 +1,12 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::U256,
     providers::{Provider, ext::AnvilApi},
     sol_types::SolEvent,
 };
 
 use crate::common::{
-    TestCounter::{self, CountIncreased},
-    TestCounterExt, deploy_counter, setup_common, setup_latest_scanner,
+    TestCounter, TestCounterExt, deploy_counter, setup_common, setup_latest_scanner,
 };
 use event_scanner::{
     EventFilter, EventScannerBuilder, assert_closed, assert_next, test_utils::LogMetadata,
@@ -248,35 +246,34 @@ async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> any
 }
 
 #[tokio::test]
-async fn latest_scanner_ignores_non_tracked_contract() -> anyhow::Result<()> {
+async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
     // Manual setup to deploy two contracts
-    let setup = setup_latest_scanner(None, None, 5, None, None).await?;
+    let count = 5;
+    let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let provider = setup.provider;
-    let scanner = setup.scanner;
+    let mut scanner = setup.scanner;
 
-    let contract_a = setup.contract;
-    let contract_b = deploy_counter(provider).await?;
+    let contract_a = deploy_counter(provider.clone()).await?;
+    let contract_b = deploy_counter(provider.clone()).await?;
 
     // Listener only for contract A CountIncreased
-    let mut stream_a = setup.stream;
+    let filter_a = EventFilter::new()
+        .contract_address(*contract_a.address())
+        .event(TestCounter::CountIncreased::SIGNATURE);
+
+    let mut stream_a = scanner.subscribe(filter_a);
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
-    contract_a.increase().send().await?.watch().await?;
-    contract_b.increase().send().await?.watch().await?;
-    contract_a.increase().send().await?.watch().await?;
-    contract_b.increase().send().await?.watch().await?;
-    contract_a.increase().send().await?.watch().await?;
+    let mut a_log_meta = Vec::new();
+    a_log_meta.push(contract_a.increase_and_get_meta().await?);
+    _ = contract_b.increase_and_get_meta().await?; // ignored by filter
+    a_log_meta.push(contract_a.increase_and_get_meta().await?);
+    _ = contract_b.increase_and_get_meta().await?; // ignored by filter
+    a_log_meta.push(contract_a.increase_and_get_meta().await?);
 
     scanner.start().await?;
 
-    assert_next!(
-        stream_a,
-        &[
-            CountIncreased { newCount: U256::from(1) },
-            CountIncreased { newCount: U256::from(2) },
-            CountIncreased { newCount: U256::from(3) },
-        ]
-    );
+    assert_next!(stream_a, &a_log_meta);
     assert_closed!(stream_a);
 
     Ok(())
