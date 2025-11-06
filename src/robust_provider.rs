@@ -69,18 +69,21 @@ impl<N: Network> RobustProvider<N> {
         }
     }
 
+    /// Set the maximum timeout for RPC operations.
     #[must_use]
     pub fn max_timeout(mut self, timeout: Duration) -> Self {
         self.max_timeout = timeout;
         self
     }
 
+    /// Set the maximum number of retry attempts.
     #[must_use]
     pub fn max_retries(mut self, max_retries: usize) -> Self {
         self.max_retries = max_retries;
         self
     }
 
+    /// Set the base delay for exponential backoff retries.
     #[must_use]
     pub fn min_delay(mut self, retry_interval: Duration) -> Self {
         self.min_delay = retry_interval;
