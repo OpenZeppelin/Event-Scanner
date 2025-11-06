@@ -45,7 +45,7 @@ pub struct RobustProvider<N: Network> {
     providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
     max_retries: usize,
-    retry_interval: Duration,
+    min_delay: Duration,
 }
 
 // RPC retry and timeout settings
@@ -54,7 +54,7 @@ pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
-pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
 impl<N: Network> RobustProvider<N> {
     /// Create a new `RobustProvider` with default settings.
@@ -65,7 +65,7 @@ impl<N: Network> RobustProvider<N> {
             providers: vec![provider.root().to_owned()],
             max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
-            retry_interval: DEFAULT_RETRY_INTERVAL,
+            min_delay: DEFAULT_MIN_DELAY,
         }
     }
 
@@ -83,7 +83,7 @@ impl<N: Network> RobustProvider<N> {
 
     #[must_use]
     pub fn min_delay(mut self, retry_interval: Duration) -> Self {
-        self.retry_interval = retry_interval;
+        self.min_delay = retry_interval;
         self
     }
 
@@ -279,7 +279,7 @@ impl<N: Network> RobustProvider<N> {
     {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
-            .with_min_delay(self.retry_interval);
+            .with_min_delay(self.min_delay);
 
         timeout(
             self.max_timeout,
@@ -312,7 +312,7 @@ mod tests {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
             max_retries,
-            retry_interval: Duration::from_millis(retry_interval),
+            min_delay: Duration::from_millis(retry_interval),
         }
     }
 
