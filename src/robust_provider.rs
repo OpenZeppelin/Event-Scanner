@@ -82,7 +82,7 @@ impl<N: Network> RobustProvider<N> {
     }
 
     #[must_use]
-    pub fn retry_interval(mut self, retry_interval: Duration) -> Self {
+    pub fn min_delay(mut self, retry_interval: Duration) -> Self {
         self.retry_interval = retry_interval;
         self
     }
