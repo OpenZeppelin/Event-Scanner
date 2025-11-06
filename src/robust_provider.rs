@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
@@ -239,7 +239,7 @@ impl<N: Network> RobustProvider<N> {
     /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
     /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    async fn retry_with_total_timeout<T, F, Fut>(
+    async fn retry_with_total_timeout<T: Debug, F, Fut>(
         &self,
         operation: F,
         require_pubsub: bool,
@@ -248,44 +248,41 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let mut last_error = None;
         let mut skipped_count = 0;
 
-        // Try each provider in sequence (first one is primary)
-        for (idx, provider) in self.providers.iter().enumerate() {
-            // Skip providers that don't support pubsub if required
+        let mut providers = self.providers.iter();
+        let primary = providers.next().expect("should have primary provider");
+
+        let result = self.try_provider_with_timeout(primary, &operation).await;
+
+        if result.is_ok() {
+            return result;
+        }
+
+        let mut last_error = result.unwrap_err();
+
+        if self.providers.len() > 1 {
+            info!("Primary provider failed, trying fallback provider(s)");
+        }
+
+        // This loop starts at index 1 automatically
+        for (idx, provider) in providers.enumerate() {
+            let fallback_num = idx + 1;
             if require_pubsub && !Self::supports_pubsub(provider) {
-                if idx == 0 {
-                    info!("Primary provider doesn't support pubsub, skipping");
-                } else {
-                    info!("Fallback provider {} doesn't support pubsub, skipping", idx);
-                }
+                info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
                 skipped_count += 1;
                 continue;
             }
+            info!("Attempting fallback provider {}/{}", fallback_num, self.providers.len() - 1);
 
-            if idx == 0 {
-                info!("Attempting primary provider");
-            } else {
-                info!("Attempting fallback provider {} out of {}", idx, self.providers.len() - 1);
-            }
-
-            let result = self.try_provider_with_timeout(provider, &operation).await;
-
-            match result {
+            match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
-                    if idx > 0 {
-                        info!(provider_num = idx, "Fallback provider succeeded");
-                    }
+                    info!(provider_num = fallback_num, "Fallback provider succeeded");
                     return Ok(value);
                 }
                 Err(e) => {
-                    last_error = Some(e);
-                    if idx == 0 && self.providers.len() > 1 {
-                        info!("Primary provider failed, trying fallback provider(s)");
-                    } else if idx > 0 {
-                        error!(provider_num = idx, err = %last_error.as_ref().unwrap(), "Fallback provider failed with error");
-                    }
+                    error!(provider_num = fallback_num, err = %e, "Fallback provider failed");
+                    last_error = e;
                 }
             }
         }
@@ -298,7 +295,7 @@ impl<N: Network> RobustProvider<N> {
 
         // Return the last error encountered
         error!("All providers failed or timed out");
-        Err(last_error.unwrap_or(Error::Timeout))
+        Err(last_error)
     }
 
     /// Try executing an operation with a specific provider with retry and timeout.
