@@ -228,6 +228,10 @@ impl EventScannerBuilder<Unspecified> {
 
     /// Streams the latest `count` matching events per registered listener.
     ///
+    /// # Panics
+    ///
+    /// If `count` is zero
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -323,6 +327,7 @@ impl EventScannerBuilder<Unspecified> {
     /// [reorg]: crate::ScannerStatus::ReorgDetected
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
+        assert!(count != 0, "count must be greater than 0");
         EventScannerBuilder::<LatestEvents>::new(count)
     }
 }
@@ -376,6 +381,10 @@ impl<M> EventScannerBuilder<M> {
     ///
     /// * `max_block_range` - Maximum number of blocks to process per batch.
     ///
+    /// # Panics
+    ///
+    /// If `max_block_range` is zero
+    ///
     /// # Example
     ///
     /// If scanning events from blocks 1000–1099 (100 blocks total) with `max_block_range(30)`:
@@ -385,6 +394,7 @@ impl<M> EventScannerBuilder<M> {
     /// - Batch 4: blocks 1090–1099 (10 blocks)
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
+        assert!(max_block_range != 0, "max block range should be greater than zero");
         self.block_range_scanner.max_block_range = max_block_range;
         self
     }
@@ -502,5 +512,17 @@ mod tests {
 
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+    }
+
+    #[test]
+    #[should_panic(expected = "count must be greater than 0")]
+    fn test_latest_panics_with_zero_count() {
+        let _ = EventScannerBuilder::latest(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "max block range should be greater than zero")]
+    fn test_max_block_range_panics_with_zero() {
+        let _ = EventScannerBuilder::historic().max_block_range(0);
     }
 }
