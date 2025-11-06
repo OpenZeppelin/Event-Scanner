@@ -82,8 +82,9 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         setup_sync_scanner(None, None, BlockNumberOrTag::Earliest, 5).await?;
 
     // mine some initial "historic" blocks
-    contract.increase().send().await?.watch().await?;
-    provider.root().anvil_mine(Some(5), None).await?;
+    for _ in 0..7 {
+        contract.increase().send().await?.watch().await?;
+    }
 
     scanner.start().await?;
 
