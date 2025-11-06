@@ -45,7 +45,7 @@ pub struct RobustProvider<N: Network> {
     providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
     max_retries: usize,
-    retry_interval: Duration,
+    min_delay: Duration,
 }
 
 // RPC retry and timeout settings
@@ -54,7 +54,7 @@ pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
-pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
 impl<N: Network> RobustProvider<N> {
     /// Create a new `RobustProvider` with default settings.
@@ -65,25 +65,28 @@ impl<N: Network> RobustProvider<N> {
             providers: vec![provider.root().to_owned()],
             max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
-            retry_interval: DEFAULT_RETRY_INTERVAL,
+            min_delay: DEFAULT_MIN_DELAY,
         }
     }
 
+    /// Set the maximum timeout for RPC operations.
     #[must_use]
     pub fn max_timeout(mut self, timeout: Duration) -> Self {
         self.max_timeout = timeout;
         self
     }
 
+    /// Set the maximum number of retry attempts.
     #[must_use]
     pub fn max_retries(mut self, max_retries: usize) -> Self {
         self.max_retries = max_retries;
         self
     }
 
+    /// Set the base delay for exponential backoff retries.
     #[must_use]
-    pub fn retry_interval(mut self, retry_interval: Duration) -> Self {
-        self.retry_interval = retry_interval;
+    pub fn min_delay(mut self, retry_interval: Duration) -> Self {
+        self.min_delay = retry_interval;
         self
     }
 
@@ -311,7 +314,7 @@ impl<N: Network> RobustProvider<N> {
     {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
-            .with_min_delay(self.retry_interval);
+            .with_min_delay(self.min_delay);
 
         timeout(
             self.max_timeout,
@@ -354,7 +357,7 @@ mod tests {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
             max_retries,
-            retry_interval: Duration::from_millis(retry_interval),
+            min_delay: Duration::from_millis(retry_interval),
         }
     }
 

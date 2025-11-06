@@ -1,7 +1,7 @@
-use alloy::providers::ext::AnvilApi;
+use alloy::{primitives::U256, providers::ext::AnvilApi};
 
-use crate::common::{TestCounter, TestCounterExt, setup_sync_from_latest_scanner};
-use event_scanner::{ScannerStatus, assert_next, test_utils::LogMetadata};
+use crate::common::{TestCounter, setup_sync_from_latest_scanner};
+use event_scanner::{ScannerStatus, assert_next};
 
 #[tokio::test]
 async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> {
@@ -11,29 +11,34 @@ async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> 
     let mut stream = setup.stream;
 
     // Historical: produce 6 events total
-    _ = contract.increase_and_get_meta().await?;
-    _ = contract.increase_and_get_meta().await?;
-    _ = contract.increase_and_get_meta().await?;
-
-    let mut expected_latest = vec![];
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     // Ask for the latest 3, then live
     scanner.start().await?;
 
     // Latest phase
-    assert_next!(stream, expected_latest);
+    assert_next!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(4) },
+            TestCounter::CountIncreased { newCount: U256::from(5) },
+            TestCounter::CountIncreased { newCount: U256::from(6) },
+        ]
+    );
     // Transition to live
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // Live phase: emit three more, should arrive in order without duplicating latest
-    let live1 = contract.increase_and_get_meta().await?;
-    let live2 = contract.increase_and_get_meta().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
-    assert_next!(stream, &[live1]);
-    assert_next!(stream, &[live2]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(7) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(8) }]);
 
     Ok(())
 }
@@ -46,21 +51,26 @@ async fn scan_latest_then_live_fewer_historical_then_continues_live() -> anyhow:
     let mut stream = setup.stream;
 
     // Historical: only 2 available
-    let mut expected_latest = vec![];
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
     // Latest phase returns all available
-    assert_next!(stream, &expected_latest);
+    assert_next!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+        ]
+    );
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // Live: two more arrive
-    let live1 = contract.increase_and_get_meta().await?;
-    let live2 = contract.increase_and_get_meta().await?;
-    assert_next!(stream, &[live1]);
-    assert_next!(stream, &[live2]);
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
 
     Ok(())
 }
@@ -73,20 +83,27 @@ async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Res
     let mut stream = setup.stream;
 
     // Historical: produce exactly 4 events
-    let mut expected_latest = vec![];
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
-    assert_next!(stream, expected_latest);
+    assert_next!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+            TestCounter::CountIncreased { newCount: U256::from(4) },
+        ]
+    );
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // Live continues
-    let live = contract.increase_and_get_meta().await?;
-    assert_next!(stream, &[live]);
+    contract.increase().send().await?.watch().await?;
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) }]);
 
     Ok(())
 }
@@ -101,15 +118,15 @@ async fn scan_latest_then_live_no_historical_only_live_streams() -> anyhow::Resu
     scanner.start().await?;
 
     // Latest is empty
-    let expected: &[LogMetadata<TestCounter::CountIncreased>] = &[];
+    let expected: &[TestCounter::CountIncreased] = &[];
     assert_next!(stream, expected);
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // Live events arrive
-    let live1 = contract.increase_and_get_meta().await?;
-    let live2 = contract.increase_and_get_meta().await?;
-    assert_next!(stream, &[live1]);
-    assert_next!(stream, &[live2]);
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
 
     Ok(())
 }
@@ -123,25 +140,31 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
     let mut stream = setup.stream;
 
     // Historical: emit 3, mine 1 empty block to form a clear boundary
-    let mut expected_latest = vec![];
-    expected_latest.push(contract.increase_and_get_meta().await?);
+    contract.increase().send().await?.watch().await?;
 
     provider.root().anvil_mine(Some(1), None).await?;
 
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     provider.root().anvil_mine(Some(1), None).await?;
 
     scanner.start().await?;
 
     // Latest phase
-    assert_next!(stream, &expected_latest);
+    assert_next!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+        ]
+    );
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // Immediately produce a new live event in a new block
-    let live = contract.increase_and_get_meta().await?;
-    assert_next!(stream, &[live]);
+    contract.increase().send().await?.watch().await?;
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
 
     Ok(())
 }
@@ -154,15 +177,21 @@ async fn scan_latest_then_live_waiting_on_live_logs_arriving() -> anyhow::Result
     let mut stream = setup.stream;
 
     // Historical: emit 3, mine 1 empty block to form a clear boundary
-    let mut expected_latest = vec![];
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
-    expected_latest.push(contract.increase_and_get_meta().await?);
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
     // Latest phase
-    assert_next!(stream, &expected_latest);
+    assert_next!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+        ]
+    );
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     let inner = stream.into_inner();
