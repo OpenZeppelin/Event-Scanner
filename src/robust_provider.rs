@@ -18,14 +18,14 @@ pub enum Error {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
-    RetryFailure(Arc<RpcError<TransportErrorKind>>),
+    RpcError(Arc<RpcError<TransportErrorKind>>),
     #[error("Block not found, Block Id: {0}")]
     BlockNotFound(BlockId),
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {
     fn from(err: RpcError<TransportErrorKind>) -> Self {
-        Error::RetryFailure(Arc::new(err))
+        Error::RpcError(Arc::new(err))
     }
 }
 
@@ -366,7 +366,7 @@ mod tests {
             })
             .await;
 
-        assert!(matches!(result, Err(Error::RetryFailure(_))));
+        assert!(matches!(result, Err(Error::RpcError(_))));
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
