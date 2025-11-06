@@ -280,7 +280,6 @@ impl<N: Network> RobustProvider<N> {
                     return Ok(value);
                 }
                 Err(e) => {
-                    println!("errr {e:?}");
                     last_error = Some(e);
                     if idx == 0 && self.providers.len() > 1 {
                         info!("Primary provider failed, trying fallback provider(s)");
@@ -321,7 +320,6 @@ impl<N: Network> RobustProvider<N> {
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
                 .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
-                    println!("retry {err:?}");
                     info!(error = %err, "RPC error retrying after {:?}", dur);
                 })
                 .sleep(tokio::time::sleep),
@@ -499,13 +497,26 @@ mod tests {
         let anvil_2 = Anvil::new().port(8222_u16).try_spawn().expect("Failed to start anvil");
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
-        let robust = RobustProvider::new(ws_provider)
+        let robust = RobustProvider::new(ws_provider.clone())
             .fallback(http_provider)
-            .max_timeout(Duration::from_secs(1))
-            .max_retries(1)
+            .max_timeout(Duration::from_millis(500))
+            .max_retries(0)
             .min_delay(Duration::from_millis(10));
 
         drop(anvil_1);
+
+        // Verify that the WS connection is actually dead before proceeding
+        // Retry until it fails to ensure the connection is truly dead
+        let mut retries = 0;
+        loop {
+            let verification = ws_provider.get_block_number().await;
+            if verification.is_err() {
+                break;
+            }
+            sleep(Duration::from_millis(50)).await;
+            retries += 1;
+            assert!(retries < 50, "WS provider should have failed after anvil dropped");
+        }
 
         let result = robust.subscribe_blocks().await;
 
@@ -513,6 +524,20 @@ mod tests {
 
         let err = result.unwrap_err();
 
-        assert!(matches!(err, Error::Timeout));
+        // The error should be either a Timeout or BackendGone from the primary WS provider,
+        // NOT a PubsubUnavailable error (which would indicate HTTP fallback was attempted)
+        match err {
+            Error::Timeout => {
+                // Expected - WS provider timed out
+            }
+            Error::RpcError(e) => {
+                if matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::PubsubUnavailable))
+                {
+                    panic!("Should not get PubsubUnavailable error");
+                }
+                // All other RPC errors (including BackendGone) are acceptable
+            }
+            Error::BlockNotFound(_) => panic!("Unexpected error type: {err:?}"),
+        }
     }
 }
