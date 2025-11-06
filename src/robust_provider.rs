@@ -85,8 +85,8 @@ impl<N: Network> RobustProvider<N> {
 
     /// Set the base delay for exponential backoff retries.
     #[must_use]
-    pub fn min_delay(mut self, retry_interval: Duration) -> Self {
-        self.min_delay = retry_interval;
+    pub fn min_delay(mut self, min_delay: Duration) -> Self {
+        self.min_delay = min_delay;
         self
     }
 
@@ -348,16 +348,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
 
-    fn test_provider(
-        timeout: u64,
-        max_retries: usize,
-        retry_interval: u64,
-    ) -> RobustProvider<Ethereum> {
+    fn test_provider(timeout: u64, max_retries: usize, min_delay: u64) -> RobustProvider<Ethereum> {
         RobustProvider {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
             max_retries,
-            min_delay: Duration::from_millis(retry_interval),
+            min_delay: Duration::from_millis(min_delay),
         }
     }
 
@@ -462,7 +458,7 @@ mod tests {
             .fallback(ws_provider_2)
             .max_timeout(Duration::from_secs(5))
             .max_retries(10)
-            .retry_interval(Duration::from_millis(100));
+            .min_delay(Duration::from_millis(100));
 
         drop(anvil_1);
 
@@ -486,7 +482,7 @@ mod tests {
             .fallback(ws_provider)
             .max_timeout(Duration::from_secs(5))
             .max_retries(10)
-            .retry_interval(Duration::from_millis(100));
+            .min_delay(Duration::from_millis(100));
 
         let _ = robust.subscribe_blocks().await;
     }
@@ -507,7 +503,7 @@ mod tests {
             .fallback(http_provider)
             .max_timeout(Duration::from_secs(1))
             .max_retries(1)
-            .retry_interval(Duration::from_millis(10));
+            .min_delay(Duration::from_millis(10));
 
         drop(anvil_1);
 
