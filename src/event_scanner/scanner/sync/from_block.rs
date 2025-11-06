@@ -10,12 +10,6 @@ use crate::{
 
 impl EventScannerBuilder<SyncFromBlock> {
     #[must_use]
-    pub fn max_block_range(mut self, max_block_range: u64) -> Self {
-        self.block_range_scanner.max_block_range = max_block_range;
-        self
-    }
-
-    #[must_use]
     pub fn block_confirmations(mut self, count: u64) -> Self {
         self.config.block_confirmations = count;
         self
