@@ -441,7 +441,7 @@ impl<N: Network> Service<N> {
         let confirmed_tip = latest_block.saturating_sub(block_confirmations);
 
         let subscription = self.provider.subscribe_blocks().await?;
-        info!("Bufferring live blocks");
+        info!("Buffering live blocks");
 
         // If start is beyond confirmed tip, skip historical and go straight to live
         if start_block > confirmed_tip {
