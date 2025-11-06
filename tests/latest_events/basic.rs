@@ -1,8 +1,5 @@
 use alloy::{
-    eips::BlockNumberOrTag,
-    primitives::U256,
-    providers::{Provider, ext::AnvilApi},
-    sol_types::SolEvent,
+    eips::BlockNumberOrTag, primitives::U256, providers::ext::AnvilApi, sol_types::SolEvent,
 };
 
 use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
@@ -341,7 +338,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
-    let (anvil, _provider, contract, default_filter) = setup_common(None, None).await?;
+    let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     contract.increase().send().await?.watch().await?;
     let receipt = contract.increase().send().await?.get_receipt().await?;
