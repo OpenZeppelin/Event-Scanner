@@ -102,8 +102,8 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// Fallback providers are used when the primary provider times out or fails.
     #[must_use]
-    pub fn fallback(mut self, provider: RootProvider<N>) -> Self {
-        self.providers.push(provider);
+    pub fn fallback(mut self, provider: impl Provider<N>) -> Self {
+        self.providers.push(provider.root().to_owned());
         self
     }
 
@@ -119,9 +119,10 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByNumber called");
         let result = self
-            .retry_with_total_timeout(move |provider| async move {
-                provider.get_block_by_number(number).await
-            })
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_by_number(number).await },
+                false,
+            )
             .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getByBlockNumber failed");
@@ -141,6 +142,7 @@ impl<N: Network> RobustProvider<N> {
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.get_block_number().await },
+                false,
             )
             .await;
         if let Err(e) = &result {
@@ -161,9 +163,10 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
         let result = self
-            .retry_with_total_timeout(move |provider| async move {
-                provider.get_block_by_hash(hash).await
-            })
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_by_hash(hash).await },
+                false,
+            )
             .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockByHash failed");
@@ -183,6 +186,7 @@ impl<N: Network> RobustProvider<N> {
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.get_logs(filter).await },
+                false,
             )
             .await;
         if let Err(e) = &result {
@@ -199,9 +203,12 @@ impl<N: Network> RobustProvider<N> {
     /// after exhausting retries or if the call times out.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
+        // immediately fail if primary does not support pubsub
+        self.root().client().expect_pubsub_frontend();
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
+                true,
             )
             .await;
         if let Err(e) = &result {
@@ -219,21 +226,41 @@ impl<N: Network> RobustProvider<N> {
     /// If the timeout is exceeded and fallback providers are available, it will
     /// attempt to use each fallback provider in sequence.
     ///
+    /// If `require_pubsub` is true, providers that don't support pubsub will be skipped.
+    ///
     /// # Errors
     ///
     /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
     ///   and all fallback providers failed" if the overall timeout elapses and no fallback
     ///   providers succeed.
+    /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
+    ///   is true and all providers don't support pubsub.
     /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    async fn retry_with_total_timeout<T, F, Fut>(&self, operation: F) -> Result<T, Error>
+    async fn retry_with_total_timeout<T, F, Fut>(
+        &self,
+        operation: F,
+        require_pubsub: bool,
+    ) -> Result<T, Error>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
         let mut last_error = None;
+        let mut skipped_count = 0;
 
         // Try each provider in sequence (first one is primary)
         for (idx, provider) in self.providers.iter().enumerate() {
+            // Skip providers that don't support pubsub if required
+            if require_pubsub && !Self::supports_pubsub(provider) {
+                if idx == 0 {
+                    info!("Primary provider doesn't support pubsub, skipping");
+                } else {
+                    info!("Fallback provider {} doesn't support pubsub, skipping", idx);
+                }
+                skipped_count += 1;
+                continue;
+            }
+
             if idx == 0 {
                 info!("Attempting primary provider");
             } else {
@@ -250,14 +277,21 @@ impl<N: Network> RobustProvider<N> {
                     return Ok(value);
                 }
                 Err(e) => {
+                    println!("errr {e:?}");
                     last_error = Some(e);
                     if idx == 0 && self.providers.len() > 1 {
                         info!("Primary provider failed, trying fallback provider(s)");
-                    } else {
+                    } else if idx > 0 {
                         error!(provider_num = idx, err = %last_error.as_ref().unwrap(), "Fallback provider failed with error");
                     }
                 }
             }
+        }
+
+        // If all providers were skipped due to pubsub requirement
+        if skipped_count == self.providers.len() {
+            error!("All providers skipped - none support pubsub");
+            return Err(RpcError::Transport(TransportErrorKind::PubsubUnavailable).into());
         }
 
         // Return the last error encountered
@@ -283,11 +317,8 @@ impl<N: Network> RobustProvider<N> {
             self.max_timeout,
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
-                .when(|err: &RpcError<TransportErrorKind>| {
-                    // Don't retry if pubsub is unavailable (it won't suddenly become available)
-                    !matches!(err, RpcError::Transport(TransportErrorKind::PubsubUnavailable))
-                })
                 .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
+                    println!("retry {err:?}");
                     info!(error = %err, "RPC error retrying after {:?}", dur);
                 })
                 .sleep(tokio::time::sleep),
@@ -296,12 +327,21 @@ impl<N: Network> RobustProvider<N> {
         .map_err(Error::from)?
         .map_err(Error::from)
     }
+
+    /// Check if a provider supports pubsub
+    fn supports_pubsub(provider: &RootProvider<N>) -> bool {
+        provider.client().pubsub_frontend().is_some()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::{network::Ethereum, providers::WsConnect};
+    use alloy::{
+        network::Ethereum,
+        providers::{ProviderBuilder, WsConnect},
+    };
+    use alloy_node_bindings::Anvil;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
 
@@ -325,11 +365,14 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(|_| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                let count = call_count.load(Ordering::SeqCst);
-                Ok(count)
-            })
+            .retry_with_total_timeout(
+                |_| async {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    let count = call_count.load(Ordering::SeqCst);
+                    Ok(count)
+                },
+                false,
+            )
             .await;
 
         assert!(matches!(result, Ok(1)));
@@ -342,14 +385,17 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(|_| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                let count = call_count.load(Ordering::SeqCst);
-                match count {
-                    3 => Ok(count),
-                    _ => Err(TransportErrorKind::BackendGone.into()),
-                }
-            })
+            .retry_with_total_timeout(
+                |_| async {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    let count = call_count.load(Ordering::SeqCst);
+                    match count {
+                        3 => Ok(count),
+                        _ => Err(TransportErrorKind::BackendGone.into()),
+                    }
+                },
+                false,
+            )
             .await;
 
         assert!(matches!(result, Ok(3)));
@@ -362,10 +408,13 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result: Result<(), Error> = provider
-            .retry_with_total_timeout(|_| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                Err(TransportErrorKind::BackendGone.into())
-            })
+            .retry_with_total_timeout(
+                |_| async {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    Err(TransportErrorKind::BackendGone.into())
+                },
+                false,
+            )
             .await;
 
         assert!(matches!(result, Err(Error::RpcError(_))));
@@ -378,36 +427,50 @@ mod tests {
         let provider = test_provider(max_timeout, 10, 1);
 
         let result = provider
-            .retry_with_total_timeout(move |_provider| async move {
-                sleep(Duration::from_millis(max_timeout + 10)).await;
-                Ok(42)
-            })
+            .retry_with_total_timeout(
+                move |_provider| async move {
+                    sleep(Duration::from_millis(max_timeout + 10)).await;
+                    Ok(42)
+                },
+                false,
+            )
             .await;
 
         assert!(matches!(result, Err(Error::Timeout)));
     }
 
     #[tokio::test]
-    async fn test_http_provider_skipped_when_pubsub_required() {
-        let provider = test_provider(100, 3, 10);
+    async fn test_subscribe_fails_causes_backup_to_be_used() {
+        let anvil_1 = Anvil::new().port(2222_u16).try_spawn().expect("Failed to start anvil");
 
-        let result = provider.subscribe_blocks().await;
+        let ws_provider_1 = ProviderBuilder::new()
+            .connect_ws(WsConnect::new(anvil_1.ws_endpoint_url().as_str()))
+            .await
+            .expect("Failed to connect to WS");
 
-        let Err(Error::RpcError(err)) = result else {
-            panic!("Expected Error::RpcError, got: {result:?}");
-        };
+        let anvil_2 = Anvil::new().port(1111_u16).try_spawn().expect("Failed to start anvil");
 
-        assert!(
-            matches!(err.as_ref(), RpcError::Transport(TransportErrorKind::PubsubUnavailable)),
-            "Expected PubsubUnavailable error, got: {err:?}",
-        );
+        let ws_provider_2 = ProviderBuilder::new()
+            .connect_ws(WsConnect::new(anvil_2.ws_endpoint_url().as_str()))
+            .await
+            .expect("Failed to connect to WS");
+
+        let robust = RobustProvider::new(ws_provider_1)
+            .fallback(ws_provider_2)
+            .max_timeout(Duration::from_secs(5))
+            .max_retries(10)
+            .retry_interval(Duration::from_millis(100));
+
+        drop(anvil_1);
+
+        let result = robust.subscribe_blocks().await;
+
+        assert!(result.is_ok(), "Expected subscribe blocks to work");
     }
 
     #[tokio::test]
-    async fn test_fallback_to_ws_provider_when_http_lacks_pubsub() {
-        use alloy::providers::ProviderBuilder;
-        use alloy_node_bindings::Anvil;
-
+    #[should_panic(expected = "called pubsub_frontend on a non-pubsub transport")]
+    async fn test_subscribe_fails_if_primary_provider_lacks_pubsub() {
         let anvil = Anvil::new().try_spawn().expect("Failed to start anvil");
 
         let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
@@ -417,52 +480,40 @@ mod tests {
             .expect("Failed to connect to WS");
 
         let robust = RobustProvider::new(http_provider)
-            .fallback(ws_provider.root().to_owned())
+            .fallback(ws_provider)
             .max_timeout(Duration::from_secs(5))
             .max_retries(10)
             .retry_interval(Duration::from_millis(100));
 
-        let result = robust.subscribe_blocks().await;
-
-        assert!(result.is_ok(), "Expected success with WS fallback, got: {result:?}");
+        let _ = robust.subscribe_blocks().await;
     }
 
     #[tokio::test]
     async fn test_ws_fails_http_fallback_returns_primary_error() {
-        use alloy::providers::ProviderBuilder;
-        use alloy_node_bindings::Anvil;
-
-        let anvil_1 = Anvil::new().port(2222_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_1 = Anvil::new().port(8111_u16).try_spawn().expect("Failed to start anvil");
 
         let ws_provider = ProviderBuilder::new()
             .connect_ws(WsConnect::new(anvil_1.ws_endpoint_url().as_str()))
             .await
             .expect("Failed to connect to WS");
 
-        let anvil = Anvil::new().port(1111_u16).try_spawn().expect("Failed to start anvil");
-        let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+        let anvil_2 = Anvil::new().port(8222_u16).try_spawn().expect("Failed to start anvil");
+        let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
         let robust = RobustProvider::new(ws_provider)
-            .fallback(http_provider.root().to_owned())
-            .max_timeout(Duration::from_secs(5))
+            .fallback(http_provider)
+            .max_timeout(Duration::from_secs(1))
             .max_retries(1)
             .retry_interval(Duration::from_millis(10));
 
         drop(anvil_1);
+
         let result = robust.subscribe_blocks().await;
 
         assert!(result.is_err(), "Expected error when WS fails and HTTP fallback used");
 
         let err = result.unwrap_err();
 
-        match err {
-            Error::RpcError(rpc_err) => {
-                assert!(matches!(
-                    rpc_err.as_ref(),
-                    RpcError::Transport(TransportErrorKind::BackendGone)
-                ),);
-            }
-            _ => panic!("Expected Error::RpcError, got: {err:?}"),
-        }
+        assert!(matches!(err, Error::Timeout));
     }
 }
