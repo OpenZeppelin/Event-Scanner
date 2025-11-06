@@ -5,7 +5,6 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::U256,
     providers::{Provider, ProviderBuilder, RootProvider},
     sol,
     sol_types::SolEvent,
@@ -13,7 +12,7 @@ use alloy::{
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
-    SyncFromBlock, SyncFromLatestEvents, test_utils::LogMetadata,
+    SyncFromBlock, SyncFromLatestEvents,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -196,42 +195,4 @@ where
 {
     let contract = TestCounter::deploy(provider).await?;
     Ok(contract)
-}
-
-#[allow(dead_code)]
-pub(crate) trait TestCounterExt {
-    async fn increase_and_get_meta(
-        &self,
-    ) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>>;
-    async fn decrease_and_get_meta(
-        &self,
-    ) -> anyhow::Result<LogMetadata<TestCounter::CountDecreased>>;
-}
-
-impl<P: Provider + Clone> TestCounterExt for TestCounter::TestCounterInstance<P> {
-    async fn increase_and_get_meta(
-        &self,
-    ) -> anyhow::Result<LogMetadata<TestCounter::CountIncreased>> {
-        let receipt = self.increase().send().await?.get_receipt().await?;
-        let tx_hash = receipt.transaction_hash;
-        let new_count = receipt.decoded_log::<TestCounter::CountIncreased>().unwrap().data.newCount;
-        Ok(LogMetadata {
-            event: TestCounter::CountIncreased { newCount: U256::from(new_count) },
-            address: *self.address(),
-            tx_hash,
-        })
-    }
-
-    async fn decrease_and_get_meta(
-        &self,
-    ) -> anyhow::Result<LogMetadata<TestCounter::CountDecreased>> {
-        let receipt = self.decrease().send().await?.get_receipt().await?;
-        let tx_hash = receipt.transaction_hash;
-        let new_count = receipt.decoded_log::<TestCounter::CountDecreased>().unwrap().data.newCount;
-        Ok(LogMetadata {
-            event: TestCounter::CountDecreased { newCount: U256::from(new_count) },
-            address: *self.address(),
-            tx_hash,
-        })
-    }
 }
