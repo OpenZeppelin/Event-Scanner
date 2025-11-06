@@ -49,9 +49,8 @@ impl Display for EventFilter {
         if !self.events.is_empty() {
             content.push(format!("events: [{}]", self.events.join(", ")));
         }
-        if !self.event_signatures.is_empty() {
+        if let Some(value_or_array) = self.event_signatures.to_value_or_array() {
             // No guarantee the order of values returned by `Topic`
-            let value_or_array = self.event_signatures.to_value_or_array().unwrap();
             let event_signatures = match value_or_array {
                 ValueOrArray::Value(value) => format!("{value}"),
                 ValueOrArray::Array(arr) => {
