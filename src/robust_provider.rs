@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
@@ -230,44 +230,45 @@ impl<N: Network> RobustProvider<N> {
     ///   and all fallback providers failed" if the overall timeout elapses and no fallback
     ///   providers succeed.
     /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    async fn retry_with_total_timeout<T, F, Fut>(&self, operation: F) -> Result<T, Error>
+    async fn retry_with_total_timeout<T: Debug, F, Fut>(&self, operation: F) -> Result<T, Error>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let mut last_error = None;
+        let mut providers = self.providers.iter();
+        let primary = providers.next().expect("should have primary provider");
 
-        // Try each provider in sequence (first one is primary)
-        for (idx, provider) in self.providers.iter().enumerate() {
-            if idx == 0 {
-                info!("Attempting primary provider");
-            } else {
-                info!("Attempting fallback provider {} out of {}", idx, self.providers.len() - 1);
-            }
+        let result = self.try_provider_with_timeout(primary, &operation).await;
 
-            let result = self.try_provider_with_timeout(provider, &operation).await;
+        if result.is_ok() {
+            return result;
+        }
 
-            match result {
+        let mut last_error = result.unwrap_err();
+
+        if self.providers.len() > 1 {
+            info!("Primary provider failed, trying fallback provider(s)");
+        }
+
+        // This loop starts at index 1 automatically
+        for (idx, provider) in providers.enumerate() {
+            let fallback_num = idx + 1;
+            info!("Attempting fallback provider {}/{}", fallback_num, self.providers.len() - 1);
+
+            match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
-                    if idx > 0 {
-                        info!(provider_num = idx, "Fallback provider succeeded");
-                    }
+                    info!(provider_num = fallback_num, "Fallback provider succeeded");
                     return Ok(value);
                 }
                 Err(e) => {
-                    last_error = Some(e);
-                    if idx == 0 && self.providers.len() > 1 {
-                        info!("Primary provider failed, trying fallback provider(s)");
-                    } else {
-                        error!(provider_num = idx, err = %last_error.as_ref().unwrap(), "Fallback provider failed with error");
-                    }
+                    error!(provider_num = fallback_num, err = %e, "Fallback provider failed");
+                    last_error = e;
                 }
             }
         }
 
         error!("All providers failed or timed out");
-        // Return the last error encountered
-        Err(last_error.unwrap_or(Error::Timeout))
+        Err(last_error)
     }
 
     /// Try executing an operation with a specific provider with retry and timeout.
