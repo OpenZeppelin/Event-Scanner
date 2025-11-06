@@ -35,6 +35,12 @@ impl From<TokioError::Elapsed> for Error {
     }
 }
 
+impl From<TokioError::Elapsed> for Error {
+    fn from(_: TokioError::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
+
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
 /// This wrapper around Alloy providers automatically handles retries,
