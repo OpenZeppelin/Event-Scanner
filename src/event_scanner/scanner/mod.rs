@@ -366,12 +366,6 @@ impl EventScannerBuilder<SyncFromBlock> {
 }
 
 impl<M> EventScannerBuilder<M> {
-    #[must_use]
-    pub fn max_block_range(mut self, max_block_range: u64) -> Self {
-        self.block_range_scanner.max_block_range = max_block_range;
-        self
-    }
-
     /// Connects to the provider via WebSocket.
     ///
     /// Final builder method: consumes the builder and returns the built [`EventScanner`].
