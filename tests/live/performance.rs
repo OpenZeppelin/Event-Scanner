@@ -1,52 +1,32 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
+use alloy::primitives::U256;
+use event_scanner::{assert_empty, assert_next};
 
-use event_scanner::Message;
-use tokio::time::timeout;
-use tokio_stream::StreamExt;
-
-use crate::common::{TestCounter, setup_live_scanner};
+use crate::common::{LiveScannerSetup, TestCounter::CountIncreased, setup_live_scanner};
 
 #[tokio::test]
 async fn high_event_volume_no_loss() -> anyhow::Result<()> {
-    let setup = setup_live_scanner(Some(0.05), None, 0).await?;
-    let contract = setup.contract.clone();
-
-    let expected_event_count = 100;
-
-    let scanner = setup.scanner;
-
-    let mut stream = setup.stream.take(expected_event_count);
+    let LiveScannerSetup { contract, provider: _p, scanner, mut stream, anvil: _a } =
+        setup_live_scanner(None, None, 0).await?;
 
     scanner.start().await?;
 
-    for _ in 0..expected_event_count {
-        contract.increase().send().await?.watch().await?;
-    }
-
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let event_count_clone = Arc::clone(&event_count);
-    let event_counting = async move {
-        let mut expected_new_count = 1;
-        while let Some(Message::Data(logs)) = stream.next().await {
-            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-
-            for log in logs {
-                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
-                assert_eq!(newCount, expected_new_count);
-                expected_new_count += 1;
-            }
+    tokio::spawn(async move {
+        for _ in 0..100 {
+            contract
+                .increase()
+                .send()
+                .await
+                .expect("should send")
+                .watch()
+                .await
+                .expect("should confirm");
         }
-    };
+    });
 
-    _ = timeout(Duration::from_secs(60), event_counting).await;
-
-    assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
+    for new_count in 1..=100 {
+        assert_next!(stream, &[CountIncreased { newCount: U256::from(new_count) }]);
+    }
+    assert_empty!(stream);
 
     Ok(())
 }

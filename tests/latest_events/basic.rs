@@ -17,15 +17,9 @@ async fn latest_scanner_exact_count_returns_last_events_in_order() -> anyhow::Re
     let scanner = setup.scanner;
     let mut stream = setup.stream;
 
-    // Produce 8 events
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
+    for _ in 0..8 {
+        contract.increase().send().await?.watch().await?;
+    }
 
     // Ask for the latest 5
     scanner.start().await?;
@@ -278,22 +272,17 @@ async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> any
 }
 
 #[tokio::test]
-async fn latest_scanner_cross_contract_filtering() -> anyhow::Result<()> {
+async fn latest_scanner_ignores_non_tracked_contract() -> anyhow::Result<()> {
     // Manual setup to deploy two contracts
-    let count = 5;
-    let setup = setup_latest_scanner(None, None, count, None, None).await?;
+    let setup = setup_latest_scanner(None, None, 5, None, None).await?;
     let provider = setup.provider;
-    let mut scanner = setup.scanner;
+    let scanner = setup.scanner;
 
-    let contract_a = deploy_counter(provider.clone()).await?;
-    let contract_b = deploy_counter(provider.clone()).await?;
+    let contract_a = setup.contract;
+    let contract_b = deploy_counter(provider).await?;
 
     // Listener only for contract A CountIncreased
-    let filter_a = EventFilter::new()
-        .contract_address(*contract_a.address())
-        .event(TestCounter::CountIncreased::SIGNATURE);
-
-    let mut stream_a = scanner.subscribe(filter_a);
+    let mut stream_a = setup.stream;
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
     contract_a.increase().send().await?.watch().await?;
