@@ -6,7 +6,7 @@ use alloy::{
 };
 use event_scanner::{ScannerStatus, assert_empty, assert_next};
 
-use crate::common::{TestCounter, setup_sync_scanner};
+use crate::common::{SyncScannerSetup, TestCounter, setup_sync_scanner};
 
 #[tokio::test]
 async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
@@ -75,14 +75,11 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
-    let setup = setup_sync_scanner(None, None, BlockNumberOrTag::Earliest, 5).await?;
-    let provider = setup.provider;
-    let contract = setup.contract;
-    let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let SyncScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+        setup_sync_scanner(None, None, BlockNumberOrTag::Earliest, 5).await?;
 
     // mine some initial "historic" blocks
     contract.increase().send().await?.watch().await?;
@@ -91,13 +88,23 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     scanner.start().await?;
 
     // emit "live" events
-    for _ in 0..4 {
+    for _ in 0..2 {
         contract.increase().send().await?.watch().await?;
     }
 
-    // assert only the first events has enough confirmations to be streamed
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(1) }]);
+    // assert historic events are streamed in a batch
+    assert_next!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) }
+        ]
+    );
+    // switching to "live" phase
     assert_next!(stream, ScannerStatus::SwitchingToLive);
+    // assert confirmed live events are streamed separately
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
     let stream = assert_empty!(stream);
 
     // Perform a shallow reorg on the live tail
@@ -116,13 +123,14 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     provider.root().anvil_mine(Some(10), None).await?;
 
     // no `ReorgDetected` should be emitted
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(6) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(7) }]);
     assert_next!(
         stream,
         &[
-            TestCounter::CountIncreased { newCount: U256::from(4) },
-            TestCounter::CountIncreased { newCount: U256::from(5) }
+            TestCounter::CountIncreased { newCount: U256::from(8) },
+            TestCounter::CountIncreased { newCount: U256::from(9) }
         ]
     );
     assert_empty!(stream);
