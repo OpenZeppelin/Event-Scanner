@@ -366,23 +366,6 @@ impl EventScannerBuilder<SyncFromBlock> {
 }
 
 impl<M> EventScannerBuilder<M> {
-    /// Sets the maximum block range per event batch.
-    ///
-    /// Controls how the scanner splits a large block range into smaller batches for processing.
-    /// Each batch corresponds to a single RPC call to fetch logs. This prevents timeouts and
-    /// respects rate limits imposed by node providers.
-    ///
-    /// # Arguments
-    ///
-    /// * `max_block_range` - Maximum number of blocks to process per batch.
-    ///
-    /// # Example
-    ///
-    /// If scanning events from blocks 1000–1099 (100 blocks total) with `max_block_range(30)`:
-    /// - Batch 1: blocks 1000–1029 (30 blocks)
-    /// - Batch 2: blocks 1030–1059 (30 blocks)
-    /// - Batch 3: blocks 1060–1089 (30 blocks)
-    /// - Batch 4: blocks 1090–1099 (10 blocks)
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.block_range_scanner.max_block_range = max_block_range;
