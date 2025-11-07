@@ -439,7 +439,10 @@ impl<N: Network> RobustProvider<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::providers::{ProviderBuilder, WsConnect};
+    use alloy::{
+        consensus::BlockHeader,
+        providers::{ProviderBuilder, WsConnect, ext::AnvilApi},
+    };
     use alloy_node_bindings::Anvil;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
@@ -535,30 +538,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_fails_causes_backup_to_be_used() {
-        let anvil_1 = Anvil::new().port(2222_u16).try_spawn().expect("Failed to start anvil");
+    async fn test_subscribe_fails_causes_backup_to_be_used() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
 
-        let ws_provider_1 = ProviderBuilder::new()
-            .connect_ws(WsConnect::new(anvil_1.ws_endpoint_url().as_str()))
-            .await
-            .expect("Failed to connect to WS");
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
 
-        let anvil_2 = Anvil::new().port(1111_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().port(1111_u16).try_spawn()?;
 
         let ws_provider_2 = ProviderBuilder::new()
-            .connect_ws(WsConnect::new(anvil_2.ws_endpoint_url().as_str()))
+            .connect(anvil_2.ws_endpoint_url().as_str())
             .await
             .expect("Failed to connect to WS");
 
-        let robust = RobustProvider::fragile(ws_provider_1)
-            .fallback(ws_provider_2)
-            .max_timeout(Duration::from_secs(5));
+        let robust = RobustProvider::fragile(ws_provider_1.clone())
+            .fallback(ws_provider_2.clone())
+            .max_timeout(Duration::from_secs(1));
 
         drop(anvil_1);
 
-        let result = robust.subscribe_blocks().await;
+        let mut subscription = robust.subscribe_blocks().await?;
 
-        assert!(result.is_ok(), "Expected subscribe blocks to work");
+        ws_provider_2.anvil_mine(Some(2), None).await?;
+
+        assert_eq!(1, subscription.recv().await?.number());
+        assert_eq!(2, subscription.recv().await?.number());
+        assert!(subscription.is_empty());
+
+        Ok(())
     }
 
     #[tokio::test]
