@@ -289,7 +289,7 @@ impl<N: Network> RobustProvider<N> {
         }
 
         // Return the last error encountered
-        error!("All providers failed or timed out");
+        error!("All providers failed or timed out - returning the last providers attempt's error");
         Err(last_error)
     }
 
