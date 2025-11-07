@@ -10,25 +10,11 @@ use crate::robust_provider::Error as RobustProviderError;
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
-    // #[error("WebSocket error: {0}")]
-    // WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
-    #[error("Serialization error: {0}")]
-    SerializationError(Arc<serde_json::Error>),
-
     #[error("RPC error: {0}")]
     RpcError(Arc<RpcError<TransportErrorKind>>),
 
-    #[error("Channel send error")]
-    ChannelError,
-
     #[error("Service is shutting down")]
     ServiceShutdown,
-
-    #[error("No subscriber set for streaming")]
-    NoSubscriber,
-
-    #[error("Historical sync failed: {0}")]
-    HistoricalSyncError(String),
 
     #[error("Block not found, Block Id: {0}")]
     BlockNotFound(BlockId),
@@ -47,12 +33,6 @@ impl From<RobustProviderError> for ScannerError {
             RobustProviderError::RetryFailure(err) => ScannerError::RetryFailure(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
         }
-    }
-}
-
-impl From<serde_json::Error> for ScannerError {
-    fn from(error: serde_json::Error) -> Self {
-        ScannerError::SerializationError(Arc::new(error))
     }
 }
 
