@@ -115,13 +115,13 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
         (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
     ];
-    provider.anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
+    provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
     // assert that still no events have been streamed
     let mut stream = assert_empty!(stream);
 
     // mine some additional post-reorg blocks to confirm previous blocks with logs
-    provider.anvil_mine(Some(10), None).await?;
+    provider.primary().anvil_mine(Some(10), None).await?;
 
     // no `ReorgDetected` should be emitted
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) }]);
