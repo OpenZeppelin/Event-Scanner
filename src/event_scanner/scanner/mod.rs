@@ -1,19 +1,18 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::{Ethereum, Network},
-    providers::RootProvider,
-    transports::{TransportResult, http::reqwest::Url},
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    EventFilter, Message,
+    EventFilter, Message, ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES,
     },
     event_scanner::listener::EventListener,
+    robust_provider::IntoRobustProvider,
 };
 
 mod common;
@@ -78,17 +77,16 @@ impl EventScannerBuilder<Unspecified> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Stream all events from genesis to latest block
-    /// let mut scanner = EventScannerBuilder::historic()
-    ///     .connect_ws::<Ethereum>(ws_url)
-    ///     .await?;
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
+    /// let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let mut stream = scanner.subscribe(filter);
@@ -105,16 +103,17 @@ impl EventScannerBuilder<Unspecified> {
     /// Specifying a custom block range:
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::EventScannerBuilder;
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// // Stream events between blocks [1_000_000, 2_000_000]
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::historic()
     ///     .from_block(1_000_000)
     ///     .to_block(2_000_000)
-    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .connect(robust_provider)
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -144,17 +143,18 @@ impl EventScannerBuilder<Unspecified> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Stream new events as they arrive
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::live()
     ///     .block_confirmations(20)
-    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .connect(robust_provider)
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
@@ -235,17 +235,16 @@ impl EventScannerBuilder<Unspecified> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::{network::Ethereum, primitives::Address};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use alloy::{network::Ethereum, primitives::Address, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Collect the latest 10 events across Earliest..=Latest
-    /// let mut scanner = EventScannerBuilder::latest(10)
-    ///     .connect_ws::<Ethereum>(ws_url)
-    ///     .await?;
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
+    /// let mut scanner = EventScannerBuilder::latest(10).connect(robust_provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let mut stream = scanner.subscribe(filter);
@@ -263,17 +262,17 @@ impl EventScannerBuilder<Unspecified> {
     /// Restricting to a specific block range:
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::EventScannerBuilder;
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// // Collect the latest 5 events between blocks [1_000_000, 1_100_000]
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::latest(5)
     ///     .from_block(1_000_000)
     ///     .to_block(1_100_000)
-    ///     .connect_ws::<Ethereum>(ws_url)
-    ///     .await?;
+    ///     .connect(robust_provider);
     /// # Ok(())
     /// # }
     /// ```
@@ -399,44 +398,19 @@ impl<M> EventScannerBuilder<M> {
         self
     }
 
-    /// Connects to the provider via WebSocket.
-    ///
-    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(self, ws_url: Url) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ws::<N>(ws_url).await?;
-        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
-    }
-
-    /// Connects to the provider via IPC.
-    ///
-    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> TransportResult<EventScanner<M, N>> {
-        let block_range_scanner = self.block_range_scanner.connect_ipc::<N>(ipc_path).await?;
-        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
-    }
-
     /// Connects to an existing provider.
     ///
     /// Final builder method: consumes the builder and returns the built [`EventScanner`].
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails
-    #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> EventScanner<M, N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
-        EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
+    /// Returns an error if the provider connection fails.
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<EventScanner<M, N>, ScannerError> {
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
+        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 }
 
@@ -451,7 +425,10 @@ impl<M, N: Network> EventScanner<M, N> {
 
 #[cfg(test)]
 mod tests {
-    use alloy::{providers::mock::Asserter, rpc::client::RpcClient};
+    use alloy::{
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
 
     use super::*;
 
@@ -488,10 +465,10 @@ mod tests {
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
-    #[test]
-    fn test_historic_event_stream_listeners_vector_updates() {
+    #[tokio::test]
+    async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
 
         assert!(scanner.listeners.is_empty());
 
@@ -501,17 +478,21 @@ mod tests {
         let _stream2 = scanner.subscribe(EventFilter::new());
         let _stream3 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 3);
+
+        Ok(())
     }
 
-    #[test]
-    fn test_historic_event_stream_channel_capacity() {
+    #[tokio::test]
+    async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect::<Ethereum>(provider);
+        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
 
         let _ = scanner.subscribe(EventFilter::new());
 
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+
+        Ok(())
     }
 
     #[test]
