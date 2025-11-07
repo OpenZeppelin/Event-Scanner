@@ -142,12 +142,12 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
     // Historical: emit 3, mine 1 empty block to form a clear boundary
     contract.increase().send().await?.watch().await?;
 
-    provider.root().anvil_mine(Some(1), None).await?;
+    provider.primary().anvil_mine(Some(1), None).await?;
 
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    provider.root().anvil_mine(Some(1), None).await?;
+    provider.primary().anvil_mine(Some(1), None).await?;
 
     scanner.start().await?;
 

@@ -21,7 +21,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     let mut stream = client.stream_live(0).await?;
 
-    robust_provider.root().anvil_mine(Some(5), None).await?;
+    robust_provider.primary().anvil_mine(Some(5), None).await?;
 
     assert_next!(stream, 1..=1);
     assert_next!(stream, 2..=2);
@@ -30,7 +30,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
     assert_next!(stream, 5..=5);
     let mut stream = assert_empty!(stream);
 
-    robust_provider.root().anvil_mine(Some(1), None).await?;
+    robust_provider.primary().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 6..=6, timeout = 10);
     assert_empty!(stream);
@@ -39,7 +39,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     let mut stream = client.stream_live(1).await?;
 
-    robust_provider.root().anvil_mine(Some(5), None).await?;
+    robust_provider.primary().anvil_mine(Some(5), None).await?;
 
     assert_next!(stream, 6..=6);
     assert_next!(stream, 7..=7);
@@ -48,7 +48,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
     assert_next!(stream, 10..=10);
     let mut stream = assert_empty!(stream);
 
-    robust_provider.root().anvil_mine(Some(1), None).await?;
+    robust_provider.primary().anvil_mine(Some(1), None).await?;
 
     assert_next!(stream, 11..=11, timeout = 10);
     assert_empty!(stream);
@@ -64,20 +64,20 @@ async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> 
     let robust_provider = RobustProvider::new(provider);
     let client = BlockRangeScanner::new().connect(robust_provider.clone()).run()?;
 
-    robust_provider.root().anvil_mine(Some(20), None).await?;
+    robust_provider.primary().anvil_mine(Some(20), None).await?;
 
     let stream = client.stream_from(BlockNumberOrTag::Latest, 5).await?;
 
     let stream = assert_empty!(stream);
 
-    robust_provider.root().anvil_mine(Some(4), None).await?;
+    robust_provider.primary().anvil_mine(Some(4), None).await?;
     let mut stream = assert_empty!(stream);
 
-    robust_provider.root().anvil_mine(Some(1), None).await?;
+    robust_provider.primary().anvil_mine(Some(1), None).await?;
     assert_next!(stream, 20..=20);
     let mut stream = assert_empty!(stream);
 
-    robust_provider.root().anvil_mine(Some(1), None).await?;
+    robust_provider.primary().anvil_mine(Some(1), None).await?;
     assert_next!(stream, 21..=21);
     assert_empty!(stream);
 
@@ -95,7 +95,7 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
     let mut stream = client.stream_live(5).await?;
 
     // mine initial blocks
-    robust_provider.root().anvil_mine(Some(10), None).await?;
+    robust_provider.primary().anvil_mine(Some(10), None).await?;
 
     // assert initial block ranges immediately to avoid Anvil race condition:
     //
@@ -110,9 +110,12 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
     assert_next!(stream, 5..=5);
 
     // reorg less blocks than the block_confirmation config
-    robust_provider.root().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs: vec![] }).await?;
+    robust_provider
+        .primary()
+        .anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs: vec![] })
+        .await?;
     // mint additional blocks so the scanner processes reorged blocks
-    robust_provider.root().anvil_mine(Some(5), None).await?;
+    robust_provider.primary().anvil_mine(Some(5), None).await?;
 
     // no ReorgDetected should be emitted
     assert_next!(stream, 6..=6);
@@ -136,7 +139,7 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     let mut stream = client.stream_live(3).await?;
 
     // mine initial blocks
-    robust_provider.root().anvil_mine(Some(10), None).await?;
+    robust_provider.primary().anvil_mine(Some(10), None).await?;
 
     // assert initial block ranges immediately to avoid Anvil race condition:
     //
@@ -153,9 +156,12 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     assert_next!(stream, 7..=7);
 
     // reorg more blocks than the block_confirmation config
-    robust_provider.root().anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
+    robust_provider
+        .primary()
+        .anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] })
+        .await?;
     // mint additional blocks
-    robust_provider.root().anvil_mine(Some(3), None).await?;
+    robust_provider.primary().anvil_mine(Some(3), None).await?;
 
     assert_next!(stream, ScannerStatus::ReorgDetected);
     assert_next!(stream, 0..=0);

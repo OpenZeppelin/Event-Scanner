@@ -96,7 +96,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// If there are no providers set (this should never happen)
     #[must_use]
-    pub fn root(&self) -> &RootProvider<N> {
+    pub fn primary(&self) -> &RootProvider<N> {
         // Safe to unwrap because we always have at least one provider
         self.providers.first().expect("providers vector should never be empty")
     }
@@ -207,7 +207,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
         // immediately fail if primary does not support pubsub
-        self.root().client().expect_pubsub_frontend();
+        self.primary().client().expect_pubsub_frontend();
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
