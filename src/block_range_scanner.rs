@@ -12,7 +12,7 @@
 //!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
 //!         DEFAULT_MAX_BLOCK_RANGE, Message,
 //!     },
-//!     robust_provider::RobustProvider,
+//!     robust_provider::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -24,8 +24,8 @@
 //!
 //!     // Configuration
 //!     let provider = ProviderBuilder::new().connect("ws://localhost:8546").await?;
-//!     let robust_provider = RobustProvider::new(provider).await?;
-//!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider);
+//!     let robust_provider = RobustProviderBuilder::new(provider).build().await?;
+//!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider).await?;
 //!
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
