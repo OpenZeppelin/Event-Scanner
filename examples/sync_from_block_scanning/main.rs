@@ -58,7 +58,11 @@ async fn main() -> anyhow::Result<()> {
         info!("Historical event {} created", i + 1);
     }
 
-    let robust_provider = RobustProvider::new(provider.clone());
+    let robust_provider = RobustProvider::new(provider)
+        .max_timeout(Duration::from_secs(30))
+        .max_retries(5)
+        .min_delay(Duration::from_millis(500));
+
     let mut scanner = EventScannerBuilder::sync().from_block(0).connect(robust_provider);
 
     let mut stream = scanner.subscribe(increase_filter);

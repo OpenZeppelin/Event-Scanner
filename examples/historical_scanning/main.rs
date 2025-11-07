@@ -52,7 +52,11 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let robust_provider = RobustProvider::new(provider.clone());
+    let robust_provider = RobustProvider::new(provider)
+        .max_timeout(std::time::Duration::from_secs(30))
+        .max_retries(5)
+        .min_delay(std::time::Duration::from_millis(500));
+
     let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
 
     let mut stream = scanner.subscribe(increase_filter);

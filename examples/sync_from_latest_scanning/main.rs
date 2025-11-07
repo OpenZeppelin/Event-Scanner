@@ -50,7 +50,11 @@ async fn main() -> anyhow::Result<()> {
         .contract_address(*contract_address)
         .event(Counter::CountIncreased::SIGNATURE);
 
-    let robust_provider = RobustProvider::new(provider.clone());
+    let robust_provider = RobustProvider::new(provider)
+        .max_timeout(std::time::Duration::from_secs(30))
+        .max_retries(5)
+        .min_delay(std::time::Duration::from_millis(500));
+
     let mut client = EventScannerBuilder::sync().from_latest(5).connect(robust_provider);
 
     let mut stream = client.subscribe(increase_filter);
