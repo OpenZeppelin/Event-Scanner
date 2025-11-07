@@ -415,7 +415,6 @@ impl<N: Network> RobustProvider<N> {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_attempts)
             .with_min_delay(self.min_delay);
-        println!("Retry strategy: {:?}", retry_strategy);
 
         timeout(
             self.max_timeout,
