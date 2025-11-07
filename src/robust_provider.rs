@@ -1,15 +1,20 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc, time::Duration};
 
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
-    network::Network,
-    providers::{Provider, RootProvider},
+    network::{Ethereum, Network},
+    providers::{
+        DynProvider, Provider, RootProvider,
+        fillers::{FillProvider, TxFiller},
+        layers::{CacheProvider, CallBatchProvider},
+    },
     pubsub::Subscription,
     rpc::types::{Filter, Log},
-    transports::{RpcError, TransportErrorKind},
+    transports::{RpcError, TransportErrorKind, http::reqwest::Url},
 };
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
+use tokio::time::{error as TokioError, timeout};
 use tracing::{error, info};
 
 #[derive(Error, Debug, Clone)]
@@ -17,14 +22,193 @@ pub enum Error {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
-    RetryFailure(Arc<RpcError<TransportErrorKind>>),
+    RpcError(Arc<RpcError<TransportErrorKind>>),
     #[error("Block not found, Block Id: {0}")]
     BlockNotFound(BlockId),
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {
     fn from(err: RpcError<TransportErrorKind>) -> Self {
-        Error::RetryFailure(Arc::new(err))
+        Error::RpcError(Arc::new(err))
+    }
+}
+
+impl From<TokioError::Elapsed> for Error {
+    fn from(_: TokioError::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
+
+pub trait IntoProvider<N: Network = Ethereum> {
+    fn into_provider(
+        self,
+    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send;
+}
+
+impl<N: Network> IntoProvider<N> for RobustProvider<N> {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self.primary().to_owned())
+    }
+}
+
+impl<N: Network> IntoProvider<N> for RootProvider<N> {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<N: Network> IntoProvider<N> for &str {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self).await?)
+    }
+}
+
+impl<N: Network> IntoProvider<N> for Url {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self.as_str()).await?)
+    }
+}
+
+impl<F, P, N> IntoProvider<N> for FillProvider<F, P, N>
+where
+    F: TxFiller<N>,
+    P: Provider<N>,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<P, N> IntoProvider<N> for CacheProvider<P, N>
+where
+    P: Provider<N>,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<N> IntoProvider<N> for DynProvider<N>
+where
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<P, N> IntoProvider<N> for CallBatchProvider<P, N>
+where
+    P: Provider<N> + 'static,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+pub trait IntoRobustProvider<N: Network = Ethereum> {
+    fn into_robust_provider(
+        self,
+    ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send;
+}
+
+impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
+    async fn into_robust_provider(self) -> Result<RobustProvider<N>, Error> {
+        RobustProviderBuilder::new(self).build().await
+    }
+}
+
+// RPC retry and timeout settings
+/// Default timeout used by `RobustProvider`
+pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default maximum number of retry attempts.
+pub const DEFAULT_MAX_RETRIES: usize = 3;
+/// Default base delay between retries.
+pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
+
+#[derive(Clone)]
+pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
+    providers: Vec<P>,
+    max_timeout: Duration,
+    max_retries: usize,
+    min_delay: Duration,
+    _network: PhantomData<N>,
+}
+
+impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
+    /// Create a new `RobustProvider` with default settings.
+    ///
+    /// The provided provider is treated as the primary provider.
+    #[must_use]
+    pub fn new(provider: P) -> Self {
+        Self {
+            providers: vec![provider],
+            max_timeout: DEFAULT_MAX_TIMEOUT,
+            max_retries: DEFAULT_MAX_RETRIES,
+            min_delay: DEFAULT_MIN_DELAY,
+            _network: PhantomData,
+        }
+    }
+
+    /// Create a new `RobustProvider` with no retry attempts and only timeout set.
+    ///
+    /// The provided provider is treated as the primary provider.
+    #[must_use]
+    pub fn fragile(provider: P) -> Self {
+        Self::new(provider).max_retries(0).min_delay(Duration::ZERO)
+    }
+
+    /// Add a fallback provider to the list.
+    ///
+    /// Fallback providers are used when the primary provider times out or fails.
+    #[must_use]
+    pub fn fallback(mut self, provider: P) -> Self {
+        self.providers.push(provider);
+        self
+    }
+
+    /// Set the maximum timeout for RPC operations.
+    #[must_use]
+    pub fn max_timeout(mut self, timeout: Duration) -> Self {
+        self.max_timeout = timeout;
+        self
+    }
+
+    /// Set the maximum number of retry attempts.
+    #[must_use]
+    pub fn max_retries(mut self, max_retries: usize) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    /// Set the base delay for exponential backoff retries.
+    #[must_use]
+    pub fn min_delay(mut self, min_delay: Duration) -> Self {
+        self.min_delay = min_delay;
+        self
+    }
+
+    /// Build the `RobustProvider`.
+    ///
+    /// Final builder method: consumes the builder and returns the built [`RobustProvider`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the providers fail to connect.
+    pub async fn build(self) -> Result<RobustProvider<N>, Error> {
+        let mut providers = vec![];
+        for p in self.providers {
+            providers.push(p.into_provider().await?.root().to_owned());
+        }
+        Ok(RobustProvider {
+            providers,
+            max_timeout: self.max_timeout,
+            max_retries: self.max_retries,
+            min_delay: self.min_delay,
+        })
     }
 }
 
@@ -32,65 +216,45 @@ impl From<RpcError<TransportErrorKind>> for Error {
 ///
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
+/// The first provider in the vector is treated as the primary provider.
 #[derive(Clone)]
-pub struct RobustProvider<N: Network> {
-    provider: RootProvider<N>,
+pub struct RobustProvider<N: Network = Ethereum> {
+    providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
     max_retries: usize,
-    retry_interval: Duration,
+    min_delay: Duration,
 }
 
-// RPC retry and timeout settings
-/// Default timeout used by `RobustProvider`
-pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(30);
-/// Default maximum number of retry attempts.
-pub const DEFAULT_MAX_RETRIES: usize = 5;
-/// Default base delay between retries.
-pub const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-
 impl<N: Network> RobustProvider<N> {
-    /// Create a new `RobustProvider` with default settings.
+    /// Get a reference to the primary provider (the first provider in the list)
+    ///
+    /// # Panics
+    ///
+    /// If there are no providers set (this should never happen)
     #[must_use]
-    pub fn new(provider: RootProvider<N>) -> Self {
-        Self {
-            provider,
-            max_timeout: DEFAULT_MAX_TIMEOUT,
-            max_retries: DEFAULT_MAX_RETRIES,
-            retry_interval: DEFAULT_RETRY_INTERVAL,
-        }
-    }
-
-    #[must_use]
-    pub fn max_timeout(mut self, timeout: Duration) -> Self {
-        self.max_timeout = timeout;
-        self
-    }
-
-    #[must_use]
-    pub fn max_retries(mut self, max_retries: usize) -> Self {
-        self.max_retries = max_retries;
-        self
-    }
-
-    #[must_use]
-    pub fn retry_interval(mut self, retry_interval: Duration) -> Self {
-        self.retry_interval = retry_interval;
-        self
+    pub fn primary(&self) -> &RootProvider<N> {
+        // Safe to unwrap because we always have at least one provider
+        self.providers.first().expect("providers vector should never be empty")
     }
 
     /// Fetch a block by number with retry and timeout.
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByNumber called");
-        let operation = async || self.provider.get_block_by_number(number).await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_by_number(number).await },
+                false,
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getByBlockNumber failed");
         }
@@ -102,12 +266,17 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_block_number(&self) -> Result<u64, Error> {
         info!("eth_getBlockNumber called");
-        let operation = async || self.provider.get_block_number().await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_number().await },
+                false,
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockNumber failed");
         }
@@ -118,15 +287,20 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
-        let operation = async || self.provider.get_block_by_hash(hash).await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_by_hash(hash).await },
+                false,
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockByHash failed");
         }
@@ -138,12 +312,17 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
-        let operation = async || self.provider.get_logs(filter).await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_logs(filter).await },
+                false,
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getLogs failed");
         }
@@ -154,12 +333,18 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the primary provider does not support pubsub, if the RPC
+    /// call fails after exhausting all retry attempts, or if the call times out.
+    /// When fallback providers are configured, the error returned will be from the
+    /// final provider that was attempted.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
-        let operation = async || self.provider.subscribe_blocks().await;
-        let result = self.retry_with_total_timeout(operation).await;
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.subscribe_blocks().await },
+                true,
+            )
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_subscribe failed");
         }
@@ -172,49 +357,121 @@ impl<N: Network> RobustProvider<N> {
     /// the entire operation (including time spent inside the RPC call) cannot exceed
     /// `max_timeout`.
     ///
+    /// If the timeout is exceeded and fallback providers are available, it will
+    /// attempt to use each fallback provider in sequence.
+    ///
+    /// If `require_pubsub` is true, providers that don't support pubsub will be skipped.
+    ///
     /// # Errors
     ///
-    /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded"
-    ///   if the overall timeout elapses.
+    /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
+    ///   and all fallback providers failed" if the overall timeout elapses and no fallback
+    ///   providers succeed.
+    /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
+    ///   is true and all providers don't support pubsub.
     /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    async fn retry_with_total_timeout<T, F, Fut>(&self, operation: F) -> Result<T, Error>
+    async fn retry_with_total_timeout<T: Debug, F, Fut>(
+        &self,
+        operation: F,
+        require_pubsub: bool,
+    ) -> Result<T, Error>
     where
-        F: Fn() -> Fut,
+        F: Fn(RootProvider<N>) -> Fut,
+        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
+    {
+        let mut providers = self.providers.iter();
+        let primary = providers.next().expect("should have primary provider");
+
+        let result = self.try_provider_with_timeout(primary, &operation).await;
+
+        if result.is_ok() {
+            return result;
+        }
+
+        let mut last_error = result.unwrap_err();
+
+        let num_providers = self.providers.len();
+        if num_providers > 1 {
+            info!("Primary provider failed, trying fallback provider(s)");
+        }
+
+        // This loop starts at index 1 automatically
+        for (idx, provider) in providers.enumerate() {
+            let fallback_num = idx + 1;
+            if require_pubsub && !Self::supports_pubsub(provider) {
+                info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
+                continue;
+            }
+            info!("Attempting fallback provider {}/{}", fallback_num, num_providers - 1);
+
+            match self.try_provider_with_timeout(provider, &operation).await {
+                Ok(value) => {
+                    info!(provider_num = fallback_num, "Fallback provider succeeded");
+                    return Ok(value);
+                }
+                Err(e) => {
+                    error!(provider_num = fallback_num, err = %e, "Fallback provider failed");
+                    last_error = e;
+                }
+            }
+        }
+
+        // Return the last error encountered
+        error!("All providers failed or timed out - returning the last providers attempt's error");
+        Err(last_error)
+    }
+
+    /// Try executing an operation with a specific provider with retry and timeout.
+    async fn try_provider_with_timeout<T, F, Fut>(
+        &self,
+        provider: &RootProvider<N>,
+        operation: F,
+    ) -> Result<T, Error>
+    where
+        F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
         let retry_strategy = ExponentialBuilder::default()
             .with_max_times(self.max_retries)
-            .with_min_delay(self.retry_interval);
+            .with_min_delay(self.min_delay);
 
-        match tokio::time::timeout(
+        timeout(
             self.max_timeout,
-            operation.retry(retry_strategy).sleep(tokio::time::sleep),
+            (|| operation(provider.clone()))
+                .retry(retry_strategy)
+                .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
+                    info!(error = %err, "RPC error retrying after {:?}", dur);
+                })
+                .sleep(tokio::time::sleep),
         )
         .await
-        {
-            Ok(res) => res.map_err(Error::from),
-            Err(_) => Err(Error::Timeout),
-        }
+        .map_err(Error::from)?
+        .map_err(Error::from)
+    }
+
+    /// Check if a provider supports pubsub
+    fn supports_pubsub(provider: &RootProvider<N>) -> bool {
+        provider.client().pubsub_frontend().is_some()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::network::Ethereum;
+    use alloy::{
+        consensus::BlockHeader,
+        providers::{ProviderBuilder, WsConnect, ext::AnvilApi},
+    };
+    use alloy_node_bindings::Anvil;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
 
-    fn test_provider(
-        timeout: u64,
-        max_retries: usize,
-        retry_interval: u64,
-    ) -> RobustProvider<Ethereum> {
+    fn test_provider(timeout: u64, max_retries: usize, min_delay: u64) -> RobustProvider {
         RobustProvider {
-            provider: RootProvider::new_http("http://localhost:8545".parse().unwrap()),
+            providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
             max_retries,
-            retry_interval: Duration::from_millis(retry_interval),
+            min_delay: Duration::from_millis(min_delay),
         }
     }
 
@@ -225,11 +482,14 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(|| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                let count = call_count.load(Ordering::SeqCst);
-                Ok(count)
-            })
+            .retry_with_total_timeout(
+                |_| async {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    let count = call_count.load(Ordering::SeqCst);
+                    Ok(count)
+                },
+                false,
+            )
             .await;
 
         assert!(matches!(result, Ok(1)));
@@ -242,14 +502,17 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(|| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                let count = call_count.load(Ordering::SeqCst);
-                match count {
-                    3 => Ok(count),
-                    _ => Err(TransportErrorKind::BackendGone.into()),
-                }
-            })
+            .retry_with_total_timeout(
+                |_| async {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    let count = call_count.load(Ordering::SeqCst);
+                    match count {
+                        3 => Ok(count),
+                        _ => Err(TransportErrorKind::BackendGone.into()),
+                    }
+                },
+                false,
+            )
             .await;
 
         assert!(matches!(result, Ok(3)));
@@ -262,13 +525,16 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result: Result<(), Error> = provider
-            .retry_with_total_timeout(|| async {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                Err(TransportErrorKind::BackendGone.into())
-            })
+            .retry_with_total_timeout(
+                |_| async {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    Err(TransportErrorKind::BackendGone.into())
+                },
+                false,
+            )
             .await;
 
-        assert!(matches!(result, Err(Error::RetryFailure(_))));
+        assert!(matches!(result, Err(Error::RpcError(_))));
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
@@ -278,12 +544,130 @@ mod tests {
         let provider = test_provider(max_timeout, 10, 1);
 
         let result = provider
-            .retry_with_total_timeout(|| async {
-                sleep(Duration::from_millis(max_timeout + 10)).await;
-                Ok(42)
-            })
+            .retry_with_total_timeout(
+                move |_provider| async move {
+                    sleep(Duration::from_millis(max_timeout + 10)).await;
+                    Ok(42)
+                },
+                false,
+            )
             .await;
 
         assert!(matches!(result, Err(Error::Timeout)));
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_fails_causes_backup_to_be_used() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
+
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
+
+        let anvil_2 = Anvil::new().try_spawn()?;
+
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
+            .fallback(ws_provider_2.clone())
+            .max_timeout(Duration::from_secs(1))
+            .build()
+            .await?;
+
+        drop(anvil_1);
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        ws_provider_2.anvil_mine(Some(2), None).await?;
+
+        assert_eq!(1, subscription.recv().await?.number());
+        assert_eq!(2, subscription.recv().await?.number());
+        assert!(subscription.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_fails_when_all_providers_lack_pubsub() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let robust = RobustProviderBuilder::new(http_provider.clone())
+            .fallback(http_provider)
+            .max_timeout(Duration::from_secs(5))
+            .min_delay(Duration::from_millis(100))
+            .build()
+            .await?;
+
+        let result = robust.subscribe_blocks().await.unwrap_err();
+
+        match result {
+            Error::RpcError(e) => {
+                assert!(matches!(
+                    e.as_ref(),
+                    RpcError::Transport(TransportErrorKind::PubsubUnavailable)
+                ));
+            }
+            other => panic!("Expected PubsubUnavailable error type, got: {other:?}"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_succeeds_if_primary_provider_lacks_pubsub_but_fallback_supports_it()
+    -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+        let ws_provider = ProviderBuilder::new()
+            .connect_ws(WsConnect::new(anvil.ws_endpoint_url().as_str()))
+            .await?;
+
+        let robust = RobustProviderBuilder::fragile(http_provider)
+            .fallback(ws_provider)
+            .max_timeout(Duration::from_secs(5))
+            .build()
+            .await?;
+
+        let result = robust.subscribe_blocks().await;
+        assert!(result.is_ok());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_ws_fails_http_fallback_returns_primary_error() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
+
+        let ws_provider =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
+
+        let anvil_2 = Anvil::new().try_spawn()?;
+        let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
+
+        let robust = RobustProviderBuilder::fragile(ws_provider.clone())
+            .fallback(http_provider)
+            .max_timeout(Duration::from_millis(500))
+            .build()
+            .await?;
+
+        // force ws_provider to fail and return BackendGone
+        drop(anvil_1);
+
+        let err = robust.subscribe_blocks().await.unwrap_err();
+
+        // The error should be either a Timeout or BackendGone from the primary WS provider,
+        // NOT a PubsubUnavailable error (which would indicate HTTP fallback was attempted)
+        match err {
+            Error::Timeout => {}
+            Error::RpcError(e) => {
+                assert!(matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)));
+            }
+            Error::BlockNotFound(id) => panic!("Unexpected error type: BlockNotFound({id})"),
+        }
+
+        Ok(())
     }
 }

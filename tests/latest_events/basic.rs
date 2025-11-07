@@ -1,9 +1,5 @@
 use alloy::{
-    eips::BlockNumberOrTag,
-    network::Ethereum,
-    primitives::U256,
-    providers::{Provider, ext::AnvilApi},
-    sol_types::SolEvent,
+    eips::BlockNumberOrTag, primitives::U256, providers::ext::AnvilApi, sol_types::SolEvent,
 };
 
 use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
@@ -86,7 +82,7 @@ async fn latest_scanner_no_events_returns_empty() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
-    let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
+    let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
     // Mine 6 events, one per tx (auto-mined), then manually mint 2 empty blocks to widen range
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
@@ -96,18 +92,15 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
 
     // manual empty block minting
-    provider.anvil_mine(Some(2), None).await?;
+    provider.primary().anvil_mine(Some(2), None).await?;
 
     let head = provider.get_block_number().await?;
     // Choose a subrange covering last 4 blocks
     let start = BlockNumberOrTag::from(head - 3);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScannerBuilder::latest(10)
-        .from_block(start)
-        .to_block(end)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut scanner_with_range =
+        EventScannerBuilder::latest(10).from_block(start).to_block(end).connect(provider).await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -279,7 +272,7 @@ async fn latest_scanner_ignores_non_tracked_contract() -> anyhow::Result<()> {
     let scanner = setup.scanner;
 
     let contract_a = setup.contract;
-    let contract_b = deploy_counter(provider).await?;
+    let contract_b = deploy_counter(provider.primary()).await?;
 
     // Listener only for contract A CountIncreased
     let mut stream_a = setup.stream;
@@ -309,14 +302,14 @@ async fn latest_scanner_ignores_non_tracked_contract() -> anyhow::Result<()> {
 #[tokio::test]
 async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     // Manual setup to mine empty blocks
-    let (anvil, provider, contract, default_filter) = setup_common(None, None).await?;
+    let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     // Emit 2 events
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
     // Mine 10 empty blocks
-    provider.anvil_mine(Some(10), None).await?;
+    provider.primary().anvil_mine(Some(10), None).await?;
     // Emit 1 more event
     contract.increase().send().await?.watch().await?;
 
@@ -324,11 +317,8 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(head - 12);
     let end = BlockNumberOrTag::from(head);
 
-    let mut scanner_with_range = EventScannerBuilder::latest(5)
-        .from_block(start)
-        .to_block(end)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut scanner_with_range =
+        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -348,7 +338,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
-    let (anvil, _provider, contract, default_filter) = setup_common(None, None).await?;
+    let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     contract.increase().send().await?.watch().await?;
     let receipt = contract.increase().send().await?.get_receipt().await?;
@@ -358,11 +348,8 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     let start = BlockNumberOrTag::from(receipt.block_number.unwrap());
     let end = start;
 
-    let mut scanner_with_range = EventScannerBuilder::latest(5)
-        .from_block(start)
-        .to_block(end)
-        .connect_ws::<Ethereum>(anvil.ws_endpoint_url())
-        .await?;
+    let mut scanner_with_range =
+        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
