@@ -32,7 +32,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     robust_provider.primary().anvil_mine(Some(1), None).await?;
 
-    assert_next!(stream, 6..=6, timeout = 10);
+    assert_next!(stream, 6..=6);
     assert_empty!(stream);
 
     // --- 1 block confirmation  ---
@@ -50,7 +50,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     robust_provider.primary().anvil_mine(Some(1), None).await?;
 
-    assert_next!(stream, 11..=11, timeout = 10);
+    assert_next!(stream, 11..=11);
     assert_empty!(stream);
 
     Ok(())
