@@ -500,7 +500,7 @@ mod tests {
             .max_retries(0)
             .min_delay(Duration::from_millis(10));
 
-        // force ws_provider to fail
+        // force ws_provider to fail and return BackendGone
         drop(anvil_1);
 
         let err = robust.subscribe_blocks().await.unwrap_err();
@@ -512,7 +512,7 @@ mod tests {
             Error::RpcError(e) => {
                 assert!(matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)));
             }
-            other => panic!("Unexpected error type: {other:?}"),
+            Error::BlockNotFound(id) => panic!("Unexpected error type: BlockNotFound({id})"),
         }
     }
 }
