@@ -164,7 +164,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// The provided provider is treated as the primary provider.
     #[must_use]
-    pub fn new_no_retry(provider: impl Provider<N>) -> Self {
+    pub fn fragile(provider: impl Provider<N>) -> Self {
         Self {
             providers: vec![provider.root().to_owned()],
             max_timeout: DEFAULT_MAX_TIMEOUT,
@@ -550,7 +550,7 @@ mod tests {
             .await
             .expect("Failed to connect to WS");
 
-        let robust = RobustProvider::new_no_retry(ws_provider_1)
+        let robust = RobustProvider::fragile(ws_provider_1)
             .fallback(ws_provider_2)
             .max_timeout(Duration::from_secs(5));
 
@@ -572,7 +572,7 @@ mod tests {
             .await
             .expect("Failed to connect to WS");
 
-        let robust = RobustProvider::new_no_retry(http_provider)
+        let robust = RobustProvider::fragile(http_provider)
             .fallback(ws_provider)
             .max_timeout(Duration::from_secs(5));
 
@@ -591,7 +591,7 @@ mod tests {
         let anvil_2 = Anvil::new().port(8222_u16).try_spawn().expect("Failed to start anvil");
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
-        let robust = RobustProvider::new_no_retry(ws_provider.clone())
+        let robust = RobustProvider::fragile(ws_provider.clone())
             .fallback(http_provider)
             .max_timeout(Duration::from_millis(500));
 
