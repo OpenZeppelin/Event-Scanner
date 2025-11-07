@@ -422,8 +422,7 @@ impl<N: Network> RobustProvider<N> {
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
                 .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
-                    println!("RPC error retrying after {:?}: {err:?}", dur);
-                    // info!(error = %err, "RPC error retrying after {:?}", dur);
+                    info!(error = %err, "RPC error retrying after {:?}", dur);
                 })
                 .sleep(tokio::time::sleep),
         )
