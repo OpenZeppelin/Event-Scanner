@@ -389,7 +389,10 @@ impl<M> EventScannerBuilder<M> {
     /// Connects to an existing provider.
     ///
     /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails.
     pub async fn connect<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,

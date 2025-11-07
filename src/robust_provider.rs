@@ -46,34 +46,26 @@ pub trait IntoProvider<N: Network = Ethereum> {
 }
 
 impl<N: Network> IntoProvider<N> for RobustProvider<N> {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(self.root().to_owned()) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self.root().to_owned())
     }
 }
 
 impl<N: Network> IntoProvider<N> for RootProvider<N> {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(self) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
     }
 }
 
 impl<N: Network> IntoProvider<N> for &str {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(RootProvider::connect(self).await?) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self).await?)
     }
 }
 
 impl<N: Network> IntoProvider<N> for Url {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(RootProvider::connect(self.as_str()).await?) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self.as_str()).await?)
     }
 }
 
@@ -83,10 +75,8 @@ where
     P: Provider<N>,
     N: Network,
 {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(self) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
     }
 }
 
@@ -95,10 +85,8 @@ where
     P: Provider<N>,
     N: Network,
 {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(self) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
     }
 }
 
@@ -106,10 +94,8 @@ impl<N> IntoProvider<N> for DynProvider<N>
 where
     N: Network,
 {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(self) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
     }
 }
 
@@ -118,10 +104,8 @@ where
     P: Provider<N> + 'static,
     N: Network,
 {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send {
-        async move { Ok(self) }
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
     }
 }
 
@@ -132,10 +116,8 @@ pub trait IntoRobustProvider<N: Network = Ethereum> {
 }
 
 impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
-    fn into_robust_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        RobustProviderBuilder::new(self).build()
+    async fn into_robust_provider(self) -> Result<RobustProvider<N>, Error> {
+        RobustProviderBuilder::new(self).build().await
     }
 }
 
@@ -209,7 +191,13 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         self
     }
 
-    #[must_use]
+    /// Build the `RobustProvider`.
+    ///
+    /// Final builder method: consumes the builder and returns the built [`RobustProvider`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the providers fail to connect.
     pub async fn build(self) -> Result<RobustProvider<N>, Error> {
         let mut providers = vec![];
         for p in self.providers {

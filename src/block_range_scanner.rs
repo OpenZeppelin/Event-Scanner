@@ -148,7 +148,10 @@ impl BlockRangeScanner {
     }
 
     /// Connects to an existing provider
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails.
     pub async fn connect<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
