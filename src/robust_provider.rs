@@ -125,7 +125,7 @@ impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
 /// Default timeout used by `RobustProvider`
 pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default maximum number of retry attempts.
-pub const DEFAULT_MAX_ATTEMPTS: usize = 3;
+pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
 pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
@@ -133,7 +133,7 @@ pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
     providers: Vec<P>,
     max_timeout: Duration,
-    max_attempts: usize,
+    max_retries: usize,
     min_delay: Duration,
     _network: PhantomData<N>,
 }
@@ -147,7 +147,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         Self {
             providers: vec![provider],
             max_timeout: DEFAULT_MAX_TIMEOUT,
-            max_attempts: DEFAULT_MAX_ATTEMPTS,
+            max_retries: DEFAULT_MAX_RETRIES,
             min_delay: DEFAULT_MIN_DELAY,
             _network: PhantomData,
         }
@@ -180,7 +180,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     /// Set the maximum number of retry attempts.
     #[must_use]
     pub fn max_retries(mut self, max_retries: usize) -> Self {
-        self.max_attempts = max_retries + 1;
+        self.max_retries = max_retries;
         self
     }
 
@@ -206,7 +206,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         Ok(RobustProvider {
             providers,
             max_timeout: self.max_timeout,
-            max_attempts: self.max_attempts,
+            max_retries: self.max_retries,
             min_delay: self.min_delay,
         })
     }
@@ -221,7 +221,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
 pub struct RobustProvider<N: Network = Ethereum> {
     providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
-    max_attempts: usize,
+    max_retries: usize,
     min_delay: Duration,
 }
 
@@ -437,7 +437,7 @@ impl<N: Network> RobustProvider<N> {
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
         let retry_strategy = ExponentialBuilder::default()
-            .with_max_times(self.max_attempts)
+            .with_max_times(self.max_retries)
             .with_min_delay(self.min_delay);
 
         timeout(
@@ -475,7 +475,7 @@ mod tests {
         RobustProvider {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
-            max_attempts: max_retries,
+            max_retries,
             min_delay: Duration::from_millis(min_delay),
         }
     }
