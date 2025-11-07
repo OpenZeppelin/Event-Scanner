@@ -27,6 +27,6 @@ pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RobustProvi
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
     let provider =
         ProviderBuilder::new().wallet(wallet).connect(anvil.ws_endpoint_url().as_str()).await?;
-    let robust_provider = RobustProvider::new(provider);
+    let robust_provider = RobustProvider::new(provider).await?;
     Ok(robust_provider)
 }

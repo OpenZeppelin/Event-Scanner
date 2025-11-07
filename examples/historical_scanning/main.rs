@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let robust_provider = RobustProvider::new(provider.clone());
+    let robust_provider = RobustProvider::new(provider.clone()).await?;
     let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
 
     let mut stream = scanner.subscribe(increase_filter);

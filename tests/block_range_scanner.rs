@@ -180,7 +180,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
 
     let end_num = 110;
 
-    let robust_provider = RobustProvider::new(provider.clone());
+    let robust_provider = RobustProvider::new(provider.clone()).await?;
 
     let client =
         BlockRangeScanner::new().max_block_range(30).connect(robust_provider).await?.run()?;
@@ -214,7 +214,7 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 
     let end_num = 120;
 
-    let robust_provider = RobustProvider::new(provider.clone());
+    let robust_provider = RobustProvider::new(provider.clone()).await?;
     let client =
         BlockRangeScanner::new().max_block_range(30).connect(robust_provider).await?.run()?;
 

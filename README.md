@@ -71,7 +71,7 @@ async fn run_scanner(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Connect to provider
     let provider = ProviderBuilder::new().connect(ws_url).await?;
-    let robust_provider = RobustProvider::new(provider);
+    let robust_provider = RobustProvider::new(provider).await?;
     
     // Configure scanner with custom batch size (optional)
     let mut scanner = EventScannerBuilder::live()
@@ -126,7 +126,7 @@ use event_scanner::robust_provider::RobustProvider;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-let robust_provider = RobustProvider::new(provider);
+let robust_provider = RobustProvider::new(provider).await?;
 
 // Live streaming mode
 let scanner = EventScannerBuilder::live()

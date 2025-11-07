@@ -62,7 +62,7 @@ impl<N: Network> IntoRobustProvider<N> for RootProvider<N> {
     fn into_robust_provider(
         self,
     ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        async move { Ok(RobustProvider::new(self)) }
+        async move { Ok(RobustProvider::new_inner(self)) }
     }
 }
 
@@ -78,7 +78,7 @@ impl<N: Network> IntoRobustProvider<N> for &str {
     fn into_robust_provider(
         self,
     ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        async move { Ok(RobustProvider::new(RootProvider::connect(self).await?)) }
+        async move { Ok(RobustProvider::new_inner(RootProvider::connect(self).await?)) }
     }
 }
 
@@ -86,7 +86,7 @@ impl<N: Network> IntoRobustProvider<N> for Url {
     fn into_robust_provider(
         self,
     ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        async move { Ok(RobustProvider::new(RootProvider::connect(self.as_str()).await?)) }
+        async move { Ok(RobustProvider::new_inner(RootProvider::connect(self.as_str()).await?)) }
     }
 }
 
@@ -99,7 +99,7 @@ where
     fn into_robust_provider(
         self,
     ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        async move { Ok(RobustProvider::new(self)) }
+        async move { Ok(RobustProvider::new_inner(self)) }
     }
 }
 
@@ -111,7 +111,7 @@ where
     fn into_robust_provider(
         self,
     ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        async move { Ok(RobustProvider::new(self)) }
+        async move { Ok(RobustProvider::new_inner(self)) }
     }
 }
 
@@ -122,7 +122,7 @@ where
     fn into_robust_provider(
         self,
     ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        async move { Ok(RobustProvider::new(self)) }
+        async move { Ok(RobustProvider::new_inner(self)) }
     }
 }
 
@@ -134,7 +134,7 @@ where
     fn into_robust_provider(
         self,
     ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send {
-        async move { Ok(RobustProvider::new(self)) }
+        async move { Ok(RobustProvider::new_inner(self)) }
     }
 }
 
@@ -151,7 +151,12 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// The provided provider is treated as the primary provider.
     #[must_use]
-    pub fn new(provider: impl Provider<N>) -> Self {
+    pub async fn new(provider: impl IntoRobustProvider<N>) -> Result<Self, Error> {
+        provider.into_robust_provider().await
+    }
+
+    #[must_use]
+    fn new_inner(provider: impl Provider<N>) -> Self {
         Self {
             providers: vec![provider.root().to_owned()],
             max_timeout: DEFAULT_MAX_TIMEOUT,
