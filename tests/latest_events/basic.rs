@@ -92,7 +92,7 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
 
     // manual empty block minting
-    provider.root().anvil_mine(Some(2), None).await?;
+    provider.primary().anvil_mine(Some(2), None).await?;
 
     let head = provider.get_block_number().await?;
     // Choose a subrange covering last 4 blocks
@@ -272,7 +272,7 @@ async fn latest_scanner_ignores_non_tracked_contract() -> anyhow::Result<()> {
     let scanner = setup.scanner;
 
     let contract_a = setup.contract;
-    let contract_b = deploy_counter(provider.root()).await?;
+    let contract_b = deploy_counter(provider.primary()).await?;
 
     // Listener only for contract A CountIncreased
     let mut stream_a = setup.stream;
@@ -309,7 +309,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
 
     // Mine 10 empty blocks
-    provider.root().anvil_mine(Some(10), None).await?;
+    provider.primary().anvil_mine(Some(10), None).await?;
     // Emit 1 more event
     contract.increase().send().await?.watch().await?;
 

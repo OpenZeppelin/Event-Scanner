@@ -35,7 +35,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
         (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
     ];
 
-    provider.root().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
+    provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
     assert_next!(stream, ScannerStatus::ReorgDetected);
@@ -79,7 +79,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
         (TransactionData::JSON(contract.increase().into_transaction_request()), 2),
     ];
 
-    provider.root().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
+    provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
     assert_next!(stream, ScannerStatus::ReorgDetected);
@@ -114,7 +114,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     let tx_block_pairs =
         vec![(TransactionData::JSON(contract.increase().into_transaction_request()), 0)];
 
-    provider.root().anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs }).await?;
+    provider.primary().anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
     assert_next!(stream, ScannerStatus::ReorgDetected);
@@ -147,7 +147,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     let tx_block_pairs =
         vec![(TransactionData::JSON(contract.increase().into_transaction_request()), 0)];
 
-    provider.root().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
+    provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
     assert_next!(stream, ScannerStatus::ReorgDetected);
@@ -166,7 +166,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     scanner.start().await?;
 
     // mine some initial blocks
-    provider.root().anvil_mine(Some(10), None).await?;
+    provider.primary().anvil_mine(Some(10), None).await?;
 
     // emit initial events
     for _ in 0..4 {
@@ -184,13 +184,13 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
     ];
 
-    provider.root().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
+    provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
     // assert that still no events have been streamed
     let mut stream = assert_empty!(stream);
 
     // mine some additional post-reorg blocks
-    provider.root().anvil_mine(Some(10), None).await?;
+    provider.primary().anvil_mine(Some(10), None).await?;
 
     // no `ReorgDetected` should be emitted
     assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);

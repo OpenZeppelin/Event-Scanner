@@ -47,7 +47,7 @@ pub trait IntoProvider<N: Network = Ethereum> {
 
 impl<N: Network> IntoProvider<N> for RobustProvider<N> {
     async fn into_provider(self) -> Result<impl Provider<N>, Error> {
-        Ok(self.root().to_owned())
+        Ok(self.primary().to_owned())
     }
 }
 
@@ -232,7 +232,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// If there are no providers set (this should never happen)
     #[must_use]
-    pub fn root(&self) -> &RootProvider<N> {
+    pub fn primary(&self) -> &RootProvider<N> {
         // Safe to unwrap because we always have at least one provider
         self.providers.first().expect("providers vector should never be empty")
     }
@@ -241,8 +241,9 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -265,8 +266,9 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_block_number(&self) -> Result<u64, Error> {
         info!("eth_getBlockNumber called");
         let result = self
@@ -285,8 +287,9 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
@@ -309,8 +312,9 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
         let result = self
@@ -329,14 +333,17 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if RPC call fails repeatedly even
-    /// after exhausting retries or if the call times out.
+    /// Returns an error if the primary provider does not support pubsub, if the RPC
+    /// call fails after exhausting all retry attempts, or if the call times out.
+    /// When fallback providers are configured, the error returned will be from the
+    /// final provider that was attempted.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
         // immediately fail if primary does not support pubsub
-        if !Self::supports_pubsub(self.root()) {
-            return Err(TransportErrorKind::pubsub_unavailable().into());
+        if !Self::supports_pubsub(self.primary()) {
+            return Err(RpcError::Transport(TransportErrorKind::PubsubUnavailable).into());
         }
+
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
@@ -377,8 +384,6 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let mut skipped_count = 0;
-
         let mut providers = self.providers.iter();
         let primary = providers.next().expect("should have primary provider");
 
@@ -390,7 +395,8 @@ impl<N: Network> RobustProvider<N> {
 
         let mut last_error = result.unwrap_err();
 
-        if self.providers.len() > 1 {
+        let num_providers = self.providers.len();
+        if num_providers > 1 {
             info!("Primary provider failed, trying fallback provider(s)");
         }
 
@@ -399,10 +405,9 @@ impl<N: Network> RobustProvider<N> {
             let fallback_num = idx + 1;
             if require_pubsub && !Self::supports_pubsub(provider) {
                 info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
-                skipped_count += 1;
                 continue;
             }
-            info!("Attempting fallback provider {}/{}", fallback_num, self.providers.len() - 1);
+            info!("Attempting fallback provider {}/{}", fallback_num, num_providers - 1);
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
@@ -416,14 +421,8 @@ impl<N: Network> RobustProvider<N> {
             }
         }
 
-        // If all providers were skipped due to pubsub requirement
-        if skipped_count == self.providers.len() {
-            error!("All providers skipped - none support pubsub");
-            return Err(RpcError::Transport(TransportErrorKind::PubsubUnavailable).into());
-        }
-
         // Return the last error encountered
-        error!("All providers failed or timed out");
+        error!("All providers failed or timed out - returning the last providers attempt's error");
         Err(last_error)
     }
 
@@ -479,6 +478,12 @@ mod tests {
             max_attempts: max_retries,
             min_delay: Duration::from_millis(min_delay),
         }
+    }
+
+    fn free_port() -> u16 {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind to find free port");
+        listener.local_addr().expect("Failed to get local address").port()
     }
 
     #[tokio::test]
@@ -569,7 +574,7 @@ mod tests {
         let ws_provider_1 =
             ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
 
-        let anvil_2 = Anvil::new().port(1111_u16).try_spawn()?;
+        let anvil_2 = Anvil::new().port(free_port()).try_spawn().expect("Failed to start anvil");
 
         let ws_provider_2 = ProviderBuilder::new()
             .connect(anvil_2.ws_endpoint_url().as_str())
@@ -596,8 +601,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_subscribe_fails_when_all_providers_lack_pubsub() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let robust = RobustProviderBuilder::new(http_provider.clone())
+            .fallback(http_provider)
+            .max_timeout(Duration::from_secs(5))
+            .min_delay(Duration::from_millis(100))
+            .build()
+            .await?;
+
+        let result = robust.subscribe_blocks().await.unwrap_err();
+
+        match result {
+            Error::RpcError(e) => {
+                assert!(matches!(
+                    e.as_ref(),
+                    RpcError::Transport(TransportErrorKind::PubsubUnavailable)
+                ));
+            }
+            other => panic!("Expected PubsubUnavailable error type, got: {other:?}"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_subscribe_fails_if_primary_provider_lacks_pubsub() -> anyhow::Result<()> {
-        let anvil = Anvil::new().try_spawn().expect("Failed to start anvil");
+        let anvil = Anvil::new().try_spawn()?;
 
         let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
         let ws_provider = ProviderBuilder::new()
@@ -620,7 +653,7 @@ mod tests {
                     RpcError::Transport(TransportErrorKind::PubsubUnavailable)
                 ));
             }
-            other => panic!("Unexpected error type: {other:?}"),
+            other => panic!("Expected PubsubUnavailable error type, got: {other:?}"),
         }
 
         Ok(())
@@ -635,7 +668,7 @@ mod tests {
             .await
             .expect("Failed to connect to WS");
 
-        let anvil_2 = Anvil::new().port(8222_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().port(free_port()).try_spawn().expect("Failed to start anvil");
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
