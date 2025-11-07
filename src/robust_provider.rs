@@ -480,12 +480,6 @@ mod tests {
         }
     }
 
-    fn free_port() -> u16 {
-        let listener =
-            std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind to find free port");
-        listener.local_addr().expect("Failed to get local address").port()
-    }
-
     #[tokio::test]
     async fn test_retry_with_timeout_succeeds_on_first_attempt() {
         let provider = test_provider(100, 3, 10);
@@ -574,7 +568,7 @@ mod tests {
         let ws_provider_1 =
             ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
 
-        let anvil_2 = Anvil::new().port(free_port()).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().try_spawn()?;
 
         let ws_provider_2 = ProviderBuilder::new()
             .connect(anvil_2.ws_endpoint_url().as_str())
@@ -668,7 +662,7 @@ mod tests {
             .await
             .expect("Failed to connect to WS");
 
-        let anvil_2 = Anvil::new().port(free_port()).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().try_spawn().expect("Failed to start anvil");
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
