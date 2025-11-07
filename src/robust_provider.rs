@@ -339,11 +339,6 @@ impl<N: Network> RobustProvider<N> {
     /// final provider that was attempted.
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
-        // immediately fail if primary does not support pubsub
-        if !Self::supports_pubsub(self.primary()) {
-            return Err(RpcError::Transport(TransportErrorKind::PubsubUnavailable).into());
-        }
-
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
@@ -570,10 +565,8 @@ mod tests {
 
         let anvil_2 = Anvil::new().try_spawn()?;
 
-        let ws_provider_2 = ProviderBuilder::new()
-            .connect(anvil_2.ws_endpoint_url().as_str())
-            .await
-            .expect("Failed to connect to WS");
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
 
         let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
             .fallback(ws_provider_2.clone())
@@ -629,8 +622,7 @@ mod tests {
         let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
         let ws_provider = ProviderBuilder::new()
             .connect_ws(WsConnect::new(anvil.ws_endpoint_url().as_str()))
-            .await
-            .expect("Failed to connect to WS");
+            .await?;
 
         let robust = RobustProviderBuilder::fragile(http_provider)
             .fallback(ws_provider)
@@ -655,14 +647,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_fails_http_fallback_returns_primary_error() -> anyhow::Result<()> {
-        let anvil_1 = Anvil::new().try_spawn().expect("Failed to start anvil");
+        let anvil_1 = Anvil::new().try_spawn()?;
 
-        let ws_provider = ProviderBuilder::new()
-            .connect_ws(WsConnect::new(anvil_1.ws_endpoint_url().as_str()))
-            .await
-            .expect("Failed to connect to WS");
+        let ws_provider =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
 
-        let anvil_2 = Anvil::new().try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().try_spawn()?;
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
