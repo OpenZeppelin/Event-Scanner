@@ -526,7 +526,7 @@ mod tests {
             .await
             .expect("Failed to connect to WS");
 
-        let anvil_2 = Anvil::new().port(8222_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().port(8225_u16).try_spawn().expect("Failed to start anvil");
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
         let robust = RobustProvider::new(ws_provider.clone())
