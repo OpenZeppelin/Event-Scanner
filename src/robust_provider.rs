@@ -262,7 +262,8 @@ impl<N: Network> RobustProvider<N> {
 
         let mut last_error = result.unwrap_err();
 
-        if self.providers.len() > 1 {
+        let num_providers = self.providers.len();
+        if num_providers > 1 {
             info!("Primary provider failed, trying fallback provider(s)");
         }
 
@@ -273,7 +274,7 @@ impl<N: Network> RobustProvider<N> {
                 info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
                 continue;
             }
-            info!("Attempting fallback provider {}/{}", fallback_num, self.providers.len() - 1);
+            info!("Attempting fallback provider {}/{}", fallback_num, num_providers - 1);
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
