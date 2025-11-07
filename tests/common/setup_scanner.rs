@@ -63,8 +63,10 @@ pub async fn setup_live_scanner(
 ) -> anyhow::Result<LiveScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
 
-    let mut scanner =
-        EventScannerBuilder::live().block_confirmations(confirmations).connect(provider.clone());
+    let mut scanner = EventScannerBuilder::live()
+        .block_confirmations(confirmations)
+        .connect(provider.clone())
+        .await?;
 
     let stream = scanner.subscribe(filter);
 
@@ -82,7 +84,8 @@ pub async fn setup_sync_scanner(
     let mut scanner = EventScannerBuilder::sync()
         .from_block(from)
         .block_confirmations(confirmations)
-        .connect(provider.clone());
+        .connect(provider.clone())
+        .await?;
 
     let stream = scanner.subscribe(filter);
 
@@ -100,7 +103,8 @@ pub async fn setup_sync_from_latest_scanner(
     let mut scanner = EventScannerBuilder::sync()
         .from_latest(latest)
         .block_confirmations(confirmations)
-        .connect(provider.clone());
+        .connect(provider.clone())
+        .await?;
 
     let stream = scanner.subscribe(filter);
 
@@ -114,8 +118,11 @@ pub async fn setup_historic_scanner(
     to: BlockNumberOrTag,
 ) -> anyhow::Result<HistoricScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;
-    let mut scanner =
-        EventScannerBuilder::historic().from_block(from).to_block(to).connect(provider.clone());
+    let mut scanner = EventScannerBuilder::historic()
+        .from_block(from)
+        .to_block(to)
+        .connect(provider.clone())
+        .await?;
 
     let stream = scanner.subscribe(filter);
 
@@ -138,7 +145,7 @@ pub async fn setup_latest_scanner(
         builder = builder.to_block(t);
     }
 
-    let mut scanner = builder.connect(provider.clone());
+    let mut scanner = builder.connect(provider.clone()).await?;
 
     let stream = scanner.subscribe(filter);
 

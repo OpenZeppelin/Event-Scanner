@@ -100,7 +100,7 @@ async fn latest_scanner_respects_range_subset() -> anyhow::Result<()> {
     let end = BlockNumberOrTag::from(head);
 
     let mut scanner_with_range =
-        EventScannerBuilder::latest(10).from_block(start).to_block(end).connect(provider);
+        EventScannerBuilder::latest(10).from_block(start).to_block(end).connect(provider).await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -318,7 +318,7 @@ async fn latest_scanner_large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let end = BlockNumberOrTag::from(head);
 
     let mut scanner_with_range =
-        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider);
+        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;
@@ -349,7 +349,7 @@ async fn latest_scanner_boundary_range_single_block() -> anyhow::Result<()> {
     let end = start;
 
     let mut scanner_with_range =
-        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider);
+        EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
     let mut stream_with_range = scanner_with_range.subscribe(default_filter);
 
     scanner_with_range.start().await?;

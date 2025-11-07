@@ -69,7 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerMessage,
     error::ScannerError,
-    robust_provider::{Error as RobustProviderError, RobustProvider},
+    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -149,8 +149,12 @@ impl BlockRangeScanner {
 
     /// Connects to an existing provider
     #[must_use]
-    pub fn connect<N: Network>(self, provider: RobustProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+        let provider = provider.into_robust_provider().await?;
+        Ok(ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range })
     }
 }
 

@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         .event(Counter::CountIncreased::SIGNATURE);
 
     let robust_provider = RobustProvider::new(provider.clone());
-    let mut client = EventScannerBuilder::sync().from_latest(5).connect(robust_provider);
+    let mut client = EventScannerBuilder::sync().from_latest(5).connect(robust_provider).await?;
 
     let mut stream = client.subscribe(increase_filter);
 

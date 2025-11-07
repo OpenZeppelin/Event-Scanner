@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let robust_provider = RobustProvider::new(provider.clone());
-    let mut scanner = EventScannerBuilder::sync().from_block(0).connect(robust_provider);
+    let mut scanner = EventScannerBuilder::sync().from_block(0).connect(robust_provider).await?;
 
     let mut stream = scanner.subscribe(increase_filter);
 
