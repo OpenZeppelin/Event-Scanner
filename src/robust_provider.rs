@@ -1,12 +1,16 @@
-use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
+use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc, time::Duration};
 
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
-    network::Network,
-    providers::{Provider, RootProvider},
+    network::{Ethereum, Network},
+    providers::{
+        DynProvider, Provider, RootProvider,
+        fillers::{FillProvider, TxFiller},
+        layers::{CacheProvider, CallBatchProvider},
+    },
     pubsub::Subscription,
     rpc::types::{Filter, Log},
-    transports::{RpcError, TransportErrorKind},
+    transports::{RpcError, TransportErrorKind, http::reqwest::Url},
 };
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
@@ -35,17 +39,86 @@ impl From<TokioError::Elapsed> for Error {
     }
 }
 
-/// Provider wrapper with built-in retry and timeout mechanisms.
-///
-/// This wrapper around Alloy providers automatically handles retries,
-/// timeouts, and error logging for RPC calls.
-/// The first provider in the vector is treated as the primary provider.
-#[derive(Clone)]
-pub struct RobustProvider<N: Network> {
-    providers: Vec<RootProvider<N>>,
-    max_timeout: Duration,
-    max_retries: usize,
-    min_delay: Duration,
+pub trait IntoProvider<N: Network = Ethereum> {
+    fn into_provider(
+        self,
+    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send;
+}
+
+impl<N: Network> IntoProvider<N> for RobustProvider<N> {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self.primary().to_owned())
+    }
+}
+
+impl<N: Network> IntoProvider<N> for RootProvider<N> {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<N: Network> IntoProvider<N> for &str {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self).await?)
+    }
+}
+
+impl<N: Network> IntoProvider<N> for Url {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self.as_str()).await?)
+    }
+}
+
+impl<F, P, N> IntoProvider<N> for FillProvider<F, P, N>
+where
+    F: TxFiller<N>,
+    P: Provider<N>,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<P, N> IntoProvider<N> for CacheProvider<P, N>
+where
+    P: Provider<N>,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<N> IntoProvider<N> for DynProvider<N>
+where
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<P, N> IntoProvider<N> for CallBatchProvider<P, N>
+where
+    P: Provider<N> + 'static,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+pub trait IntoRobustProvider<N: Network = Ethereum> {
+    fn into_robust_provider(
+        self,
+    ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send;
+}
+
+impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
+    async fn into_robust_provider(self) -> Result<RobustProvider<N>, Error> {
+        RobustProviderBuilder::new(self).build().await
+    }
 }
 
 // RPC retry and timeout settings
@@ -56,17 +129,45 @@ pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
 pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
-impl<N: Network> RobustProvider<N> {
+#[derive(Clone)]
+pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
+    providers: Vec<P>,
+    max_timeout: Duration,
+    max_retries: usize,
+    min_delay: Duration,
+    _network: PhantomData<N>,
+}
+
+impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     /// Create a new `RobustProvider` with default settings.
+    ///
     /// The provided provider is treated as the primary provider.
     #[must_use]
-    pub fn new(provider: impl Provider<N>) -> Self {
+    pub fn new(provider: P) -> Self {
         Self {
-            providers: vec![provider.root().to_owned()],
+            providers: vec![provider],
             max_timeout: DEFAULT_MAX_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             min_delay: DEFAULT_MIN_DELAY,
+            _network: PhantomData,
         }
+    }
+
+    /// Create a new `RobustProvider` with no retry attempts and only timeout set.
+    ///
+    /// The provided provider is treated as the primary provider.
+    #[must_use]
+    pub fn fragile(provider: P) -> Self {
+        Self::new(provider).max_retries(0).min_delay(Duration::ZERO)
+    }
+
+    /// Add a fallback provider to the list.
+    ///
+    /// Fallback providers are used when the primary provider times out or fails.
+    #[must_use]
+    pub fn fallback(mut self, provider: P) -> Self {
+        self.providers.push(provider);
+        self
     }
 
     /// Set the maximum timeout for RPC operations.
@@ -90,6 +191,41 @@ impl<N: Network> RobustProvider<N> {
         self
     }
 
+    /// Build the `RobustProvider`.
+    ///
+    /// Final builder method: consumes the builder and returns the built [`RobustProvider`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the providers fail to connect.
+    pub async fn build(self) -> Result<RobustProvider<N>, Error> {
+        let mut providers = vec![];
+        for p in self.providers {
+            providers.push(p.into_provider().await?.root().to_owned());
+        }
+        Ok(RobustProvider {
+            providers,
+            max_timeout: self.max_timeout,
+            max_retries: self.max_retries,
+            min_delay: self.min_delay,
+        })
+    }
+}
+
+/// Provider wrapper with built-in retry and timeout mechanisms.
+///
+/// This wrapper around Alloy providers automatically handles retries,
+/// timeouts, and error logging for RPC calls.
+/// The first provider in the vector is treated as the primary provider.
+#[derive(Clone)]
+pub struct RobustProvider<N: Network = Ethereum> {
+    providers: Vec<RootProvider<N>>,
+    max_timeout: Duration,
+    max_retries: usize,
+    min_delay: Duration,
+}
+
+impl<N: Network> RobustProvider<N> {
     /// Get a reference to the primary provider (the first provider in the list)
     ///
     /// # Panics
@@ -99,15 +235,6 @@ impl<N: Network> RobustProvider<N> {
     pub fn primary(&self) -> &RootProvider<N> {
         // Safe to unwrap because we always have at least one provider
         self.providers.first().expect("providers vector should never be empty")
-    }
-
-    /// Add a fallback provider to the list.
-    ///
-    /// Fallback providers are used when the primary provider times out or fails.
-    #[must_use]
-    pub fn fallback(mut self, provider: impl Provider<N>) -> Self {
-        self.providers.push(provider.root().to_owned());
-        self
     }
 
     /// Fetch a block by number with retry and timeout.
@@ -337,14 +464,14 @@ impl<N: Network> RobustProvider<N> {
 mod tests {
     use super::*;
     use alloy::{
-        network::Ethereum,
-        providers::{ProviderBuilder, WsConnect},
+        consensus::BlockHeader,
+        providers::{ProviderBuilder, WsConnect, ext::AnvilApi},
     };
     use alloy_node_bindings::Anvil;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
 
-    fn test_provider(timeout: u64, max_retries: usize, min_delay: u64) -> RobustProvider<Ethereum> {
+    fn test_provider(timeout: u64, max_retries: usize, min_delay: u64) -> RobustProvider {
         RobustProvider {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
@@ -435,45 +562,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_fails_causes_backup_to_be_used() {
-        let anvil_1 = Anvil::new().try_spawn().expect("Failed to start anvil");
+    async fn test_subscribe_fails_causes_backup_to_be_used() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
 
-        let ws_provider_1 = ProviderBuilder::new()
-            .connect_ws(WsConnect::new(anvil_1.ws_endpoint_url().as_str()))
-            .await
-            .expect("Failed to connect to WS");
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
 
-        let anvil_2 = Anvil::new().port(8222_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().try_spawn()?;
 
         let ws_provider_2 = ProviderBuilder::new()
-            .connect_ws(WsConnect::new(anvil_2.ws_endpoint_url().as_str()))
+            .connect(anvil_2.ws_endpoint_url().as_str())
             .await
             .expect("Failed to connect to WS");
 
-        let robust = RobustProvider::new(ws_provider_1)
-            .fallback(ws_provider_2)
-            .max_timeout(Duration::from_secs(5))
-            .max_retries(10)
-            .min_delay(Duration::from_millis(100));
+        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
+            .fallback(ws_provider_2.clone())
+            .max_timeout(Duration::from_secs(1))
+            .build()
+            .await?;
 
         drop(anvil_1);
 
-        let result = robust.subscribe_blocks().await;
+        let mut subscription = robust.subscribe_blocks().await?;
 
-        assert!(result.is_ok(), "Expected subscribe blocks to work");
+        ws_provider_2.anvil_mine(Some(2), None).await?;
+
+        assert_eq!(1, subscription.recv().await?.number());
+        assert_eq!(2, subscription.recv().await?.number());
+        assert!(subscription.is_empty());
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_subscribe_fails_when_all_providers_lack_pubsub() {
-        let anvil = Anvil::new().try_spawn().expect("Failed to start anvil");
+    async fn test_subscribe_fails_when_all_providers_lack_pubsub() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
 
         let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
-        let robust = RobustProvider::new(http_provider.clone())
+        let robust = RobustProviderBuilder::new(http_provider.clone())
             .fallback(http_provider)
             .max_timeout(Duration::from_secs(5))
-            .max_retries(10)
-            .min_delay(Duration::from_millis(100));
+            .min_delay(Duration::from_millis(100))
+            .build()
+            .await?;
 
         let result = robust.subscribe_blocks().await.unwrap_err();
 
@@ -484,13 +616,15 @@ mod tests {
                     RpcError::Transport(TransportErrorKind::PubsubUnavailable)
                 ));
             }
-            _ => panic!("Should be a pubsub error"),
+            other => panic!("Expected PubsubUnavailable error type, got: {other:?}"),
         }
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_subscribe_fails_if_primary_provider_lacks_pubsub() {
-        let anvil = Anvil::new().try_spawn().expect("Failed to start anvil");
+    async fn test_subscribe_fails_if_primary_provider_lacks_pubsub() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
 
         let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
         let ws_provider = ProviderBuilder::new()
@@ -498,27 +632,29 @@ mod tests {
             .await
             .expect("Failed to connect to WS");
 
-        let robust = RobustProvider::new(http_provider)
+        let robust = RobustProviderBuilder::fragile(http_provider)
             .fallback(ws_provider)
             .max_timeout(Duration::from_secs(5))
-            .max_retries(10)
-            .min_delay(Duration::from_millis(100));
+            .build()
+            .await?;
 
-        let result = robust.subscribe_blocks().await.unwrap_err();
+        let err = robust.subscribe_blocks().await.unwrap_err();
 
-        match result {
+        match err {
             Error::RpcError(e) => {
                 assert!(matches!(
                     e.as_ref(),
                     RpcError::Transport(TransportErrorKind::PubsubUnavailable)
                 ));
             }
-            _ => panic!("Should be a pubsub error"),
+            other => panic!("Expected PubsubUnavailable error type, got: {other:?}"),
         }
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_ws_fails_http_fallback_returns_primary_error() {
+    async fn test_ws_fails_http_fallback_returns_primary_error() -> anyhow::Result<()> {
         let anvil_1 = Anvil::new().try_spawn().expect("Failed to start anvil");
 
         let ws_provider = ProviderBuilder::new()
@@ -526,14 +662,14 @@ mod tests {
             .await
             .expect("Failed to connect to WS");
 
-        let anvil_2 = Anvil::new().port(8225_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().try_spawn().expect("Failed to start anvil");
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
-        let robust = RobustProvider::new(ws_provider.clone())
+        let robust = RobustProviderBuilder::fragile(ws_provider.clone())
             .fallback(http_provider)
             .max_timeout(Duration::from_millis(500))
-            .max_retries(0)
-            .min_delay(Duration::from_millis(10));
+            .build()
+            .await?;
 
         // force ws_provider to fail and return BackendGone
         drop(anvil_1);
@@ -549,5 +685,7 @@ mod tests {
             }
             Error::BlockNotFound(id) => panic!("Unexpected error type: BlockNotFound({id})"),
         }
+
+        Ok(())
     }
 }

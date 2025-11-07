@@ -12,7 +12,7 @@
 //!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
 //!         DEFAULT_MAX_BLOCK_RANGE, Message,
 //!     },
-//!     robust_provider::RobustProvider,
+//!     robust_provider::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -24,8 +24,8 @@
 //!
 //!     // Configuration
 //!     let provider = ProviderBuilder::new().connect("ws://localhost:8546").await?;
-//!     let robust_provider = RobustProvider::new(provider);
-//!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider);
+//!     let robust_provider = RobustProviderBuilder::new(provider).build().await?;
+//!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider).await?;
 //!
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
@@ -69,7 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerMessage,
     error::ScannerError,
-    robust_provider::{Error as RobustProviderError, RobustProvider},
+    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -148,9 +148,16 @@ impl BlockRangeScanner {
     }
 
     /// Connects to an existing provider
-    #[must_use]
-    pub fn connect<N: Network>(self, provider: RobustProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range }
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails.
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+        let provider = provider.into_robust_provider().await?;
+        Ok(ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range })
     }
 }
 

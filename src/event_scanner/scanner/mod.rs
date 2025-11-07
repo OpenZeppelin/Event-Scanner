@@ -6,13 +6,13 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    EventFilter, Message,
+    EventFilter, Message, ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES,
     },
     event_scanner::listener::EventListener,
-    robust_provider::RobustProvider,
+    robust_provider::IntoRobustProvider,
 };
 
 mod common;
@@ -78,15 +78,15 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Stream all events from genesis to latest block
     /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProvider::new(provider);
-    /// let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
+    /// let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let mut stream = scanner.subscribe(filter);
@@ -104,16 +104,17 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProvider};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// // Stream events between blocks [1_000_000, 2_000_000]
     /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProvider::new(provider);
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::historic()
     ///     .from_block(1_000_000)
     ///     .to_block(2_000_000)
-    ///     .connect(robust_provider);
+    ///     .connect(robust_provider)
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -143,17 +144,18 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Stream new events as they arrive
     /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProvider::new(provider);
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::live()
     ///     .block_confirmations(20)
-    ///     .connect(robust_provider);
+    ///     .connect(robust_provider)
+    ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let mut stream = scanner.subscribe(filter);
@@ -230,15 +232,15 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, primitives::Address, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Collect the latest 10 events across Earliest..=Latest
     /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProvider::new(provider);
-    /// let mut scanner = EventScannerBuilder::latest(10).connect(robust_provider);
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
+    /// let mut scanner = EventScannerBuilder::latest(10).connect(robust_provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let mut stream = scanner.subscribe(filter);
@@ -257,12 +259,12 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProvider};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// // Collect the latest 5 events between blocks [1_000_000, 1_100_000]
     /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProvider::new(provider);
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::latest(5)
     ///     .from_block(1_000_000)
     ///     .to_block(1_100_000)
@@ -389,10 +391,16 @@ impl<M> EventScannerBuilder<M> {
     /// Connects to an existing provider.
     ///
     /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    #[must_use]
-    pub fn connect<N: Network>(self, provider: RobustProvider<N>) -> EventScanner<M, N> {
-        let block_range_scanner = self.block_range_scanner.connect::<N>(provider);
-        EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() }
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails.
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<EventScanner<M, N>, ScannerError> {
+        let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
+        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
 }
 
@@ -447,11 +455,10 @@ mod tests {
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
-    #[test]
-    fn test_historic_event_stream_listeners_vector_updates() {
+    #[tokio::test]
+    async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let robust_provider = RobustProvider::new(provider.clone());
-        let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
+        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
 
         assert!(scanner.listeners.is_empty());
 
@@ -461,17 +468,20 @@ mod tests {
         let _stream2 = scanner.subscribe(EventFilter::new());
         let _stream3 = scanner.subscribe(EventFilter::new());
         assert_eq!(scanner.listeners.len(), 3);
+
+        Ok(())
     }
 
-    #[test]
-    fn test_historic_event_stream_channel_capacity() {
+    #[tokio::test]
+    async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let robust_provider = RobustProvider::new(provider.clone());
-        let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
+        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
 
         let _ = scanner.subscribe(EventFilter::new());
 
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+
+        Ok(())
     }
 }
