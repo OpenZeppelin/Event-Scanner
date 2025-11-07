@@ -500,6 +500,7 @@ mod tests {
             .max_retries(0)
             .min_delay(Duration::from_millis(10));
 
+        // force ws_provider to fail
         drop(anvil_1);
 
         let err = robust.subscribe_blocks().await.unwrap_err();
@@ -507,6 +508,7 @@ mod tests {
         // The error should be either a Timeout or BackendGone from the primary WS provider,
         // NOT a PubsubUnavailable error (which would indicate HTTP fallback was attempted)
         match err {
+            Error::Timeout => {}
             Error::RpcError(e) => {
                 assert!(matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)));
             }
