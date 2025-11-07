@@ -207,7 +207,10 @@ impl<N: Network> RobustProvider<N> {
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
         // immediately fail if primary does not support pubsub
-        self.primary().client().expect_pubsub_frontend();
+        if !Self::supports_pubsub(self.primary()) {
+            return Err(RpcError::Transport(TransportErrorKind::PubsubUnavailable).into());
+        }
+
         let result = self
             .retry_with_total_timeout(
                 move |provider| async move { provider.subscribe_blocks().await },
