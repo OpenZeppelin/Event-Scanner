@@ -447,8 +447,8 @@ mod tests {
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
-    #[tokio::test]
-    async fn test_historic_event_stream_listeners_vector_updates() {
+    #[test]
+    fn test_historic_event_stream_listeners_vector_updates() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let robust_provider = RobustProvider::new(provider.clone());
         let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
@@ -463,8 +463,8 @@ mod tests {
         assert_eq!(scanner.listeners.len(), 3);
     }
 
-    #[tokio::test]
-    async fn test_historic_event_stream_channel_capacity() {
+    #[test]
+    fn test_historic_event_stream_channel_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let robust_provider = RobustProvider::new(provider.clone());
         let mut scanner = EventScannerBuilder::historic().connect(robust_provider);
