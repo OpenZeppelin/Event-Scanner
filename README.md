@@ -60,7 +60,7 @@ Create an event stream for the given event filters registered with the `EventSca
 
 ```rust
 use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
+use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
 use tokio_stream::StreamExt;
 
 use crate::MyContract;
@@ -71,7 +71,7 @@ async fn run_scanner(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Connect to provider
     let provider = ProviderBuilder::new().connect(ws_url).await?;
-    let robust_provider = RobustProvider::new(provider).await?;
+    let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     
     // Configure scanner with custom batch size (optional)
     let mut scanner = EventScannerBuilder::live()
@@ -116,30 +116,33 @@ async fn run_scanner(
 `EventScannerBuilder` provides mode-specific constructors and functions to configure settings before connecting.
 Once configured, connect using:
 
-- `connect(robust_provider)` - Connect using a `RobustProvider` wrapping your alloy provider
+- `connect(provider)` - Connect using a `RobustProvider` wrapping your alloy provider or using an alloy provider directly
 
 This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ```rust
 use alloy::providers::{Provider, ProviderBuilder};
-use event_scanner::robust_provider::RobustProvider;
+use event_scanner::robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-let robust_provider = RobustProvider::new(provider).await?;
 
 // Live streaming mode
 let scanner = EventScannerBuilder::live()
     .max_block_range(500)  // Optional: set max blocks per read (default: 1000)
     .block_confirmations(12)  // Optional: set block confirmations (default: 12)
-    .connect(robust_provider.clone());
+    .connect(provider.clone());
 
 // Historical block range mode
 let scanner = EventScannerBuilder::historic()
     .from_block(1_000_000)
     .to_block(2_000_000)
     .max_block_range(500)
-    .connect(robust_provider.clone());
+    .connect(provider.clone());
+
+// we can also wrap the provider in a RobustProvider
+// for more advanced configurations like retries and fallbacks
+let robust_provider = RobustProviderBuilder::new(provider).build().await?;
 
 // Latest events mode
 let scanner = EventScannerBuilder::latest(100)

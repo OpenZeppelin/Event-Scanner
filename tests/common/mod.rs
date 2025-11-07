@@ -13,7 +13,7 @@ pub(crate) use test_counter::{TestCounter, deploy_counter};
 
 use alloy::{network::Ethereum, providers::ProviderBuilder};
 use alloy_node_bindings::{Anvil, AnvilInstance};
-use event_scanner::robust_provider::RobustProvider;
+use event_scanner::robust_provider::{RobustProvider, RobustProviderBuilder};
 
 pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
     let mut anvil = Anvil::new();
@@ -27,6 +27,6 @@ pub async fn build_provider(anvil: &AnvilInstance) -> anyhow::Result<RobustProvi
     let wallet = anvil.wallet().expect("anvil should return a default wallet");
     let provider =
         ProviderBuilder::new().wallet(wallet).connect(anvil.ws_endpoint_url().as_str()).await?;
-    let robust_provider = RobustProvider::new(provider).await?;
+    let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     Ok(robust_provider)
 }

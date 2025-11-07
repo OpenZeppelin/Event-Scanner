@@ -6,7 +6,7 @@ use alloy::{
 use alloy_node_bindings::Anvil;
 use event_scanner::{
     ScannerError, ScannerStatus, assert_closed, assert_empty, assert_next,
-    block_range_scanner::BlockRangeScanner, robust_provider::RobustProvider,
+    block_range_scanner::BlockRangeScanner,
 };
 
 #[tokio::test]
@@ -180,10 +180,8 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
 
     let end_num = 110;
 
-    let robust_provider = RobustProvider::new(provider.clone()).await?;
-
     let client =
-        BlockRangeScanner::new().max_block_range(30).connect(robust_provider).await?.run()?;
+        BlockRangeScanner::new().max_block_range(30).connect(provider.clone()).await?.run()?;
 
     let mut stream = client
         .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num))
@@ -214,9 +212,8 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 
     let end_num = 120;
 
-    let robust_provider = RobustProvider::new(provider.clone()).await?;
     let client =
-        BlockRangeScanner::new().max_block_range(30).connect(robust_provider).await?.run()?;
+        BlockRangeScanner::new().max_block_range(30).connect(provider.clone()).await?.run()?;
 
     let mut stream = client
         .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num))

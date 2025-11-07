@@ -1,7 +1,9 @@
 use alloy::{providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 
-use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProvider};
+use event_scanner::{
+    EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder,
+};
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -52,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = counter_contract.increase().send().await?.get_receipt().await?;
 
-    let robust_provider = RobustProvider::new(provider.clone()).await?;
+    let robust_provider = RobustProviderBuilder::new(provider.clone()).build().await?;
     let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
 
     let mut stream = scanner.subscribe(increase_filter);

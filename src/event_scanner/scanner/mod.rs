@@ -415,8 +415,6 @@ mod tests {
         rpc::client::RpcClient,
     };
 
-    use crate::robust_provider::RobustProvider;
-
     use super::*;
 
     #[test]
@@ -455,8 +453,7 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let robust_provider = RobustProvider::fragile(provider.clone());
-        let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
+        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
 
         assert!(scanner.listeners.is_empty());
 
@@ -473,8 +470,7 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let robust_provider = RobustProvider::fragile(provider.clone());
-        let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
+        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
 
         let _ = scanner.subscribe(EventFilter::new());
 
