@@ -48,7 +48,7 @@ impl From<TokioError::Elapsed> for Error {
 pub struct RobustProvider<N: Network = Ethereum> {
     providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
-    max_retries: usize,
+    max_attempts: usize,
     min_delay: Duration,
 }
 
@@ -142,7 +142,7 @@ where
 /// Default timeout used by `RobustProvider`
 pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default maximum number of retry attempts.
-pub const DEFAULT_MAX_RETRIES: usize = 3;
+pub const DEFAULT_MAX_ATTEMPTS: usize = 3;
 /// Default base delay between retries.
 pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
@@ -155,7 +155,7 @@ impl<N: Network> RobustProvider<N> {
         Self {
             providers: vec![provider.root().to_owned()],
             max_timeout: DEFAULT_MAX_TIMEOUT,
-            max_retries: DEFAULT_MAX_RETRIES,
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
             min_delay: DEFAULT_MIN_DELAY,
         }
     }
@@ -168,7 +168,7 @@ impl<N: Network> RobustProvider<N> {
         Self {
             providers: vec![provider.root().to_owned()],
             max_timeout: DEFAULT_MAX_TIMEOUT,
-            max_retries: 1,
+            max_attempts: 1,
             min_delay: Duration::ZERO,
         }
     }
@@ -183,7 +183,7 @@ impl<N: Network> RobustProvider<N> {
     /// Set the maximum number of retry attempts.
     #[must_use]
     pub fn max_retries(mut self, max_retries: usize) -> Self {
-        self.max_retries = max_retries;
+        self.max_attempts = max_retries + 1;
         self
     }
 
@@ -413,7 +413,7 @@ impl<N: Network> RobustProvider<N> {
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
         let retry_strategy = ExponentialBuilder::default()
-            .with_max_times(self.max_retries)
+            .with_max_times(self.max_attempts)
             .with_min_delay(self.min_delay);
         println!("Retry strategy: {:?}", retry_strategy);
 
@@ -450,7 +450,7 @@ mod tests {
         RobustProvider {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
-            max_retries,
+            max_attempts: max_retries,
             min_delay: Duration::from_millis(min_delay),
         }
     }
