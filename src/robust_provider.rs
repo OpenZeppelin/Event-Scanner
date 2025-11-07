@@ -251,8 +251,6 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let mut skipped_count = 0;
-
         let mut providers = self.providers.iter();
         let primary = providers.next().expect("should have primary provider");
 
@@ -273,7 +271,6 @@ impl<N: Network> RobustProvider<N> {
             let fallback_num = idx + 1;
             if require_pubsub && !Self::supports_pubsub(provider) {
                 info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
-                skipped_count += 1;
                 continue;
             }
             info!("Attempting fallback provider {}/{}", fallback_num, self.providers.len() - 1);
@@ -288,12 +285,6 @@ impl<N: Network> RobustProvider<N> {
                     last_error = e;
                 }
             }
-        }
-
-        // If all providers were skipped due to pubsub requirement
-        if skipped_count == self.providers.len() {
-            error!("All providers skipped - none support pubsub");
-            return Err(RpcError::Transport(TransportErrorKind::PubsubUnavailable).into());
         }
 
         // Return the last error encountered
@@ -438,14 +429,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe_fails_causes_backup_to_be_used() {
-        let anvil_1 = Anvil::new().port(2222_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_1 = Anvil::new().try_spawn().expect("Failed to start anvil");
 
         let ws_provider_1 = ProviderBuilder::new()
             .connect_ws(WsConnect::new(anvil_1.ws_endpoint_url().as_str()))
             .await
             .expect("Failed to connect to WS");
 
-        let anvil_2 = Anvil::new().port(1111_u16).try_spawn().expect("Failed to start anvil");
+        let anvil_2 = Anvil::new().port(8222_u16).try_spawn().expect("Failed to start anvil");
 
         let ws_provider_2 = ProviderBuilder::new()
             .connect_ws(WsConnect::new(anvil_2.ws_endpoint_url().as_str()))
@@ -466,7 +457,31 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "called pubsub_frontend on a non-pubsub transport")]
+    async fn test_subscribe_fails_when_all_providers_lack_pubsub() {
+        let anvil = Anvil::new().try_spawn().expect("Failed to start anvil");
+
+        let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let robust = RobustProvider::new(http_provider.clone())
+            .fallback(http_provider)
+            .max_timeout(Duration::from_secs(5))
+            .max_retries(10)
+            .min_delay(Duration::from_millis(100));
+
+        let result = robust.subscribe_blocks().await.unwrap_err();
+
+        match result {
+            Error::RpcError(e) => {
+                assert!(matches!(
+                    e.as_ref(),
+                    RpcError::Transport(TransportErrorKind::PubsubUnavailable)
+                ));
+            }
+            _ => panic!("Should be a pubsub error"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_subscribe_fails_if_primary_provider_lacks_pubsub() {
         let anvil = Anvil::new().try_spawn().expect("Failed to start anvil");
 
@@ -482,7 +497,17 @@ mod tests {
             .max_retries(10)
             .min_delay(Duration::from_millis(100));
 
-        let _ = robust.subscribe_blocks().await;
+        let result = robust.subscribe_blocks().await.unwrap_err();
+
+        match result {
+            Error::RpcError(e) => {
+                assert!(matches!(
+                    e.as_ref(),
+                    RpcError::Transport(TransportErrorKind::PubsubUnavailable)
+                ));
+            }
+            _ => panic!("Should be a pubsub error"),
+        }
     }
 
     #[tokio::test]
