@@ -616,7 +616,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_fails_if_primary_provider_lacks_pubsub() -> anyhow::Result<()> {
+    async fn test_subscribe_succeeds_if_primary_provider_lacks_pubsub_but_fallback_supports_it()
+    -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
         let http_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
@@ -630,17 +631,8 @@ mod tests {
             .build()
             .await?;
 
-        let err = robust.subscribe_blocks().await.unwrap_err();
-
-        match err {
-            Error::RpcError(e) => {
-                assert!(matches!(
-                    e.as_ref(),
-                    RpcError::Transport(TransportErrorKind::PubsubUnavailable)
-                ));
-            }
-            other => panic!("Expected PubsubUnavailable error type, got: {other:?}"),
-        }
+        let result = robust.subscribe_blocks().await;
+        assert!(result.is_ok());
 
         Ok(())
     }
