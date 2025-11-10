@@ -64,11 +64,13 @@ use tokio::{
     sync::{mpsc, oneshot},
     try_join,
 };
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     IntoRobustProvider, RobustProvider, RobustProviderError, ScannerMessage,
     error::ScannerError,
+    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
+    robust_subscription::RobustSubscription,
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -76,7 +78,6 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
 use tracing::{debug, error, info, warn};
@@ -610,17 +611,33 @@ impl<N: Network> Service<N> {
 
     async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        subscription: Subscription<N::HeaderResponse>,
+        mut subscription: RobustSubscription<N>,
         sender: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
     ) {
         // ensure we start streaming only after the expected_next_block cutoff
         let cutoff = range_start;
-        let mut stream = subscription.into_stream().skip_while(|header| header.number() < cutoff);
 
-        while let Some(incoming_block) = stream.next().await {
+        loop {
+            // Use recv() to get the next block with automatic failover
+            let incoming_block = match subscription.recv().await {
+                Ok(block) => block,
+                Err(e) => {
+                    error!(error = %e, "Failed to receive block from subscription");
+                    // Send error to subscriber and terminate
+                    _ = sender.try_stream(e).await;
+                    return;
+                }
+            };
+
             let incoming_block_num = incoming_block.number();
+
+            // Skip blocks before the cutoff
+            if incoming_block_num < cutoff {
+                continue;
+            }
+
             info!(block_number = incoming_block_num, "Received block header");
 
             if incoming_block_num < range_start {

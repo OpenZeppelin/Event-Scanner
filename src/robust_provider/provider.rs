@@ -3,8 +3,11 @@ use std::{fmt::Debug, future::Future, time::Duration};
 use alloy::{
     eips::BlockNumberOrTag,
     network::{Ethereum, Network},
-    providers::{Provider, RootProvider},
-    pubsub::Subscription,
+    providers::{
+        DynProvider, Provider, RootProvider,
+        fillers::{FillProvider, TxFiller},
+        layers::{CacheProvider, CallBatchProvider},
+    },
     rpc::types::{Filter, Log},
     transports::{RpcError, TransportErrorKind},
 };
@@ -12,19 +15,214 @@ use backon::{ExponentialBuilder, Retryable};
 use tokio::time::timeout;
 use tracing::{error, info};
 
-use crate::robust_provider::error::Error;
+use crate::robust_subscription::{DEFAULT_RECONNECT_INTERVAL, RobustSubscription};
+
+#[derive(Error, Debug, Clone)]
+pub enum Error {
+    #[error("Operation timed out")]
+    Timeout,
+    #[error("RPC call failed after exhausting all retry attempts: {0}")]
+    RpcError(Arc<RpcError<TransportErrorKind>>),
+    #[error("Block not found, Block Id: {0}")]
+    BlockNotFound(BlockId),
+}
+
+impl From<RpcError<TransportErrorKind>> for Error {
+    fn from(err: RpcError<TransportErrorKind>) -> Self {
+        Error::RpcError(Arc::new(err))
+    }
+}
+
+impl From<TokioError::Elapsed> for Error {
+    fn from(_: TokioError::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
+
+pub trait IntoProvider<N: Network = Ethereum> {
+    fn into_provider(
+        self,
+    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send;
+}
+
+impl<N: Network> IntoProvider<N> for RobustProvider<N> {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self.primary().to_owned())
+    }
+}
+
+impl<N: Network> IntoProvider<N> for RootProvider<N> {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<N: Network> IntoProvider<N> for &str {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self).await?)
+    }
+}
+
+impl<N: Network> IntoProvider<N> for Url {
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(RootProvider::connect(self.as_str()).await?)
+    }
+}
+
+impl<F, P, N> IntoProvider<N> for FillProvider<F, P, N>
+where
+    F: TxFiller<N>,
+    P: Provider<N>,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<P, N> IntoProvider<N> for CacheProvider<P, N>
+where
+    P: Provider<N>,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<N> IntoProvider<N> for DynProvider<N>
+where
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+impl<P, N> IntoProvider<N> for CallBatchProvider<P, N>
+where
+    P: Provider<N> + 'static,
+    N: Network,
+{
+    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+        Ok(self)
+    }
+}
+
+pub trait IntoRobustProvider<N: Network = Ethereum> {
+    fn into_robust_provider(
+        self,
+    ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send;
+}
+
+impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
+    async fn into_robust_provider(self) -> Result<RobustProvider<N>, Error> {
+        RobustProviderBuilder::new(self).build().await
+    }
+}
+
+// RPC retry and timeout settings
+/// Default timeout used by `RobustProvider`
+pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default maximum number of retry attempts.
+pub const DEFAULT_MAX_RETRIES: usize = 3;
+/// Default base delay between retries.
+pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
+
+#[derive(Clone)]
+pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
+    pub(crate) providers: Vec<P>,
+    max_timeout: Duration,
+    max_retries: usize,
+    min_delay: Duration,
+    _network: PhantomData<N>,
+}
+
+impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
+    /// Create a new `RobustProvider` with default settings.
+    ///
+    /// The provided provider is treated as the primary provider.
+    #[must_use]
+    pub fn new(provider: P) -> Self {
+        Self {
+            providers: vec![provider],
+            max_timeout: DEFAULT_MAX_TIMEOUT,
+            max_retries: DEFAULT_MAX_RETRIES,
+            min_delay: DEFAULT_MIN_DELAY,
+            _network: PhantomData,
+        }
+    }
+
+    /// Create a new `RobustProvider` with no retry attempts and only timeout set.
+    ///
+    /// The provided provider is treated as the primary provider.
+    #[must_use]
+    pub fn fragile(provider: P) -> Self {
+        Self::new(provider).max_retries(0).min_delay(Duration::ZERO)
+    }
+
+    /// Add a fallback provider to the list.
+    ///
+    /// Fallback providers are used when the primary provider times out or fails.
+    #[must_use]
+    pub fn fallback(mut self, provider: P) -> Self {
+        self.providers.push(provider);
+        self
+    }
+
+    /// Set the maximum timeout for RPC operations.
+    #[must_use]
+    pub fn max_timeout(mut self, timeout: Duration) -> Self {
+        self.max_timeout = timeout;
+        self
+    }
+
+    /// Set the maximum number of retry attempts.
+    #[must_use]
+    pub fn max_retries(mut self, max_retries: usize) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    /// Set the base delay for exponential backoff retries.
+    #[must_use]
+    pub fn min_delay(mut self, min_delay: Duration) -> Self {
+        self.min_delay = min_delay;
+        self
+    }
+
+    /// Build the `RobustProvider`.
+    ///
+    /// Final builder method: consumes the builder and returns the built [`RobustProvider`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the providers fail to connect.
+    pub async fn build(self) -> Result<RobustProvider<N>, Error> {
+        let mut providers = vec![];
+        for p in self.providers {
+            providers.push(p.into_provider().await?.root().to_owned());
+        }
+        Ok(RobustProvider {
+            providers,
+            max_timeout: self.max_timeout,
+            max_retries: self.max_retries,
+            min_delay: self.min_delay,
+        })
+    }
+}
 
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
 /// The first provider in the vector is treated as the primary provider.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RobustProvider<N: Network = Ethereum> {
     pub(crate) providers: Vec<RootProvider<N>>,
-    pub(crate) max_timeout: Duration,
-    pub(crate) max_retries: usize,
-    pub(crate) min_delay: Duration,
+    max_timeout: Duration,
+    max_retries: usize,
+    min_delay: Duration,
 }
 
 impl<N: Network> RobustProvider<N> {
@@ -52,7 +250,7 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByNumber called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_number(number).await },
                 false,
             )
@@ -74,7 +272,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_block_number(&self) -> Result<u64, Error> {
         info!("eth_getBlockNumber called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number().await },
                 false,
             )
@@ -98,7 +296,7 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_hash(hash).await },
                 false,
             )
@@ -120,7 +318,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_logs(filter).await },
                 false,
             )
@@ -131,7 +329,12 @@ impl<N: Network> RobustProvider<N> {
         result
     }
 
-    /// Subscribe to new block headers with retry and timeout.
+    /// Subscribe to new block headers with automatic failover and reconnection.
+    ///
+    /// Returns a `RobustSubscription` that automatically:
+    /// - Handles connection errors by switching to fallback providers
+    /// - Detects and recovers from lagged subscriptions
+    /// - Periodically attempts to reconnect to the primary provider
     ///
     /// # Errors
     ///
@@ -139,18 +342,23 @@ impl<N: Network> RobustProvider<N> {
     /// call fails after exhausting all retry attempts, or if the call times out.
     /// When fallback providers are configured, the error returned will be from the
     /// final provider that was attempted.
-    pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
+    pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
         info!("eth_subscribe called");
-        let result = self
-            .retry_with_total_timeout(
+        let subscription = self
+            .try_operation_with_failover(
                 move |provider| async move { provider.subscribe_blocks().await },
                 true,
             )
             .await;
-        if let Err(e) = &result {
+
+        if let Err(e) = &subscription {
             error!(error = %e, "eth_subscribe failed");
+            return Err(e.clone());
         }
-        result
+
+        let subscription = subscription?;
+
+        Ok(RobustSubscription::new(subscription, self.clone(), DEFAULT_RECONNECT_INTERVAL))
     }
 
     /// Execute `operation` with exponential backoff and a total timeout.
@@ -172,7 +380,7 @@ impl<N: Network> RobustProvider<N> {
     /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
     /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    async fn retry_with_total_timeout<T: Debug, F, Fut>(
+    pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
         require_pubsub: bool,
@@ -192,13 +400,35 @@ impl<N: Network> RobustProvider<N> {
 
         let mut last_error = result.unwrap_err();
 
+        // providers are just fallback
+        match self.try_fallback_providers(providers, &operation, require_pubsub, last_error).await {
+            Ok(value) => {
+                return Ok(value);
+            }
+            Err(e) => last_error = e,
+        }
+
+        // Return the last error encountered
+        error!("All providers failed or timed out - returning the last providers attempt's error");
+        Err(last_error)
+    }
+
+    pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
+        &self,
+        fallback_providers: impl Iterator<Item = &RootProvider<N>>,
+        operation: F,
+        require_pubsub: bool,
+        mut last_error: Error,
+    ) -> Result<T, Error>
+    where
+        F: Fn(RootProvider<N>) -> Fut,
+        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
+    {
         let num_providers = self.providers.len();
         if num_providers > 1 {
             info!("Primary provider failed, trying fallback provider(s)");
         }
-
-        // This loop starts at index 1 automatically
-        for (idx, provider) in providers.enumerate() {
+        for (idx, provider) in fallback_providers.enumerate() {
             let fallback_num = idx + 1;
             if require_pubsub && !Self::supports_pubsub(provider) {
                 info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
@@ -217,14 +447,12 @@ impl<N: Network> RobustProvider<N> {
                 }
             }
         }
-
-        // Return the last error encountered
-        error!("All providers failed or timed out - returning the last providers attempt's error");
+        // All fallbacks failed / skipped, return the last error
         Err(last_error)
     }
 
     /// Try executing an operation with a specific provider with retry and timeout.
-    async fn try_provider_with_timeout<T, F, Fut>(
+    pub(crate) async fn try_provider_with_timeout<T, F, Fut>(
         &self,
         provider: &RootProvider<N>,
         operation: F,
@@ -286,7 +514,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     let count = call_count.load(Ordering::SeqCst);
@@ -306,7 +534,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     let count = call_count.load(Ordering::SeqCst);
@@ -329,7 +557,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result: Result<(), Error> = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     Err(TransportErrorKind::BackendGone.into())
@@ -348,7 +576,7 @@ mod tests {
         let provider = test_provider(max_timeout, 10, 1);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |_provider| async move {
                     sleep(Duration::from_millis(max_timeout + 10)).await;
                     Ok(42)
