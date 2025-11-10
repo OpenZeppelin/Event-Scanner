@@ -132,7 +132,7 @@ pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
-    providers: Vec<P>,
+    pub(crate) providers: Vec<P>,
     max_timeout: Duration,
     max_retries: usize,
     min_delay: Duration,
@@ -220,7 +220,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
 /// The first provider in the vector is treated as the primary provider.
 #[derive(Clone, Debug)]
 pub struct RobustProvider<N: Network = Ethereum> {
-    providers: Vec<RootProvider<N>>,
+    pub(crate) providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
     max_retries: usize,
     min_delay: Duration,
@@ -251,7 +251,7 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByNumber called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_number(number).await },
                 false,
             )
@@ -273,7 +273,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_block_number(&self) -> Result<u64, Error> {
         info!("eth_getBlockNumber called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number().await },
                 false,
             )
@@ -297,7 +297,7 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_hash(hash).await },
                 false,
             )
@@ -319,7 +319,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_logs(filter).await },
                 false,
             )
@@ -330,7 +330,12 @@ impl<N: Network> RobustProvider<N> {
         result
     }
 
-    /// Subscribe to new block headers with retry and timeout.
+    /// Subscribe to new block headers with automatic failover and reconnection.
+    ///
+    /// Returns a `RobustSubscription` that automatically:
+    /// - Handles connection errors by switching to fallback providers
+    /// - Detects and recovers from lagged subscriptions
+    /// - Periodically attempts to reconnect to the primary provider
     ///
     /// # Errors
     ///
@@ -338,18 +343,23 @@ impl<N: Network> RobustProvider<N> {
     /// call fails after exhausting all retry attempts, or if the call times out.
     /// When fallback providers are configured, the error returned will be from the
     /// final provider that was attempted.
-    pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
+    pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
         info!("eth_subscribe called");
-        let result = self
-            .retry_with_total_timeout(
+        let subscription = self
+            .try_operation_with_failover(
                 move |provider| async move { provider.subscribe_blocks().await },
                 true,
             )
             .await;
-        if let Err(e) = &result {
+
+        if let Err(e) = &subscription {
             error!(error = %e, "eth_subscribe failed");
+            return Err(e.clone());
         }
-        result
+
+        let subscription = subscription?;
+
+        Ok(RobustSubscription::new(subscription, self.clone(), DEFAULT_RECONNECT_INTERVAL))
     }
 
     /// Execute `operation` with exponential backoff and a total timeout.
@@ -371,7 +381,7 @@ impl<N: Network> RobustProvider<N> {
     /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
     /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    async fn retry_with_total_timeout<T: Debug, F, Fut>(
+    pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
         require_pubsub: bool,
@@ -391,8 +401,8 @@ impl<N: Network> RobustProvider<N> {
 
         let mut last_error = result.unwrap_err();
 
-        // This loop starts at index 1 automatically
-        match self.try_fallback_providers(providers, &operation, last_error, require_pubsub).await {
+        // providers are just fallback
+        match self.try_fallback_providers(providers, &operation, require_pubsub, last_error).await {
             Ok(value) => {
                 return Ok(value);
             }
@@ -404,12 +414,12 @@ impl<N: Network> RobustProvider<N> {
         Err(last_error)
     }
 
-    async fn try_fallback_providers<T: Debug, F, Fut>(
+    pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
         &self,
         fallback_providers: impl Iterator<Item = &RootProvider<N>>,
         operation: F,
-        mut last_error: Error,
         require_pubsub: bool,
+        mut last_error: Error,
     ) -> Result<T, Error>
     where
         F: Fn(RootProvider<N>) -> Fut,
@@ -503,7 +513,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     let count = call_count.load(Ordering::SeqCst);
@@ -523,7 +533,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     let count = call_count.load(Ordering::SeqCst);
@@ -546,7 +556,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result: Result<(), Error> = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     Err(TransportErrorKind::BackendGone.into())
@@ -565,7 +575,7 @@ mod tests {
         let provider = test_provider(max_timeout, 10, 1);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |_provider| async move {
                     sleep(Duration::from_millis(max_timeout + 10)).await;
                     Ok(42)
