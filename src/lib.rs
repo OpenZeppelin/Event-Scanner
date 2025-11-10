@@ -15,3 +15,8 @@ pub use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
     SyncFromBlock, SyncFromLatestEvents,
 };
+
+pub use robust_provider::{
+    builder::RobustProviderBuilder, error::Error as RobustProviderError, provider::RobustProvider,
+    types::IntoRobustProvider,
+};

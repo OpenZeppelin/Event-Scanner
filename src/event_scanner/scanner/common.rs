@@ -1,9 +1,9 @@
 use std::ops::RangeInclusive;
 
 use crate::{
+    RobustProvider, RobustProviderError,
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener},
-    robust_provider::{Error as RobustProviderError, RobustProvider},
     types::TryStream,
 };
 use alloy::{

@@ -6,13 +6,12 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    EventFilter, Message, ScannerError,
+    EventFilter, IntoRobustProvider, Message, ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES,
     },
     event_scanner::listener::EventListener,
-    robust_provider::IntoRobustProvider,
 };
 
 mod common;

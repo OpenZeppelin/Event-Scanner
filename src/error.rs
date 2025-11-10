@@ -6,7 +6,7 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::robust_provider::Error as RobustProviderError;
+use crate::RobustProviderError;
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
