@@ -64,7 +64,7 @@ use tokio::{
     sync::{mpsc, oneshot},
     try_join,
 };
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
     ScannerMessage,
@@ -611,7 +611,7 @@ impl<N: Network> Service<N> {
 
     async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        mut subscription: RobustSubscription<N>,
+        subscription: RobustSubscription<N>,
         sender: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
@@ -619,9 +619,13 @@ impl<N: Network> Service<N> {
         // ensure we start streaming only after the expected_next_block cutoff
         let cutoff = range_start;
 
-        loop {
-            // Use recv() to get the next block with automatic failover
-            let incoming_block = match subscription.recv().await {
+        let mut stream = subscription.into_stream().skip_while(|result| match result {
+            Ok(header) => header.number() < cutoff,
+            Err(_) => false,
+        });
+
+        while let Some(result) = stream.next().await {
+            let incoming_block = match result {
                 Ok(block) => block,
                 Err(e) => {
                     error!(error = %e, "Failed to receive block from subscription");
@@ -632,11 +636,6 @@ impl<N: Network> Service<N> {
             };
 
             let incoming_block_num = incoming_block.number();
-
-            // Skip blocks before the cutoff
-            if incoming_block_num < cutoff {
-                continue;
-            }
 
             info!(block_number = incoming_block_num, "Received block header");
 
