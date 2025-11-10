@@ -15,7 +15,7 @@ impl EventScannerBuilder<Synchronize> {
     /// This method combines two scanning phases into a single operation:
     ///
     /// 1. **Latest events phase**: Collects up to `count` most recent events by scanning backwards
-    ///    from the current chain tip
+    ///    from the current chain tip. Events are delivered in chronological order.
     /// 2. **Automatic transition**: Emits [`ScannerStatus::SwitchingToLive`][switch_to_live] to
     ///    signal the mode change
     /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
@@ -24,17 +24,18 @@ impl EventScannerBuilder<Synchronize> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Fetch the latest 10 events, then stream new events continuously
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::sync()
     ///     .from_latest(10)
-    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .connect(robust_provider)
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
@@ -63,16 +64,17 @@ impl EventScannerBuilder<Synchronize> {
     /// # How it works
     ///
     /// The scanner captures the latest block number before starting to establish a clear boundary
-    /// between phases. The historical phase scans from genesis block to the current latest block,
-    /// while the live phase starts from the block after the latest block. This design prevents
-    /// duplicate events and handles race conditions where new blocks arrive during setup.
+    /// between phases. The "latest events" phase scans from the current latest block to the genesis
+    /// block, while the live phase starts from the block after the latest block. This design
+    /// prevents duplicate events and handles race conditions where new blocks arrive during
+    /// setup.
     ///
     /// # Key behaviors
     ///
     /// - **No duplicates**: Events are not delivered twice across the phase transition
     /// - **Flexible count**: If fewer than `count` events exist, returns all available events
     /// - **Reorg handling**: Both phases handle reorgs appropriately:
-    ///   - Historical phase: resets and rescans on reorg detection
+    ///   - Latest events phase: resets and rescans on reorg detection
     ///   - Live phase: resets stream to the first post-reorg block that satisfies the configured
     ///     block confirmations
     /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
@@ -88,7 +90,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Detailed reorg behavior
     ///
-    /// - **Historical rewind phase**: Restart the scanner. On detecting a reorg, emits
+    /// - **Latest events phase**: Restart the scanner. On detecting a reorg, emits
     ///   [`ScannerStatus::ReorgDetected`][reorg], resets the rewind start to the new tip, and
     ///   continues until collectors accumulate `count` logs. Final delivery to listeners preserves
     ///   chronological order.
@@ -96,8 +98,8 @@ impl EventScannerBuilder<Synchronize> {
     ///   confirmations. On reorg, emits [`ScannerStatus::ReorgDetected`][reorg], adjusts the next
     ///   confirmed window (possibly re-emitting confirmed portions), and continues streaming.
     ///
-    /// [subscribe]: from_latest::SyncFromLatestEventScanner::subscribe
-    /// [start]: from_latest::SyncFromLatestEventScanner::start
+    /// [subscribe]: crate::EventScanner::subscribe
+    /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
     #[must_use]
@@ -120,17 +122,18 @@ impl EventScannerBuilder<Synchronize> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::network::Ethereum;
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
     /// // Sync from block 1_000_000 to present, then stream new events
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::sync()
     ///     .from_block(1_000_000)
-    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .connect(robust_provider)
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
@@ -159,15 +162,16 @@ impl EventScannerBuilder<Synchronize> {
     /// Using block tags:
     ///
     /// ```no_run
-    /// # use alloy::{network::Ethereum, eips::BlockNumberOrTag};
-    /// # use event_scanner::EventScannerBuilder;
+    /// # use alloy::{network::Ethereum, eips::BlockNumberOrTag, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let ws_url = "ws://localhost:8545".parse()?;
     /// // Sync from genesis block
+    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::sync()
     ///     .from_block(BlockNumberOrTag::Earliest)
-    ///     .connect_ws::<Ethereum>(ws_url)
+    ///     .connect(robust_provider)
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -201,8 +205,8 @@ impl EventScannerBuilder<Synchronize> {
     ///   [`ScannerStatus::ReorgDetected`][reorg], adjusts the next confirmed window (possibly
     ///   re-emitting confirmed portions), and continues streaming.
     ///
-    /// [subscribe]: from_latest::SyncFromLatestEventScanner::subscribe
-    /// [start]: from_latest::SyncFromLatestEventScanner::start
+    /// [subscribe]: crate::EventScanner::subscribe
+    /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
     #[must_use]

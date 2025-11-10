@@ -5,13 +5,14 @@
 //! use std::ops::RangeInclusive;
 //! use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 //!
-//! use alloy::transports::http::reqwest::Url;
+//! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
 //!     ScannerError,
 //!     block_range_scanner::{
 //!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
 //!         DEFAULT_MAX_BLOCK_RANGE, Message,
 //!     },
+//!     robust_provider::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -22,9 +23,9 @@
 //!     tracing_subscriber::fmt::init();
 //!
 //!     // Configuration
-//!     let block_range_scanner = BlockRangeScanner::new()
-//!         .connect_ws::<Ethereum>(Url::parse("ws://localhost:8546").unwrap())
-//!         .await?;
+//!     let provider = ProviderBuilder::new().connect("ws://localhost:8546").await?;
+//!     let robust_provider = RobustProviderBuilder::new(provider).build().await?;
+//!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider).await?;
 //!
 //!     // Create client to send subscribe command to block scanner
 //!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
@@ -58,7 +59,7 @@
 //! }
 //! ```
 
-use std::{cmp::Ordering, ops::RangeInclusive, time::Duration};
+use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     sync::{mpsc, oneshot},
     try_join,
@@ -68,10 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerMessage,
     error::ScannerError,
-    robust_provider::{
-        DEFAULT_MAX_RETRIES, DEFAULT_MAX_TIMEOUT, DEFAULT_RETRY_INTERVAL,
-        Error as RobustProviderError, RobustProvider,
-    },
+    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
     types::{ScannerStatus, TryStream},
 };
 use alloy::{
@@ -79,12 +77,8 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    providers::RootProvider,
     pubsub::Subscription,
-    rpc::client::ClientBuilder,
-    transports::{
-        RpcError, TransportErrorKind, TransportResult, http::reqwest::Url, ws::WsConnect,
-    },
+    transports::{RpcError, TransportErrorKind},
 };
 use tracing::{debug, error, info, warn};
 
@@ -135,12 +129,9 @@ impl From<ScannerError> for Message {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
-    pub max_timeout: Duration,
-    pub max_retries: usize,
-    pub retry_interval: Duration,
 }
 
 impl Default for BlockRangeScanner {
@@ -152,12 +143,7 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            max_block_range: DEFAULT_MAX_BLOCK_RANGE,
-            max_timeout: DEFAULT_MAX_TIMEOUT,
-            max_retries: DEFAULT_MAX_RETRIES,
-            retry_interval: DEFAULT_RETRY_INTERVAL,
-        }
+        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
     }
 
     /// Sets the maximum block range per RPC call for the scanner.
@@ -167,66 +153,17 @@ impl BlockRangeScanner {
         self
     }
 
-    #[must_use]
-    pub fn with_max_timeout(mut self, rpc_timeout: Duration) -> Self {
-        self.max_timeout = rpc_timeout;
-        self
-    }
-
-    #[must_use]
-    pub fn with_max_retries(mut self, rpc_max_retries: usize) -> Self {
-        self.max_retries = rpc_max_retries;
-        self
-    }
-
-    #[must_use]
-    pub fn with_retry_interval(mut self, rpc_retry_interval: Duration) -> Self {
-        self.retry_interval = rpc_retry_interval;
-        self
-    }
-
-    /// Connects to the provider via WebSocket
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ws<N: Network>(
-        self,
-        ws_url: Url,
-    ) -> TransportResult<ConnectedBlockRangeScanner<N>> {
-        let provider =
-            RootProvider::<N>::new(ClientBuilder::default().ws(WsConnect::new(ws_url)).await?);
-        Ok(self.connect(provider))
-    }
-
-    /// Connects to the provider via IPC
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails
-    pub async fn connect_ipc<N: Network>(
-        self,
-        ipc_path: String,
-    ) -> Result<ConnectedBlockRangeScanner<N>, RpcError<TransportErrorKind>> {
-        let provider = RootProvider::<N>::new(ClientBuilder::default().ipc(ipc_path.into()).await?);
-        Ok(self.connect(provider))
-    }
-
     /// Connects to an existing provider
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails
-    #[must_use]
-    pub fn connect<N: Network>(self, provider: RootProvider<N>) -> ConnectedBlockRangeScanner<N> {
-        let robust_provider = RobustProvider::new(provider)
-            .max_timeout(self.max_timeout)
-            .max_retries(self.max_retries)
-            .retry_interval(self.retry_interval);
-        ConnectedBlockRangeScanner {
-            provider: robust_provider,
-            max_block_range: self.max_block_range,
-        }
+    /// Returns an error if the provider connection fails.
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+        let provider = provider.into_robust_provider().await?;
+        Ok(ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range })
     }
 }
 
@@ -371,13 +308,15 @@ impl<N: Network> Service<N> {
         // blocks have been mined
         let range_start = (latest + 1).saturating_sub(block_confirmations);
 
-        let ws_stream = self.provider.subscribe_blocks().await?;
+        let subscription = self.provider.subscribe_blocks().await?;
+
+        info!("WebSocket connected for live blocks");
 
         tokio::spawn(async move {
             Self::stream_live_blocks(
                 range_start,
-                ws_stream,
-                &sender,
+                subscription,
+                sender,
                 block_confirmations,
                 max_block_range,
                 reorg_handler,
@@ -454,7 +393,8 @@ impl<N: Network> Service<N> {
 
         let confirmed_tip = latest_block.saturating_sub(block_confirmations);
 
-        let ws_stream = self.provider.subscribe_blocks().await?;
+        let subscription = self.provider.subscribe_blocks().await?;
+        info!("Buffering live blocks");
 
         // If start is beyond confirmed tip, skip historical and go straight to live
         if start_block > confirmed_tip {
@@ -467,8 +407,8 @@ impl<N: Network> Service<N> {
             tokio::spawn(async move {
                 Self::stream_live_blocks(
                     start_block,
-                    ws_stream,
-                    &sender,
+                    subscription,
+                    sender,
                     block_confirmations,
                     max_block_range,
                     reorg_handler,
@@ -494,8 +434,8 @@ impl<N: Network> Service<N> {
         tokio::spawn(async move {
             Self::stream_live_blocks(
                 cutoff + 1,
-                ws_stream,
-                &live_block_buffer_sender,
+                subscription,
+                live_block_buffer_sender,
                 block_confirmations,
                 max_block_range,
                 reorg_handler,
@@ -685,15 +625,15 @@ impl<N: Network> Service<N> {
 
     async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        ws_stream: Subscription<N::HeaderResponse>,
-        sender: &mpsc::Sender<Message>,
+        subscription: Subscription<N::HeaderResponse>,
+        sender: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
         mut reorg_handler: ReorgHandler<N>,
     ) {
         // ensure we start streaming only after the expected_next_block cutoff
         let cutoff = range_start;
-        let mut stream = ws_stream.into_stream().skip_while(|header| header.number() < cutoff);
+        let mut stream = subscription.into_stream().skip_while(|header| header.number() < cutoff);
 
         while let Some(incoming_block) = stream.next().await {
             let incoming_block_num = incoming_block.number();
@@ -731,7 +671,7 @@ impl<N: Network> Service<N> {
                 info!(range_start = range_start, range_end = range_end, "Sending live block range");
 
                 if !sender.try_stream(range_start..=range_end).await {
-                    break;
+                    return;
                 }
 
                 // Overflow can not realistically happen
