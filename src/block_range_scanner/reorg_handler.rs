@@ -1,7 +1,10 @@
 use alloy::{
-    network::{Ethereum, Network},
+    consensus::BlockHeader,
+    eips::BlockNumberOrTag,
+    network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
     primitives::{BlockHash, BlockNumber},
 };
+use tracing::{info, warn};
 
 use crate::{
     ScannerError,
@@ -26,12 +29,47 @@ impl<N: Network> ReorgHandler<N> {
         incoming_block: N::HeaderResponse,
     ) -> Result<Option<BlockNumber>, ScannerError> {
         if !self.reorg_detected().await? {
+            //
+            self.buffer.push(incoming_block.hash());
             return Ok(None);
         }
 
-        // warn!(reorged_from = reorged_from, "Reorg detected: sending forked range");
+        info!("Reorg detected, searching for common ancestor");
 
-        Ok(Some(1))
+        // last block hash definitely doesn't exist on-chain
+        _ = self.buffer.pop_back();
+
+        while let Some(&block_hash) = self.buffer.back() {
+            info!(block_hash = %block_hash, "Checking if block exists on-chain");
+            match self.provider.get_block_by_hash(block_hash).await {
+                Ok(block) => {
+                    let header = block.header();
+                    info!(common_ancestor = %header.hash(), block_number = header.number(), "Common ancestor found");
+                    // store the incoming block's hash for future reference
+                    self.buffer.push(incoming_block.hash());
+                    return Ok(Some(header.number()));
+                }
+                Err(robust_provider::Error::BlockNotFound(_)) => {
+                    _ = self.buffer.pop_back();
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        warn!("Deep reorg detected, setting finalized block as common ancestor");
+
+        let finalized = self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
+
+        // no need to store finalized block's hash in the buffer, as it is returned by default only
+        // if not buffered hashes exist on-chain
+
+        // store the incoming block's hash for future reference
+        self.buffer.push(incoming_block.hash());
+
+        let header = finalized.header();
+        info!(common_ancestor = %header.hash(), block_number = header.number(), "Finalized block set as common ancestor");
+
+        Ok(Some(header.number()))
     }
 
     async fn reorg_detected(&self) -> Result<bool, ScannerError> {

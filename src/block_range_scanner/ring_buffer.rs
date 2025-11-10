@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 #[derive(Clone)]
-pub struct RingBuffer<T> {
+pub(crate) struct RingBuffer<T> {
     inner: VecDeque<T>,
     capacity: usize,
 }
@@ -21,22 +21,11 @@ impl<T> RingBuffer<T> {
         self.inner.push_back(item); // Add the new element
     }
 
-    /// Removes and returns the oldest element from the buffer, or None if it's empty.
-    pub fn pop(&mut self) -> Option<T> {
-        self.inner.pop_front()
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.inner.pop_back()
     }
 
     pub fn back(&self) -> Option<&T> {
         self.inner.back()
-    }
-
-    /// Returns the current number of elements in the buffer.
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    /// Returns the maximum capacity of the buffer.
-    pub fn capacity(&self) -> usize {
-        self.capacity
     }
 }
