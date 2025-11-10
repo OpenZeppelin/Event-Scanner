@@ -453,7 +453,7 @@ impl<N: Network> RobustProvider<N> {
     }
 
     /// Try executing an operation with a specific provider with retry and timeout.
-    async fn try_provider_with_timeout<T, F, Fut>(
+    pub(crate) async fn try_provider_with_timeout<T, F, Fut>(
         &self,
         provider: &RootProvider<N>,
         operation: F,
