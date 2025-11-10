@@ -8,7 +8,6 @@ use alloy::{
         fillers::{FillProvider, TxFiller},
         layers::{CacheProvider, CallBatchProvider},
     },
-    pubsub::Subscription,
     rpc::types::{Filter, Log},
     transports::{RpcError, TransportErrorKind, http::reqwest::Url},
 };
@@ -16,6 +15,8 @@ use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
 use tracing::{error, info};
+
+use crate::robust_subscription::{DEFAULT_RECONNECT_INTERVAL, RobustSubscription};
 
 #[derive(Error, Debug, Clone)]
 pub enum Error {
@@ -217,7 +218,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
 /// The first provider in the vector is treated as the primary provider.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RobustProvider<N: Network = Ethereum> {
     providers: Vec<RootProvider<N>>,
     max_timeout: Duration,
@@ -390,13 +391,35 @@ impl<N: Network> RobustProvider<N> {
 
         let mut last_error = result.unwrap_err();
 
+        // This loop starts at index 1 automatically
+        match self.try_fallback_providers(providers, &operation, last_error, require_pubsub).await {
+            Ok(value) => {
+                return Ok(value);
+            }
+            Err(e) => last_error = e,
+        }
+
+        // Return the last error encountered
+        error!("All providers failed or timed out - returning the last providers attempt's error");
+        Err(last_error)
+    }
+
+    async fn try_fallback_providers<T: Debug, F, Fut>(
+        &self,
+        fallback_providers: impl Iterator<Item = &RootProvider<N>>,
+        operation: F,
+        mut last_error: Error,
+        require_pubsub: bool,
+    ) -> Result<T, Error>
+    where
+        F: Fn(RootProvider<N>) -> Fut,
+        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
+    {
         let num_providers = self.providers.len();
         if num_providers > 1 {
             info!("Primary provider failed, trying fallback provider(s)");
         }
-
-        // This loop starts at index 1 automatically
-        for (idx, provider) in providers.enumerate() {
+        for (idx, provider) in fallback_providers.enumerate() {
             let fallback_num = idx + 1;
             if require_pubsub && !Self::supports_pubsub(provider) {
                 info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
@@ -415,9 +438,7 @@ impl<N: Network> RobustProvider<N> {
                 }
             }
         }
-
-        // Return the last error encountered
-        error!("All providers failed or timed out - returning the last providers attempt's error");
+        // All fallbacks failed / skipped, return the last error
         Err(last_error)
     }
 
