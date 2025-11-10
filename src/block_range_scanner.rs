@@ -389,12 +389,10 @@ impl<N: Network> Service<N> {
 
         // Step 1:
         // Fetches the starting block and end block for historical sync in parallel
-        let (start_block, latest_block) = tokio::try_join!(get_start_block(), get_latest_block())?;
+        let (mut start_block, latest_block) =
+            tokio::try_join!(get_start_block(), get_latest_block())?;
 
-        let confirmed_tip = latest_block.saturating_sub(block_confirmations);
-
-        let subscription = self.provider.subscribe_blocks().await?;
-        info!("Buffering live blocks");
+        let mut confirmed_tip = latest_block.saturating_sub(block_confirmations);
 
         // If start is beyond confirmed tip, skip historical and go straight to live
         if start_block > confirmed_tip {
@@ -403,6 +401,8 @@ impl<N: Network> Service<N> {
                 confirmed_tip = confirmed_tip,
                 "Start block is beyond confirmed tip, starting live stream"
             );
+
+            let subscription = self.provider.subscribe_blocks().await?;
 
             tokio::spawn(async move {
                 Self::stream_live_blocks(
@@ -421,36 +421,40 @@ impl<N: Network> Service<N> {
 
         info!(start_block = start_block, end_block = confirmed_tip, "Syncing historical data");
 
-        // Step 2: Setup the live streaming buffer
-        // This channel will accumulate while historical sync is running
-        let (live_block_buffer_sender, live_block_buffer_receiver) =
-            mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
-
-        // The cutoff is the last block we have synced historically
-        // Any block > cutoff will come from the live stream
-        let cutoff = confirmed_tip;
-
         // This task runs independently, accumulating new blocks while wehistorical data is syncing
         tokio::spawn(async move {
-            Self::stream_live_blocks(
-                cutoff + 1,
-                subscription,
-                live_block_buffer_sender,
-                block_confirmations,
-                max_block_range,
-                reorg_handler,
-            )
-            .await;
-        });
-
-        tokio::spawn(async move {
-            // Step 4: Perform historical synchronization
-            // This processes blocks from start_block to end_block (cutoff)
-            // If this fails, we need to abort the live streaming task
-            Self::stream_historical_blocks(start_block, confirmed_tip, max_block_range, &sender)
+            while start_block < confirmed_tip {
+                Self::stream_historical_blocks(
+                    start_block,
+                    confirmed_tip,
+                    max_block_range,
+                    &sender,
+                )
                 .await;
 
+                let latest = match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
+                    Ok(block) => block.header().number(),
+                    Err(e) => {
+                        error!(error = %e, "Error latest block when calculating next historical batch, shutting down");
+                        _ = sender.try_stream(e).await;
+                        return;
+                    }
+                };
+
+                start_block = confirmed_tip + 1;
+                confirmed_tip = latest.saturating_sub(block_confirmations);
+            }
+
             info!("Chain tip reached, switching to live");
+
+            let subscription = match provider.subscribe_blocks().await {
+                Ok(sub) => sub,
+                Err(e) => {
+                    error!(error = %e, "Error subscribing to live blocks, shutting down");
+                    _ = sender.try_stream(e).await;
+                    return;
+                }
+            };
 
             if !sender.try_stream(ScannerStatus::SwitchingToLive).await {
                 return;
@@ -458,14 +462,15 @@ impl<N: Network> Service<N> {
 
             info!("Successfully transitioned from historical to live data");
 
-            // Step 5:
-            // Spawn the buffer processor task
-            // This will:
-            // 1. Process all buffered blocks, filtering out any ≤ cutoff
-            // 2. Forward blocks > cutoff to the user
-            // 3. Continue forwarding until the buffer if exhausted (waits for new blocks from live
-            //    stream)
-            Self::process_live_block_buffer(live_block_buffer_receiver, sender, cutoff).await;
+            Self::stream_live_blocks(
+                start_block,
+                subscription,
+                sender,
+                block_confirmations,
+                max_block_range,
+                reorg_handler,
+            )
+            .await;
         });
 
         Ok(())
@@ -549,7 +554,7 @@ impl<N: Network> Service<N> {
                 }
                 Err(e) => {
                     error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = sender.try_stream(e);
+                    _ = sender.try_stream(e).await;
                     return;
                 }
             };
@@ -571,7 +576,7 @@ impl<N: Network> Service<N> {
                     }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream(e);
+                        _ = sender.try_stream(e).await;
                         return;
                     }
                 };
@@ -677,48 +682,6 @@ impl<N: Network> Service<N> {
                 range_start = range_end + 1;
             }
         }
-    }
-
-    async fn process_live_block_buffer(
-        mut buffer_rx: mpsc::Receiver<Message>,
-        sender: mpsc::Sender<Message>,
-        cutoff: BlockNumber,
-    ) {
-        let mut processed = 0;
-        let mut discarded = 0;
-
-        // Process all buffered messages
-        while let Some(data) = buffer_rx.recv().await {
-            match data {
-                Message::Data(range) => {
-                    let (start, end) = (*range.start(), *range.end());
-                    if start >= cutoff {
-                        if !sender.try_stream(range).await {
-                            break;
-                        }
-                        processed += end - start;
-                    } else if end >= cutoff {
-                        discarded += cutoff - start;
-
-                        let start = cutoff;
-                        if !sender.try_stream(start..=end).await {
-                            break;
-                        }
-                        processed += end - start;
-                    } else {
-                        discarded += end - start;
-                    }
-                }
-                other => {
-                    // Could be error or status
-                    if !sender.try_stream(other).await {
-                        break;
-                    }
-                }
-            }
-        }
-
-        info!(processed = processed, discarded = discarded, "Finished processing live messages");
     }
 }
 
@@ -877,8 +840,7 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{assert_closed, assert_next};
-    use alloy::{eips::BlockId, network::Ethereum};
+    use alloy::eips::BlockId;
     use tokio::sync::mpsc;
 
     #[test]
@@ -897,87 +859,88 @@ mod tests {
         assert_eq!(scanner.max_block_range, max_block_range);
     }
 
-    #[tokio::test]
-    async fn buffered_messages_after_cutoff_are_all_passed() {
-        let cutoff = 50;
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(51..=55)).await.unwrap();
-        buffer_tx.send(Message::Data(56..=60)).await.unwrap();
-        buffer_tx.send(Message::Data(61..=70)).await.unwrap();
-        drop(buffer_tx);
+    // TODO: update to valid handle_sync tests
+    // #[tokio::test]
+    // async fn buffered_messages_after_cutoff_are_all_passed() {
+    //     let cutoff = 50;
+    //     let (buffer_tx, buffer_rx) = mpsc::channel(8);
+    //     buffer_tx.send(Message::Data(51..=55)).await.unwrap();
+    //     buffer_tx.send(Message::Data(56..=60)).await.unwrap();
+    //     buffer_tx.send(Message::Data(61..=70)).await.unwrap();
+    //     drop(buffer_tx);
 
-        let (out_tx, out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+    //     let (out_tx, out_rx) = mpsc::channel(8);
+    //     Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut stream = ReceiverStream::new(out_rx);
+    //     let mut stream = ReceiverStream::new(out_rx);
 
-        assert_next!(stream, 51..=55);
-        assert_next!(stream, 56..=60);
-        assert_next!(stream, 61..=70);
-        assert_closed!(stream);
-    }
+    //     assert_next!(stream, 51..=55);
+    //     assert_next!(stream, 56..=60);
+    //     assert_next!(stream, 61..=70);
+    //     assert_closed!(stream);
+    // }
 
-    #[tokio::test]
-    async fn ranges_entirely_before_cutoff_are_discarded() {
-        let cutoff = 100;
+    // #[tokio::test]
+    // async fn ranges_entirely_before_cutoff_are_discarded() {
+    //     let cutoff = 100;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(40..=50)).await.unwrap();
-        buffer_tx.send(Message::Data(51..=60)).await.unwrap();
-        buffer_tx.send(Message::Data(61..=70)).await.unwrap();
-        drop(buffer_tx);
+    //     let (buffer_tx, buffer_rx) = mpsc::channel(8);
+    //     buffer_tx.send(Message::Data(40..=50)).await.unwrap();
+    //     buffer_tx.send(Message::Data(51..=60)).await.unwrap();
+    //     buffer_tx.send(Message::Data(61..=70)).await.unwrap();
+    //     drop(buffer_tx);
 
-        let (out_tx, out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+    //     let (out_tx, out_rx) = mpsc::channel(8);
+    //     Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut stream = ReceiverStream::new(out_rx);
+    //     let mut stream = ReceiverStream::new(out_rx);
 
-        assert_closed!(stream);
-    }
+    //     assert_closed!(stream);
+    // }
 
-    #[tokio::test]
-    async fn ranges_overlapping_cutoff_are_trimmed() {
-        let cutoff = 75;
+    // #[tokio::test]
+    // async fn ranges_overlapping_cutoff_are_trimmed() {
+    //     let cutoff = 75;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(60..=70)).await.unwrap();
-        buffer_tx.send(Message::Data(71..=80)).await.unwrap();
-        buffer_tx.send(Message::Data(81..=86)).await.unwrap();
-        drop(buffer_tx);
+    //     let (buffer_tx, buffer_rx) = mpsc::channel(8);
+    //     buffer_tx.send(Message::Data(60..=70)).await.unwrap();
+    //     buffer_tx.send(Message::Data(71..=80)).await.unwrap();
+    //     buffer_tx.send(Message::Data(81..=86)).await.unwrap();
+    //     drop(buffer_tx);
 
-        let (out_tx, out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+    //     let (out_tx, out_rx) = mpsc::channel(8);
+    //     Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut stream = ReceiverStream::new(out_rx);
+    //     let mut stream = ReceiverStream::new(out_rx);
 
-        assert_next!(stream, 75..=80);
-        assert_next!(stream, 81..=86);
-        assert_closed!(stream);
-    }
+    //     assert_next!(stream, 75..=80);
+    //     assert_next!(stream, 81..=86);
+    //     assert_closed!(stream);
+    // }
 
-    #[tokio::test]
-    async fn edge_case_range_exactly_at_cutoff() {
-        let cutoff = 100;
+    // #[tokio::test]
+    // async fn edge_case_range_exactly_at_cutoff() {
+    //     let cutoff = 100;
 
-        let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(98..=98)).await.unwrap(); // Just before: discard
-        buffer_tx.send(Message::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
-        buffer_tx.send(Message::Data(100..=100)).await.unwrap(); // Exactly at: forward
-        buffer_tx.send(Message::Data(100..=101)).await.unwrap(); // Starts at cutoff: forward
-        buffer_tx.send(Message::Data(102..=102)).await.unwrap(); // After cutoff: forward
-        drop(buffer_tx);
+    //     let (buffer_tx, buffer_rx) = mpsc::channel(8);
+    //     buffer_tx.send(Message::Data(98..=98)).await.unwrap(); // Just before: discard
+    //     buffer_tx.send(Message::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to
+    // 100..=100     buffer_tx.send(Message::Data(100..=100)).await.unwrap(); // Exactly at:
+    // forward     buffer_tx.send(Message::Data(100..=101)).await.unwrap(); // Starts at cutoff:
+    // forward     buffer_tx.send(Message::Data(102..=102)).await.unwrap(); // After cutoff:
+    // forward     drop(buffer_tx);
 
-        let (out_tx, out_rx) = mpsc::channel(8);
-        Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
+    //     let (out_tx, out_rx) = mpsc::channel(8);
+    //     Service::<Ethereum>::process_live_block_buffer(buffer_rx, out_tx, cutoff).await;
 
-        let mut stream = ReceiverStream::new(out_rx);
+    //     let mut stream = ReceiverStream::new(out_rx);
 
-        assert_next!(stream, 100..=100);
-        assert_next!(stream, 100..=100);
-        assert_next!(stream, 100..=101);
-        assert_next!(stream, 102..=102);
-        assert_closed!(stream);
-    }
+    //     assert_next!(stream, 100..=100);
+    //     assert_next!(stream, 100..=100);
+    //     assert_next!(stream, 100..=101);
+    //     assert_next!(stream, 102..=102);
+    //     assert_closed!(stream);
+    // }
 
     #[tokio::test]
     async fn try_send_forwards_errors_to_subscribers() {
