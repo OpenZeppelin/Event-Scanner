@@ -177,22 +177,22 @@ let specific_filter = EventFilter::new()
     .contract_address(*counter_contract.address())
     .event(Counter::CountIncreased::SIGNATURE);
 
-// Track a multiple events from a SPECIFIC contract
+// Track multiple events from a SPECIFIC contract
 let specific_filter = EventFilter::new()
     .contract_address(*counter_contract.address())
     .event(Counter::CountIncreased::SIGNATURE)
     .event(Counter::CountDecreased::SIGNATURE);
 
-// Track a SPECIFIC event from a ALL contracts
+// Track a SPECIFIC event from ALL contracts
 let specific_filter = EventFilter::new()
     .event(Counter::CountIncreased::SIGNATURE);
 
-// Track ALL events from a SPECIFIC contracts
+// Track ALL events from SPECIFIC contracts
 let all_contract_events_filter = EventFilter::new()
     .contract_address(*counter_contract.address())
     .contract_address(*other_counter_contract.address());
 
-// Track ALL events from ALL contracts in the block range
+// Track ALL events from ALL contracts
 let all_events_filter = EventFilter::new();
 ```
 
