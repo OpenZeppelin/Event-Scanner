@@ -29,7 +29,7 @@ impl<N: Network> ReorgHandler<N> {
         incoming_block: N::HeaderResponse,
     ) -> Result<Option<BlockNumber>, ScannerError> {
         if !self.reorg_detected().await? {
-            //
+            // store the incoming block's hash for future reference
             self.buffer.push(incoming_block.hash());
             return Ok(None);
         }
@@ -42,14 +42,15 @@ impl<N: Network> ReorgHandler<N> {
         while let Some(&block_hash) = self.buffer.back() {
             info!(block_hash = %block_hash, "Checking if block exists on-chain");
             match self.provider.get_block_by_hash(block_hash).await {
-                Ok(block) => {
-                    let header = block.header();
+                Ok(common_ancestor) => {
+                    let header = common_ancestor.header();
                     info!(common_ancestor = %header.hash(), block_number = header.number(), "Common ancestor found");
                     // store the incoming block's hash for future reference
                     self.buffer.push(incoming_block.hash());
                     return Ok(Some(header.number()));
                 }
                 Err(robust_provider::Error::BlockNotFound(_)) => {
+                    // block was reorged
                     _ = self.buffer.pop_back();
                 }
                 Err(e) => return Err(e.into()),

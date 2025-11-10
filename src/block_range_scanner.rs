@@ -648,18 +648,19 @@ impl<N: Network> Service<N> {
                 }
             };
 
-            if let Some(reorged_from) = reorged_opt {
-                if !sender.try_stream(ScannerStatus::ReorgDetected).await {
-                    break;
+            if let Some(common_ancestor) = reorged_opt {
+                if common_ancestor < range_start {
+                    if !sender.try_stream(ScannerStatus::ReorgDetected).await {
+                        return;
+                    }
+                    // updated expected block to updated confirmed
+                    range_start = common_ancestor + 1;
                 }
 
                 // TODO: explain in docs that the returned block after a reorg will be the
                 // first confirmed block that is smaller between:
                 // - the first post-reorg block
                 // - the previous range_start
-
-                // updated expected block to updated confirmed
-                range_start = range_start.min(reorged_from);
             }
 
             let confirmed = incoming_block_num.saturating_sub(block_confirmations);
@@ -667,8 +668,6 @@ impl<N: Network> Service<N> {
                 // NOTE: Edge case when difference between range end and range start >= max
                 // reads
                 let range_end = confirmed.min(range_start.saturating_add(max_block_range - 1));
-
-                info!(range_start = range_start, range_end = range_end, "Sending live block range");
 
                 if !sender.try_stream(range_start..=range_end).await {
                     return;

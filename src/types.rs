@@ -10,6 +10,8 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
     Status(ScannerStatus),
 }
 
+// TODO: implement Display for ScannerMessage
+
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub enum ScannerStatus {
     SwitchingToLive,
