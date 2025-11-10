@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 use alloy::{
     network::Network,
@@ -7,6 +11,7 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use tokio::sync::broadcast::error::RecvError;
+use tokio_stream::Stream;
 use tracing::{error, info, warn};
 
 use crate::{RobustProvider, robust_provider::Error};
@@ -171,6 +176,52 @@ impl<N: Network> RobustSubscription<N> {
         match &self.subscription {
             Some(sub) => sub.is_empty(),
             None => true,
+        }
+    }
+
+    /// Convert this `RobustSubscription` into a `Stream`.
+    ///
+    /// This allows using standard stream combinators like `skip_while`, `filter`, etc.
+    /// The stream will automatically handle failover and reconnection attempts.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tokio_stream::StreamExt;
+    ///
+    /// let mut stream = subscription.into_stream()
+    ///     .skip_while(|result| matches!(result, Ok(header) if header.number() < cutoff))
+    ///     .filter_map(|result| result.ok());
+    ///
+    /// while let Some(block) = stream.next().await {
+    ///     // Process block
+    /// }
+    /// ```
+    #[must_use]
+    pub fn into_stream(self) -> RobustSubscriptionStream<N> {
+        RobustSubscriptionStream { inner: self }
+    }
+}
+
+/// A `Stream` wrapper around `RobustSubscription`.
+///
+/// This struct implements the `Stream` trait, allowing you to use standard stream
+/// combinators from `tokio_stream::StreamExt`.
+pub struct RobustSubscriptionStream<N: Network> {
+    inner: RobustSubscription<N>,
+}
+
+impl<N: Network> Stream for RobustSubscriptionStream<N> {
+    type Item = Result<N::HeaderResponse, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let fut = self.inner.recv();
+        tokio::pin!(fut);
+
+        match fut.poll(cx) {
+            Poll::Ready(Ok(header)) => Poll::Ready(Some(Ok(header))),
+            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
