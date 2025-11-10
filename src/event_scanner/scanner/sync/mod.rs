@@ -15,7 +15,7 @@ impl EventScannerBuilder<Synchronize> {
     /// This method combines two scanning phases into a single operation:
     ///
     /// 1. **Latest events phase**: Collects up to `count` most recent events by scanning backwards
-    ///    from the current chain tip
+    ///    from the current chain tip. Events are delivered in chronological order.
     /// 2. **Automatic transition**: Emits [`ScannerStatus::SwitchingToLive`][switch_to_live] to
     ///    signal the mode change
     /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
@@ -64,16 +64,17 @@ impl EventScannerBuilder<Synchronize> {
     /// # How it works
     ///
     /// The scanner captures the latest block number before starting to establish a clear boundary
-    /// between phases. The historical phase scans from genesis block to the current latest block,
-    /// while the live phase starts from the block after the latest block. This design prevents
-    /// duplicate events and handles race conditions where new blocks arrive during setup.
+    /// between phases. The "latest events" phase scans from the current latest block to the genesis
+    /// block, while the live phase starts from the block after the latest block. This design
+    /// prevents duplicate events and handles race conditions where new blocks arrive during
+    /// setup.
     ///
     /// # Key behaviors
     ///
     /// - **No duplicates**: Events are not delivered twice across the phase transition
     /// - **Flexible count**: If fewer than `count` events exist, returns all available events
     /// - **Reorg handling**: Both phases handle reorgs appropriately:
-    ///   - Historical phase: resets and rescans on reorg detection
+    ///   - Latest events phase: resets and rescans on reorg detection
     ///   - Live phase: resets stream to the first post-reorg block that satisfies the configured
     ///     block confirmations
     /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
@@ -89,7 +90,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Detailed reorg behavior
     ///
-    /// - **Historical rewind phase**: Restart the scanner. On detecting a reorg, emits
+    /// - **Latest events phase**: Restart the scanner. On detecting a reorg, emits
     ///   [`ScannerStatus::ReorgDetected`][reorg], resets the rewind start to the new tip, and
     ///   continues until collectors accumulate `count` logs. Final delivery to listeners preserves
     ///   chronological order.
