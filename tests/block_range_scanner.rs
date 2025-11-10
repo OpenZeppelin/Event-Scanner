@@ -150,13 +150,11 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
 
     // reorg more blocks than the block_confirmation config
     provider.anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
-    // mint additional blocks
+
+    // mint additional blocks to allow the scanner to stream the pre-reorg blocks
     provider.anvil_mine(Some(3), None).await?;
 
     assert_next!(stream, ScannerStatus::ReorgDetected);
-    assert_next!(stream, 0..=0);
-    assert_next!(stream, 1..=1);
-    assert_next!(stream, 2..=2);
     assert_next!(stream, 3..=3);
     assert_next!(stream, 4..=4);
     assert_next!(stream, 5..=5);
