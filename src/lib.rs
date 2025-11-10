@@ -1,7 +1,6 @@
 pub mod block_range_scanner;
 
 pub mod robust_provider;
-pub mod robust_subscription;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
@@ -18,6 +17,6 @@ pub use event_scanner::{
 };
 
 pub use robust_provider::{
-    builder::RobustProviderBuilder, error::Error as RobustProviderError, provider::RobustProvider,
-    types::IntoRobustProvider,
+    builder::RobustProviderBuilder, provider::RobustProvider,
+    robust_subscription::RobustSubscription, types::IntoRobustProvider,
 };

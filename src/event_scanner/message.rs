@@ -1,6 +1,6 @@
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
-use crate::{RobustProviderError, ScannerError, ScannerMessage};
+use crate::{ScannerError, ScannerMessage, robust_provider::Error as RobustProviderError};
 
 pub type Message = ScannerMessage<Vec<Log>, ScannerError>;
 

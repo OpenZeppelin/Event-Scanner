@@ -67,10 +67,9 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    IntoRobustProvider, RobustProvider, RobustProviderError, ScannerMessage,
+    IntoRobustProvider, RobustProvider, RobustSubscription, ScannerMessage,
     error::ScannerError,
-    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
-    robust_subscription::RobustSubscription,
+    robust_provider::Error as RobustProviderError,
     types::{ScannerStatus, TryStream},
 };
 use alloy::{

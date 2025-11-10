@@ -9,7 +9,7 @@ use alloy::{
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info, warn};
 
-use crate::robust_provider::{Error, RobustProvider};
+use crate::{RobustProvider, robust_provider::Error};
 
 /// Default time interval between primary provider reconnection attempts (30 seconds)
 pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
