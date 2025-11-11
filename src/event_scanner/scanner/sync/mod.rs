@@ -25,7 +25,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -123,7 +123,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -163,7 +163,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, eips::BlockNumberOrTag, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventScannerBuilder, RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// // Sync from genesis block
