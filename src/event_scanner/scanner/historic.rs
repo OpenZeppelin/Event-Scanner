@@ -93,6 +93,8 @@ impl<N: Network> EventScanner<Historic, N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::providers::{Provider, ProviderBuilder};
+    use alloy_node_bindings::Anvil;
 
     #[test]
     fn test_historic_scanner_builder_pattern() {
@@ -128,5 +130,37 @@ mod tests {
         assert_eq!(builder.block_range_scanner.max_block_range, 105);
         assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(2)));
         assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(200)));
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Invalid historical block range")]
+    async fn test_from_block_above_latest_panics() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let _scanner = EventScannerBuilder::historic()
+            .from_block(latest_block + 100)
+            .to_block(latest_block)
+            .connect(provider)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Invalid historical block range")]
+    async fn test_to_block_above_latest_panics() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let _scanner = EventScannerBuilder::historic()
+            .from_block(0)
+            .to_block(latest_block + 100)
+            .connect(provider)
+            .await
+            .unwrap();
     }
 }
