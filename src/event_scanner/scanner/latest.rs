@@ -4,6 +4,7 @@ use super::common::{ConsumerMode, handle_stream};
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{EventScanner, LatestEvents},
+    robust_provider::IntoRobustProvider,
 };
 
 impl EventScannerBuilder<LatestEvents> {
@@ -23,6 +24,18 @@ impl EventScannerBuilder<LatestEvents> {
     pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.config.to_block = block.into();
         self
+    }
+
+    /// Connects to an existing provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails.
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<EventScanner<LatestEvents, N>, ScannerError> {
+        self.build(provider).await
     }
 }
 

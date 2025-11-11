@@ -4,6 +4,7 @@ use super::common::{ConsumerMode, handle_stream};
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::scanner::{EventScanner, Historic},
+    robust_provider::IntoRobustProvider,
 };
 
 impl EventScannerBuilder<Historic> {
@@ -17,6 +18,46 @@ impl EventScannerBuilder<Historic> {
     pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
         self.config.to_block = block.into();
         self
+    }
+
+    /// Connects to an existing provider with block range validation.
+    ///
+    /// Validates that the maximum of `from_block` and `to_block` does not exceed
+    /// the latest block on the chain.
+    ///
+    /// # Panics
+    ///
+    /// If to or from block > latest block
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<EventScanner<Historic, N>, ScannerError> {
+        let scanner = self.build(provider).await?;
+
+        let provider = scanner.block_range_scanner.provider();
+        let latest_block = provider.get_block_number().await?;
+
+        let from_num = resolve_block_number(&scanner.config.from_block, latest_block);
+        let to_num = resolve_block_number(&scanner.config.to_block, latest_block);
+
+        let max_block = from_num.max(to_num);
+
+        assert!((max_block <= latest_block), "Invalid historical block range");
+
+        Ok(scanner)
+    }
+}
+
+/// Helper function to resolve `BlockNumberOrTag` to u64
+fn resolve_block_number(block: &BlockNumberOrTag, latest: u64) -> u64 {
+    match block {
+        BlockNumberOrTag::Number(n) => *n,
+        BlockNumberOrTag::Earliest => 0,
+        _ => latest,
     }
 }
 

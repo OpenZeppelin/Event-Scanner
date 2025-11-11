@@ -18,6 +18,7 @@ use crate::{
             common::{ConsumerMode, handle_stream},
         },
     },
+    robust_provider::IntoRobustProvider,
 };
 
 impl EventScannerBuilder<SyncFromLatestEvents> {
@@ -25,6 +26,18 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;
         self
+    }
+
+    /// Connects to an existing provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails.
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<EventScanner<SyncFromLatestEvents, N>, ScannerError> {
+        self.build(provider).await
     }
 }
 

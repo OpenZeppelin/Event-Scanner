@@ -398,14 +398,10 @@ impl<M> EventScannerBuilder<M> {
         self
     }
 
-    /// Connects to an existing provider.
+    /// Builds the scanner by connecting to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the provider connection fails.
-    pub async fn connect<N: Network>(
+    /// This is a shared method used internally by scanner-specific `connect()` methods.
+    async fn build<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<M, N>, ScannerError> {
@@ -468,7 +464,7 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
+        let mut scanner = EventScannerBuilder::historic().build(provider).await?;
 
         assert!(scanner.listeners.is_empty());
 
@@ -485,7 +481,7 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
+        let mut scanner = EventScannerBuilder::historic().build(provider).await?;
 
         let _ = scanner.subscribe(EventFilter::new());
 

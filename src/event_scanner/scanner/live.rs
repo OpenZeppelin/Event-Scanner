@@ -4,6 +4,7 @@ use super::common::{ConsumerMode, handle_stream};
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{EventScanner, scanner::Live},
+    robust_provider::IntoRobustProvider,
 };
 
 impl EventScannerBuilder<Live> {
@@ -11,6 +12,18 @@ impl EventScannerBuilder<Live> {
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;
         self
+    }
+
+    /// Connects to an existing provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider connection fails.
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<EventScanner<Live, N>, ScannerError> {
+        self.build(provider).await
     }
 }
 
