@@ -265,3 +265,74 @@ async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn multiple_filters_single_stream() -> anyhow::Result<()> {
+    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
+    let provider = setup.provider.clone();
+    let a = setup.contract.clone();
+    let b = deploy_counter(provider.primary().clone()).await?;
+
+    // track `CountIncreased` events from contract `a`
+    let a_filter = EventFilter::new()
+        .contract_address(*a.address())
+        .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
+    // track `CountDecreased` events from contract `b`
+    let b_filter = EventFilter::new()
+        .contract_address(*b.address())
+        .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
+
+    let expected_increased_events = 3;
+    let expected_decrease_events = 2;
+    let total_expected_events = expected_increased_events + expected_decrease_events;
+
+    let mut scanner = setup.scanner;
+
+    let mut stream = scanner.subscribe(vec![a_filter, b_filter]).take(total_expected_events);
+
+    scanner.start().await?;
+
+    for _ in 0..expected_increased_events {
+        a.increase().send().await?.watch().await?;
+    }
+
+    // First increase b to get a starting value, then emit CountDecreased events
+    b.increase().send().await?.watch().await?;
+    b.increase().send().await?.watch().await?;
+    for _ in 0..expected_decrease_events {
+        b.decrease().send().await?.watch().await?;
+    }
+
+    let a_count = Arc::new(AtomicUsize::new(0));
+    let b_count = Arc::new(AtomicUsize::new(0));
+    let a_count_clone = Arc::clone(&a_count);
+    let b_count_clone = Arc::clone(&b_count);
+
+    let event_counting = async move {
+        while let Some(message) = stream.next().await {
+            if let Message::Data(logs) = message {
+                for log in logs {
+                    // Check if this is a CountIncreased event from contract a
+                    if log.address() == *a.address() {
+                        let TestCounter::CountIncreased { newCount: _ } =
+                            log.log_decode().unwrap().inner.data;
+                        a_count_clone.fetch_add(1, Ordering::SeqCst);
+                    }
+                    // Check if this is a CountDecreased event from contract b
+                    else if log.address() == *b.address() {
+                        let TestCounter::CountDecreased { newCount: _ } =
+                            log.log_decode().unwrap().inner.data;
+                        b_count_clone.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            }
+        }
+    };
+
+    _ = timeout(Duration::from_secs(2), event_counting).await;
+
+    assert_eq!(a_count.load(Ordering::SeqCst), expected_increased_events);
+    assert_eq!(b_count.load(Ordering::SeqCst), expected_decrease_events);
+
+    Ok(())
+}

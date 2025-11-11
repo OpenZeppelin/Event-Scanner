@@ -178,6 +178,12 @@ impl From<&EventFilter> for Filter {
     }
 }
 
+impl From<EventFilter> for Vec<EventFilter> {
+    fn from(filter: EventFilter) -> Self {
+        vec![filter]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::EventFilter;

@@ -406,9 +406,14 @@ impl<M> EventScannerBuilder<M> {
 
 impl<M, N: Network> EventScanner<M, N> {
     #[must_use]
-    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
+    pub fn subscribe(&mut self, filters: impl Into<Vec<EventFilter>>) -> ReceiverStream<Message> {
         let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
-        self.listeners.push(EventListener { filter, sender });
+        let filters: Vec<EventFilter> = filters.into();
+
+        for filter in filters {
+            self.listeners.push(EventListener { filter, sender: sender.clone() });
+        }
+
         ReceiverStream::new(receiver)
     }
 }
@@ -481,6 +486,21 @@ mod tests {
 
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_with_multiple_filters() -> anyhow::Result<()> {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
+
+        assert!(scanner.listeners.is_empty());
+
+        let filters = vec![EventFilter::new(), EventFilter::new(), EventFilter::new()];
+        let _stream = scanner.subscribe(filters);
+
+        assert_eq!(scanner.listeners.len(), 3);
 
         Ok(())
     }
