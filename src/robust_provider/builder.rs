@@ -28,7 +28,7 @@ pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
 }
 
 impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
-    /// Create a new `RobustProvider` with default settings.
+    /// Create a new [`RobustProvider`] with default settings.
     ///
     /// The provided provider is treated as the primary provider.
     #[must_use]
@@ -43,7 +43,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         }
     }
 
-    /// Create a new `RobustProvider` with no retry attempts and only timeout set.
+    /// Create a new [`RobustProvider`] with no retry attempts and only timeout set.
     ///
     /// The provided provider is treated as the primary provider.
     #[must_use]
