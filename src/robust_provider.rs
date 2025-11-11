@@ -283,6 +283,28 @@ impl<N: Network> RobustProvider<N> {
         result
     }
 
+    /// Fetch the latest confirmed block number with retry and timeout.
+    ///
+    /// This method fetches the latest block number and subtracts the specified
+    /// number of confirmations to get a "confirmed" block number.
+    ///
+    /// # Arguments
+    ///
+    /// * `confirmations` - The number of block confirmations to wait for. The returned block number
+    ///   will be `latest_block - confirmations`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the RPC call fails after exhausting all retry attempts
+    /// or if the call times out. When fallback providers are configured, the error
+    /// returned will be from the final provider that was attempted.
+    pub async fn get_confirmed_block_number(&self, confirmations: u64) -> Result<u64, Error> {
+        info!("get_confirmed_block_number called with confirmations={}", confirmations);
+        let latest_block = self.get_block_number().await?;
+        let confirmed_block = latest_block.saturating_sub(confirmations);
+        Ok(confirmed_block)
+    }
+
     /// Fetch a block by hash with retry and timeout.
     ///
     /// # Errors
