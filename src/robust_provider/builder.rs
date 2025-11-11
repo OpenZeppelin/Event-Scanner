@@ -11,7 +11,7 @@ use crate::{
 /// Default timeout used by `RobustProvider`
 pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default timeout for subscriptions (longer to accommodate slow block times)
-pub const DEFAULT_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_mins(2);
+pub const DEFAULT_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
