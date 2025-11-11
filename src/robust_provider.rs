@@ -240,6 +240,7 @@ impl<N: Network> RobustProvider<N> {
     /// Fetch a block by number with retry and timeout.
     ///
     /// # Errors
+    /// <a name="retry-errors"></a>
     ///
     /// Returns an error if the RPC call fails after exhausting all retry attempts
     /// or if the call times out. When fallback providers are configured, the error
@@ -266,9 +267,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the RPC call fails after exhausting all retry attempts
-    /// or if the call times out. When fallback providers are configured, the error
-    /// returned will be from the final provider that was attempted.
+    /// See [retry errors](#retry-errors).
     pub async fn get_block_number(&self) -> Result<u64, Error> {
         info!("eth_getBlockNumber called");
         let result = self
@@ -295,9 +294,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the RPC call fails after exhausting all retry attempts
-    /// or if the call times out. When fallback providers are configured, the error
-    /// returned will be from the final provider that was attempted.
+    /// See [retry errors](#retry-errors).
     pub async fn get_confirmed_block_number(&self, confirmations: u64) -> Result<u64, Error> {
         info!("get_confirmed_block_number called with confirmations={}", confirmations);
         let latest_block = self.get_block_number().await?;
@@ -309,9 +306,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the RPC call fails after exhausting all retry attempts
-    /// or if the call times out. When fallback providers are configured, the error
-    /// returned will be from the final provider that was attempted.
+    /// See [retry errors](#retry-errors).
     pub async fn get_block_by_hash(
         &self,
         hash: alloy::primitives::BlockHash,
@@ -334,9 +329,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the RPC call fails after exhausting all retry attempts
-    /// or if the call times out. When fallback providers are configured, the error
-    /// returned will be from the final provider that was attempted.
+    /// See [retry errors](#retry-errors).
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
         let result = self
@@ -355,10 +348,8 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the primary provider does not support pubsub, if the RPC
-    /// call fails after exhausting all retry attempts, or if the call times out.
-    /// When fallback providers are configured, the error returned will be from the
-    /// final provider that was attempted.
+    /// Returns an error if the primary provider does not support pubsub. Otherwise,
+    /// see [retry errors](#retry-errors).
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
         let result = self
