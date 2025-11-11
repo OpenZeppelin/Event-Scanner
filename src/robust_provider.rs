@@ -512,6 +512,7 @@ mod tests {
     use alloy_node_bindings::Anvil;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
+    use tokio_stream::StreamExt;
 
     fn test_provider(timeout: u64, max_retries: usize, min_delay: u64) -> RobustProvider {
         RobustProvider {
@@ -714,6 +715,50 @@ mod tests {
                 assert!(matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)));
             }
             Error::BlockNotFound(id) => panic!("Unexpected error type: BlockNotFound({id})"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stream_with_failover() -> anyhow::Result<()> {
+        let mut anvil_1 = Some(Anvil::new().block_time(1).try_spawn()?);
+
+        let ws_provider = ProviderBuilder::new()
+            .connect(anvil_1.as_ref().unwrap().ws_endpoint_url().as_str())
+            .await?;
+
+        let anvil_2 = Anvil::new().block_time(1).try_spawn()?;
+
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider.clone())
+            .fallback(ws_provider_2)
+            .subscription_timeout(Duration::from_secs(3))
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+        let mut stream = subscription.into_stream();
+
+        while let Some(result) = stream.next().await {
+            let Ok(block) = result else {
+                break;
+            };
+
+            let block_number = block.number();
+
+            // At block 10, drop the primary provider to test failover
+            if block_number == 10 &&
+                let Some(anvil) = anvil_1.take()
+            {
+                drop(anvil);
+            }
+
+            if block_number >= 20 {
+                break;
+            }
         }
 
         Ok(())
