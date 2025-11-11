@@ -19,7 +19,7 @@ use tracing::{error, info, warn};
 
 use crate::robust_provider::{Error, RobustProvider};
 
-/// Default time interval between primary provider reconnection attempts (30 seconds)
+/// Default time interval between primary provider reconnection attempts
 pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Maximum number of consecutive lags before switching providers
@@ -58,13 +58,13 @@ impl<N: Network> RobustSubscription<N> {
     /// - Attempt to receive from the current subscription
     /// - Handle errors by switching to fallback providers
     /// - Periodically attempt to reconnect to the primary provider
+    /// - Will switch to fallback providers if subscription timeout is exhausted
     ///
     /// # Errors
     ///
     /// Returns an error if all providers have been exhausted and failed.
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         loop {
-            // Check if we should attempt to reconnect to primary
             if self.should_reconnect_to_primary() {
                 info!("Attempting to reconnect to primary provider");
                 if let Err(e) = self.try_reconnect_to_primary().await {
@@ -74,7 +74,6 @@ impl<N: Network> RobustSubscription<N> {
                 }
             }
 
-            // Try to receive from current subscription with timeout
             if let Some(subscription) = &mut self.subscription {
                 let subscription_timeout = self.robust_provider.subscription_timeout;
                 match timeout(subscription_timeout, subscription.recv()).await {
@@ -108,7 +107,6 @@ impl<N: Network> RobustSubscription<N> {
                         },
                     },
                     Err(e) => {
-                        // Timeout occurred - no block received within subscription_timeout
                         error!(
                             timeout_secs = subscription_timeout.as_secs(),
                             "Subscription timeout - no block received, switching provider"
@@ -125,7 +123,6 @@ impl<N: Network> RobustSubscription<N> {
 
     fn should_reconnect_to_primary(&self) -> bool {
         // Only attempt reconnection if enough time has passed since last attempt
-        // The RobustProvider will try the primary provider first automatically
         match self.last_reconnect_attempt {
             None => false,
             Some(last_attempt) => last_attempt.elapsed() >= self.reconnect_interval,

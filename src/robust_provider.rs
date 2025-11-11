@@ -126,7 +126,7 @@ impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
 /// Default timeout used by `RobustProvider`
 pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default timeout for subscriptions (longer to accommodate slow block times)
-pub const DEFAULT_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_mins(2);
+pub const DEFAULT_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
@@ -143,7 +143,7 @@ pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
 }
 
 impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
-    /// Create a new `RobustProvider` with default settings.
+    /// Create a new [`RobustProvider`] with default settings.
     ///
     /// The provided provider is treated as the primary provider.
     #[must_use]
@@ -158,7 +158,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         }
     }
 
-    /// Create a new `RobustProvider` with no retry attempts and only timeout set.
+    /// Create a new [`RobustProvider`] with no retry attempts and only timeout set.
     ///
     /// The provided provider is treated as the primary provider.
     #[must_use]
