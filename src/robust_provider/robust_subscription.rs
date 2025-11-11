@@ -194,7 +194,8 @@ impl<N: Network> RobustSubscription<N> {
     /// and forwards items to a channel, which is then wrapped in a Stream.
     #[must_use]
     pub fn into_stream(mut self) -> RobustSubscriptionStream<N> {
-        // TODO: This shouldnt be unbounded
+        // TODO: This shouldnt be unbounded need choose an appropriate bound (Maybe same as max
+        // buffer probably should be bigger)
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
