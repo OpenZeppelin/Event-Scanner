@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 use alloy::{
     network::Network,
@@ -6,7 +10,8 @@ use alloy::{
     pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
-use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::{broadcast::error::RecvError, mpsc};
+use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 use tracing::{error, info, warn};
 
 use crate::robust_provider::{Error, RobustProvider};
@@ -172,5 +177,48 @@ impl<N: Network> RobustSubscription<N> {
             Some(sub) => sub.is_empty(),
             None => true,
         }
+    }
+
+    /// Convert the subscription into a stream.
+    ///
+    /// This spawns a background task that continuously receives from the subscription
+    /// and forwards items to a channel, which is then wrapped in a Stream.
+    #[must_use]
+    pub fn into_stream(mut self) -> RobustSubscriptionStream<N> {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        // Spawn a background task to handle the recv loop
+        tokio::spawn(async move {
+            loop {
+                match self.recv().await {
+                    Ok(item) => {
+                        if tx.send(Ok(item)).is_err() {
+                            // Receiver dropped, exit the loop
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        // Send the error and exit
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
+
+        RobustSubscriptionStream { inner: UnboundedReceiverStream::new(rx) }
+    }
+}
+
+/// A stream wrapper around [`RobustSubscription`] that implements the [`Stream`] trait.
+pub struct RobustSubscriptionStream<N: Network> {
+    inner: UnboundedReceiverStream<Result<N::HeaderResponse, Error>>,
+}
+
+impl<N: Network> Stream for RobustSubscriptionStream<N> {
+    type Item = Result<N::HeaderResponse, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner).poll_next(cx)
     }
 }
