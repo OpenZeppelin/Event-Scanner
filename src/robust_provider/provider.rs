@@ -25,6 +25,7 @@ use crate::{
 pub struct RobustProvider<N: Network = Ethereum> {
     pub(crate) providers: Vec<RootProvider<N>>,
     pub(crate) max_timeout: Duration,
+    pub(crate) subscription_timeout: Duration,
     pub(crate) max_retries: usize,
     pub(crate) min_delay: Duration,
 }
@@ -291,7 +292,10 @@ impl<N: Network> RobustProvider<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{RobustProviderBuilder, robust_provider::Error};
+    use crate::{
+        RobustProviderBuilder,
+        robust_provider::{Error, builder::DEFAULT_SUBSCRIPTION_TIMEOUT},
+    };
 
     use super::*;
     use alloy::{
@@ -310,6 +314,7 @@ mod tests {
         RobustProvider {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
             max_timeout: Duration::from_millis(timeout),
+            subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries,
             min_delay: Duration::from_millis(min_delay),
         }

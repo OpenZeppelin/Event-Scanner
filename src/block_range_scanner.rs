@@ -617,7 +617,6 @@ impl<N: Network> Service<N> {
     ) {
         // ensure we start streaming only after the expected_next_block cutoff
         let cutoff = range_start;
-
         let mut stream = subscription.into_stream().skip_while(|result| match result {
             Ok(header) => header.number() < cutoff,
             Err(_) => false,
@@ -627,15 +626,14 @@ impl<N: Network> Service<N> {
             let incoming_block = match result {
                 Ok(block) => block,
                 Err(e) => {
-                    error!(error = %e, "Failed to receive block from subscription");
-                    // Send error to subscriber and terminate
-                    _ = sender.try_stream(e).await;
+                    error!(error = %e, "Error receiving block from stream");
+                    // Error from subscription, exit the stream
+                    _ = sender.try_stream(e);
                     return;
                 }
             };
 
             let incoming_block_num = incoming_block.number();
-
             info!(block_number = incoming_block_num, "Received block header");
 
             if incoming_block_num < range_start {

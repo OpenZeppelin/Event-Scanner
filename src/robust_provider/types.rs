@@ -1,17 +1,3 @@
-use crate::{
-    RobustProvider,
-    robust_provider::{builder::RobustProviderBuilder, error::Error},
-};
-use alloy::{
-    network::{Ethereum, Network},
-    providers::{
-        DynProvider, Provider, RootProvider,
-        fillers::{FillProvider, TxFiller},
-        layers::{CacheProvider, CallBatchProvider},
-    },
-    transports::http::reqwest::Url,
-};
-
 pub trait IntoProvider<N: Network = Ethereum> {
     fn into_provider(
         self,

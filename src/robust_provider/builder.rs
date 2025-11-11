@@ -10,6 +10,8 @@ use crate::{
 // RPC retry and timeout settings
 /// Default timeout used by `RobustProvider`
 pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default timeout for subscriptions (longer to accommodate slow block times)
+pub const DEFAULT_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_mins(2);
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
@@ -17,8 +19,9 @@ pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
-    providers: Vec<P>,
+    pub(crate) providers: Vec<P>,
     max_timeout: Duration,
+    subscription_timeout: Duration,
     max_retries: usize,
     min_delay: Duration,
     _network: PhantomData<N>,
@@ -33,6 +36,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         Self {
             providers: vec![provider],
             max_timeout: DEFAULT_MAX_TIMEOUT,
+            subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             min_delay: DEFAULT_MIN_DELAY,
             _network: PhantomData,
@@ -60,6 +64,16 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     #[must_use]
     pub fn max_timeout(mut self, timeout: Duration) -> Self {
         self.max_timeout = timeout;
+        self
+    }
+
+    /// Set the timeout for subscription operations.
+    ///
+    /// This should be set higher than `max_timeout` to accommodate chains with slow block times.
+    /// Default is 2 minutes.
+    #[must_use]
+    pub fn subscription_timeout(mut self, timeout: Duration) -> Self {
+        self.subscription_timeout = timeout;
         self
     }
 
@@ -92,6 +106,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         Ok(RobustProvider {
             providers,
             max_timeout: self.max_timeout,
+            subscription_timeout: self.subscription_timeout,
             max_retries: self.max_retries,
             min_delay: self.min_delay,
         })

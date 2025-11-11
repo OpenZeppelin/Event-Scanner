@@ -10,8 +10,11 @@ use alloy::{
     pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
-use tokio::sync::broadcast::error::RecvError;
-use tokio_stream::Stream;
+use tokio::{
+    sync::{broadcast::error::RecvError, mpsc},
+    time::timeout,
+};
+use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 use tracing::{error, info, warn};
 
 use crate::{RobustProvider, robust_provider::Error};
@@ -71,37 +74,47 @@ impl<N: Network> RobustSubscription<N> {
                 }
             }
 
-            // Try to receive from current subscription
+            // Try to receive from current subscription with timeout
             if let Some(subscription) = &mut self.subscription {
-                match subscription.recv().await {
-                    Ok(header) => {
-                        self.consecutive_lags = 0;
-                        return Ok(header);
-                    }
-                    Err(recv_error) => match recv_error {
-                        RecvError::Closed => {
-                            error!("Subscription channel closed, switching provider");
-                            // NOTE: Not sure what error to pass here
-                            let error = RpcError::Transport(TransportErrorKind::BackendGone).into();
-                            self.switch_to_fallback(error).await?;
+                let subscription_timeout = self.robust_provider.subscription_timeout;
+                match timeout(subscription_timeout, subscription.recv()).await {
+                    Ok(recv_result) => match recv_result {
+                        Ok(header) => {
+                            self.consecutive_lags = 0;
+                            return Ok(header);
                         }
-                        RecvError::Lagged(skipped) => {
-                            self.consecutive_lags += 1;
-                            warn!(
-                                skipped = skipped,
-                                consecutive_lags = self.consecutive_lags,
-                                "Subscription lagged"
-                            );
-
-                            if self.consecutive_lags >= MAX_LAG_COUNT {
-                                error!("Too many consecutive lags, switching provider");
-                                // NOTE: Not sure what error to pass here
+                        Err(recv_error) => match recv_error {
+                            RecvError::Closed => {
+                                error!("Subscription channel closed, switching provider");
                                 let error =
                                     RpcError::Transport(TransportErrorKind::BackendGone).into();
                                 self.switch_to_fallback(error).await?;
                             }
-                        }
+                            RecvError::Lagged(skipped) => {
+                                self.consecutive_lags += 1;
+                                warn!(
+                                    skipped = skipped,
+                                    consecutive_lags = self.consecutive_lags,
+                                    "Subscription lagged"
+                                );
+
+                                if self.consecutive_lags >= MAX_LAG_COUNT {
+                                    error!("Too many consecutive lags, switching provider");
+                                    let error =
+                                        RpcError::Transport(TransportErrorKind::BackendGone).into();
+                                    self.switch_to_fallback(error).await?;
+                                }
+                            }
+                        },
                     },
+                    Err(e) => {
+                        // Timeout occurred - no block received within subscription_timeout
+                        error!(
+                            timeout_secs = subscription_timeout.as_secs(),
+                            "Subscription timeout - no block received, switching provider"
+                        );
+                        self.switch_to_fallback(e.into()).await?;
+                    }
                 }
             } else {
                 // No subscription available
@@ -110,7 +123,6 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
-    /// Check if we should attempt to reconnect to the primary provider
     fn should_reconnect_to_primary(&self) -> bool {
         // Only attempt reconnection if enough time has passed since last attempt
         // The RobustProvider will try the primary provider first automatically
@@ -120,7 +132,6 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
-    /// Attempt to reconnect to the primary provider
     async fn try_reconnect_to_primary(&mut self) -> Result<(), Error> {
         self.last_reconnect_attempt = Some(Instant::now());
 
@@ -141,9 +152,7 @@ impl<N: Network> RobustSubscription<N> {
         Ok(())
     }
 
-    /// Switch to a fallback provider
     async fn switch_to_fallback(&mut self, last_error: Error) -> Result<(), Error> {
-        // Mark that we need reconnection attempts
         if self.last_reconnect_attempt.is_none() {
             self.last_reconnect_attempt = Some(Instant::now());
         }
@@ -179,49 +188,46 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
-    /// Convert this `RobustSubscription` into a `Stream`.
+    /// Convert the subscription into a stream.
     ///
-    /// This allows using standard stream combinators like `skip_while`, `filter`, etc.
-    /// The stream will automatically handle failover and reconnection attempts.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use tokio_stream::StreamExt;
-    ///
-    /// let mut stream = subscription.into_stream()
-    ///     .skip_while(|result| matches!(result, Ok(header) if header.number() < cutoff))
-    ///     .filter_map(|result| result.ok());
-    ///
-    /// while let Some(block) = stream.next().await {
-    ///     // Process block
-    /// }
-    /// ```
+    /// This spawns a background task that continuously receives from the subscription
+    /// and forwards items to a channel, which is then wrapped in a Stream.
     #[must_use]
-    pub fn into_stream(self) -> RobustSubscriptionStream<N> {
-        RobustSubscriptionStream { inner: self }
+    pub fn into_stream(mut self) -> RobustSubscriptionStream<N> {
+        // TODO: This shouldnt be unbounded
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                match self.recv().await {
+                    Ok(item) => {
+                        if tx.send(Ok(item)).is_err() {
+                            // Receiver dropped, exit the loop
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        // Send the error and exit
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
+
+        RobustSubscriptionStream { inner: UnboundedReceiverStream::new(rx) }
     }
 }
 
-/// A `Stream` wrapper around `RobustSubscription`.
-///
-/// This struct implements the `Stream` trait, allowing you to use standard stream
-/// combinators from `tokio_stream::StreamExt`.
+/// A stream wrapper around [`RobustSubscription`] that implements the [`Stream`] trait.
 pub struct RobustSubscriptionStream<N: Network> {
-    inner: RobustSubscription<N>,
+    inner: UnboundedReceiverStream<Result<N::HeaderResponse, Error>>,
 }
 
 impl<N: Network> Stream for RobustSubscriptionStream<N> {
     type Item = Result<N::HeaderResponse, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let fut = self.inner.recv();
-        tokio::pin!(fut);
-
-        match fut.poll(cx) {
-            Poll::Ready(Ok(header)) => Poll::Ready(Some(Ok(header))),
-            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
-            Poll::Pending => Poll::Pending,
-        }
+        Pin::new(&mut self.inner).poll_next(cx)
     }
 }
