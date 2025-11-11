@@ -10,7 +10,10 @@ use alloy::{
     pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
-use tokio::sync::{broadcast::error::RecvError, mpsc};
+use tokio::{
+    sync::{broadcast::error::RecvError, mpsc},
+    time::timeout,
+};
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 use tracing::{error, info, warn};
 
@@ -71,37 +74,47 @@ impl<N: Network> RobustSubscription<N> {
                 }
             }
 
-            // Try to receive from current subscription
+            // Try to receive from current subscription with timeout
             if let Some(subscription) = &mut self.subscription {
-                match subscription.recv().await {
-                    Ok(header) => {
-                        self.consecutive_lags = 0;
-                        return Ok(header);
-                    }
-                    Err(recv_error) => match recv_error {
-                        RecvError::Closed => {
-                            error!("Subscription channel closed, switching provider");
-                            // NOTE: Not sure what error to pass here
-                            let error = RpcError::Transport(TransportErrorKind::BackendGone).into();
-                            self.switch_to_fallback(error).await?;
+                let subscription_timeout = self.robust_provider.subscription_timeout;
+                match timeout(subscription_timeout, subscription.recv()).await {
+                    Ok(recv_result) => match recv_result {
+                        Ok(header) => {
+                            self.consecutive_lags = 0;
+                            return Ok(header);
                         }
-                        RecvError::Lagged(skipped) => {
-                            self.consecutive_lags += 1;
-                            warn!(
-                                skipped = skipped,
-                                consecutive_lags = self.consecutive_lags,
-                                "Subscription lagged"
-                            );
-
-                            if self.consecutive_lags >= MAX_LAG_COUNT {
-                                error!("Too many consecutive lags, switching provider");
-                                // NOTE: Not sure what error to pass here
+                        Err(recv_error) => match recv_error {
+                            RecvError::Closed => {
+                                error!("Subscription channel closed, switching provider");
                                 let error =
                                     RpcError::Transport(TransportErrorKind::BackendGone).into();
                                 self.switch_to_fallback(error).await?;
                             }
-                        }
+                            RecvError::Lagged(skipped) => {
+                                self.consecutive_lags += 1;
+                                warn!(
+                                    skipped = skipped,
+                                    consecutive_lags = self.consecutive_lags,
+                                    "Subscription lagged"
+                                );
+
+                                if self.consecutive_lags >= MAX_LAG_COUNT {
+                                    error!("Too many consecutive lags, switching provider");
+                                    let error =
+                                        RpcError::Transport(TransportErrorKind::BackendGone).into();
+                                    self.switch_to_fallback(error).await?;
+                                }
+                            }
+                        },
                     },
+                    Err(e) => {
+                        // Timeout occurred - no block received within subscription_timeout
+                        error!(
+                            timeout_secs = subscription_timeout.as_secs(),
+                            "Subscription timeout - no block received, switching provider"
+                        );
+                        self.switch_to_fallback(e.into()).await?;
+                    }
                 }
             } else {
                 // No subscription available
