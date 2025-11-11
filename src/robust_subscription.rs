@@ -110,7 +110,6 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
-    /// Check if we should attempt to reconnect to the primary provider
     fn should_reconnect_to_primary(&self) -> bool {
         // Only attempt reconnection if enough time has passed since last attempt
         // The RobustProvider will try the primary provider first automatically
@@ -120,7 +119,6 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
-    /// Attempt to reconnect to the primary provider
     async fn try_reconnect_to_primary(&mut self) -> Result<(), Error> {
         self.last_reconnect_attempt = Some(Instant::now());
 
@@ -141,9 +139,7 @@ impl<N: Network> RobustSubscription<N> {
         Ok(())
     }
 
-    /// Switch to a fallback provider
     async fn switch_to_fallback(&mut self, last_error: Error) -> Result<(), Error> {
-        // Mark that we need reconnection attempts
         if self.last_reconnect_attempt.is_none() {
             self.last_reconnect_attempt = Some(Instant::now());
         }
@@ -185,9 +181,9 @@ impl<N: Network> RobustSubscription<N> {
     /// and forwards items to a channel, which is then wrapped in a Stream.
     #[must_use]
     pub fn into_stream(mut self) -> RobustSubscriptionStream<N> {
+        // TODO: This shouldnt be unbounded
         let (tx, rx) = mpsc::unbounded_channel();
 
-        // Spawn a background task to handle the recv loop
         tokio::spawn(async move {
             loop {
                 match self.recv().await {
