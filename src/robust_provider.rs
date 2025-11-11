@@ -722,20 +722,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_with_failover() -> anyhow::Result<()> {
-        let mut anvil_1 = Some(Anvil::new().block_time(1).try_spawn()?);
+        let mut anvil_1 = Some(Anvil::new().block_time_f64(0.1).try_spawn()?);
 
         let ws_provider = ProviderBuilder::new()
             .connect(anvil_1.as_ref().unwrap().ws_endpoint_url().as_str())
             .await?;
 
-        let anvil_2 = Anvil::new().block_time(1).try_spawn()?;
+        let anvil_2 = Anvil::new().block_time_f64(0.1).try_spawn()?;
 
         let ws_provider_2 =
             ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
             .fallback(ws_provider_2)
-            .subscription_timeout(Duration::from_secs(3))
+            .subscription_timeout(Duration::from_millis(500))
             .build()
             .await?;
 
@@ -756,7 +756,7 @@ mod tests {
                 drop(anvil);
             }
 
-            if block_number >= 20 {
+            if block_number >= 11 {
                 break;
             }
         }
