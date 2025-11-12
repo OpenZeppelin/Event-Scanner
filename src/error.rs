@@ -27,6 +27,9 @@ pub enum ScannerError {
 
     #[error("Event count must be greater than 0")]
     InvalidEventCount,
+
+    #[error("Max block range must be greater than 0")]
+    InvalidMaxBlockRange,
 }
 
 impl From<RobustProviderError> for ScannerError {

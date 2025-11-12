@@ -18,7 +18,9 @@ impl EventScannerBuilder<Live> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the provider connection fails.
+    /// Returns an error if:
+    /// * The provider connection fails
+    /// * The max block range is zero
     pub async fn connect<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
@@ -58,6 +60,12 @@ impl<N: Network> EventScanner<Live, N> {
 
 #[cfg(test)]
 mod tests {
+    use alloy::{
+        network::Ethereum,
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
+
     use super::*;
 
     #[test]
@@ -88,5 +96,16 @@ mod tests {
 
         assert_eq!(builder.block_range_scanner.max_block_range, 105);
         assert_eq!(builder.config.block_confirmations, 8);
+    }
+
+    #[tokio::test]
+    async fn test_live_returns_error_with_zero_max_block_range() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::live().max_block_range(0).connect(provider).await;
+
+        match result {
+            Err(ScannerError::InvalidMaxBlockRange) => {}
+            _ => panic!("Expected InvalidMaxBlockRange error"),
+        }
     }
 }

@@ -373,11 +373,7 @@ impl<M> EventScannerBuilder<M> {
     ///
     /// # Arguments
     ///
-    /// * `max_block_range` - Maximum number of blocks to process per batch.
-    ///
-    /// # Panics
-    ///
-    /// If `max_block_range` is zero
+    /// * `max_block_range` - Maximum number of blocks to process per batch (must be greater than 0)
     ///
     /// # Example
     ///
@@ -388,7 +384,6 @@ impl<M> EventScannerBuilder<M> {
     /// - Batch 4: blocks 1090–1099 (10 blocks)
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
-        assert!(max_block_range != 0, "max block range should be greater than zero");
         self.block_range_scanner.max_block_range = max_block_range;
         self
     }
@@ -400,6 +395,9 @@ impl<M> EventScannerBuilder<M> {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<M, N>, ScannerError> {
+        if self.block_range_scanner.max_block_range == 0 {
+            return Err(ScannerError::InvalidMaxBlockRange);
+        }
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
@@ -488,21 +486,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_latest_returns_error_with_zero_count() {
-        use alloy::providers::{RootProvider, mock::Asserter};
-        use alloy::rpc::client::RpcClient;
-        
+        use alloy::{
+            providers::{RootProvider, mock::Asserter},
+            rpc::client::RpcClient,
+        };
+
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let result = EventScannerBuilder::latest(0).connect(provider).await;
-        
+
         match result {
             Err(ScannerError::InvalidEventCount) => {}
             _ => panic!("Expected InvalidEventCount error"),
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "max block range should be greater than zero")]
-    fn test_max_block_range_panics_with_zero() {
-        let _ = EventScannerBuilder::historic().max_block_range(0);
     }
 }
