@@ -137,9 +137,9 @@ impl<N: Network> RobustProvider<N> {
     /// Subscribe to new block headers with automatic failover and reconnection.
     ///
     /// Returns a `RobustSubscription` that automatically:
-    /// - Handles connection errors by switching to fallback providers
-    /// - Detects and recovers from lagged subscriptions
-    /// - Periodically attempts to reconnect to the primary provider
+    /// * Handles connection errors by switching to fallback providers
+    /// * Detects and recovers from lagged subscriptions
+    /// * Periodically attempts to reconnect to the primary provider
     ///
     /// # Errors
     ///
@@ -156,14 +156,13 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
 
-        if let Err(e) = &subscription {
-            error!(error = %e, "eth_subscribe failed");
-            return Err(e.clone());
+        match subscription {
+            Ok(sub) => Ok(RobustSubscription::new(sub, self.clone(), DEFAULT_RECONNECT_INTERVAL)),
+            Err(e) => {
+                error!(error = %e, "eth_subscribe failed");
+                Err(e)
+            }
         }
-
-        let subscription = subscription?;
-
-        Ok(RobustSubscription::new(subscription, self.clone(), DEFAULT_RECONNECT_INTERVAL))
     }
 
     /// Execute `operation` with exponential backoff and a total timeout.
@@ -179,12 +178,12 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
+    /// * Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
     ///   and all fallback providers failed" if the overall timeout elapses and no fallback
     ///   providers succeed.
-    /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
+    /// * Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
-    /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
+    /// * Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
     pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
@@ -194,33 +193,20 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let mut providers = self.providers.iter();
-        let primary = providers.next().expect("should have primary provider");
-
+        let primary = self.primary();
         let result = self.try_provider_with_timeout(primary, &operation).await;
 
         if result.is_ok() {
             return result;
         }
 
-        let mut last_error = result.unwrap_err();
+        let last_error = result.unwrap_err();
 
-        // providers are just fallback
-        match self.try_fallback_providers(providers, &operation, require_pubsub, last_error).await {
-            Ok(value) => {
-                return Ok(value);
-            }
-            Err(e) => last_error = e,
-        }
-
-        // Return the last error encountered
-        error!("All providers failed or timed out - returning the last providers attempt's error");
-        Err(last_error)
+        self.try_fallback_providers(&operation, require_pubsub, last_error).await
     }
 
     pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
         &self,
-        fallback_providers: impl Iterator<Item = &RootProvider<N>>,
         operation: F,
         require_pubsub: bool,
         mut last_error: Error,
@@ -233,6 +219,7 @@ impl<N: Network> RobustProvider<N> {
         if num_providers > 1 {
             info!("Primary provider failed, trying fallback provider(s)");
         }
+        let fallback_providers = self.providers.iter().skip(1);
         for (idx, provider) in fallback_providers.enumerate() {
             let fallback_num = idx + 1;
             if require_pubsub && !Self::supports_pubsub(provider) {
@@ -253,6 +240,7 @@ impl<N: Network> RobustProvider<N> {
             }
         }
         // All fallbacks failed / skipped, return the last error
+        error!("All providers failed or timed out - returning the last providers attempt's error");
         Err(last_error)
     }
 
