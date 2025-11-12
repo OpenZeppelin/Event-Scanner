@@ -16,7 +16,4 @@ pub use event_scanner::{
     SyncFromBlock, SyncFromLatestEvents,
 };
 
-pub use robust_provider::{
-    provider::RobustProvider, provider_conversion::IntoRobustProvider,
-    subscription::RobustSubscription,
-};
+pub use robust_provider::{provider::RobustProvider, provider_conversion::IntoRobustProvider};
