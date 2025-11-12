@@ -405,9 +405,7 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let mut providers = self.providers.iter();
-        let primary = providers.next().expect("should have primary provider");
-
+        let primary = self.primary();
         let result = self.try_provider_with_timeout(primary, &operation).await;
 
         if result.is_ok() {
@@ -416,12 +414,11 @@ impl<N: Network> RobustProvider<N> {
 
         let last_error = result.unwrap_err();
 
-        self.try_fallback_providers(providers, &operation, require_pubsub, last_error).await
+        self.try_fallback_providers(&operation, require_pubsub, last_error).await
     }
 
     pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
         &self,
-        fallback_providers: impl Iterator<Item = &RootProvider<N>>,
         operation: F,
         require_pubsub: bool,
         mut last_error: Error,
@@ -434,6 +431,7 @@ impl<N: Network> RobustProvider<N> {
         if num_providers > 1 {
             info!("Primary provider failed, trying fallback provider(s)");
         }
+        let fallback_providers = self.providers.iter().skip(1);
         for (idx, provider) in fallback_providers.enumerate() {
             let fallback_num = idx + 1;
             if require_pubsub && !Self::supports_pubsub(provider) {

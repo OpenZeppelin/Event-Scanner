@@ -134,6 +134,7 @@ impl<N: Network> RobustSubscription<N> {
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
+
         let primary = self.robust_provider.primary();
         let subscription =
             self.robust_provider.try_provider_with_timeout(primary, &operation).await;
@@ -157,16 +158,8 @@ impl<N: Network> RobustSubscription<N> {
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
-
-        let subscription = self
-            .robust_provider
-            .try_fallback_providers(
-                self.robust_provider.providers.iter().skip(1),
-                &operation,
-                true,
-                last_error,
-            )
-            .await;
+        let subscription =
+            self.robust_provider.try_fallback_providers(&operation, true, last_error).await;
 
         match subscription {
             Ok(sub) => {
