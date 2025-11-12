@@ -414,19 +414,9 @@ impl<N: Network> RobustProvider<N> {
             return result;
         }
 
-        let mut last_error = result.unwrap_err();
+        let last_error = result.unwrap_err();
 
-        // providers are just fallback
-        match self.try_fallback_providers(providers, &operation, require_pubsub, last_error).await {
-            Ok(value) => {
-                return Ok(value);
-            }
-            Err(e) => last_error = e,
-        }
-
-        // Return the last error encountered
-        error!("All providers failed or timed out - returning the last providers attempt's error");
-        Err(last_error)
+        self.try_fallback_providers(providers, &operation, require_pubsub, last_error).await
     }
 
     pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
@@ -464,6 +454,7 @@ impl<N: Network> RobustProvider<N> {
             }
         }
         // All fallbacks failed / skipped, return the last error
+        error!("All providers failed or timed out - returning the last providers attempt's error");
         Err(last_error)
     }
 

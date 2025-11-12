@@ -134,19 +134,20 @@ impl<N: Network> RobustSubscription<N> {
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
-
         let primary = self.robust_provider.primary();
         let subscription =
             self.robust_provider.try_provider_with_timeout(primary, &operation).await;
 
-        if let Err(e) = &subscription {
-            error!(error = %e, "eth_subscribe failed");
-            return Err(e.clone());
+        match subscription {
+            Ok(sub) => {
+                self.subscription = Some(sub);
+                Ok(())
+            }
+            Err(e) => {
+                error!(error = %e, "eth_subscribe failed");
+                Err(e)
+            }
         }
-
-        let subscription = subscription?;
-        self.subscription = Some(subscription);
-        Ok(())
     }
 
     async fn switch_to_fallback(&mut self, last_error: Error) -> Result<(), Error> {
@@ -156,6 +157,7 @@ impl<N: Network> RobustSubscription<N> {
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
+
         let subscription = self
             .robust_provider
             .try_fallback_providers(
@@ -166,14 +168,16 @@ impl<N: Network> RobustSubscription<N> {
             )
             .await;
 
-        if let Err(e) = &subscription {
-            error!(error = %e, "eth_subscribe failed");
-            return Err(e.clone());
+        match subscription {
+            Ok(sub) => {
+                self.subscription = Some(sub);
+                Ok(())
+            }
+            Err(e) => {
+                error!(error = %e, "eth_subscribe failed");
+                Err(e)
+            }
         }
-
-        let subscription = subscription?;
-        self.subscription = Some(subscription);
-        Ok(())
     }
 
     /// Check if the subscription channel is empty (no pending messages)
