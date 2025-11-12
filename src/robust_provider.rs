@@ -345,7 +345,6 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the primary provider does not support pubsub. Otherwise,
     /// see [retry errors](#retry-errors).
     pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
         info!("eth_subscribe called");
