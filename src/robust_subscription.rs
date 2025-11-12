@@ -55,10 +55,10 @@ impl<N: Network> RobustSubscription<N> {
     /// Receive the next item from the subscription with automatic failover.
     ///
     /// This method will:
-    /// - Attempt to receive from the current subscription
-    /// - Handle errors by switching to fallback providers
-    /// - Periodically attempt to reconnect to the primary provider
-    /// - Will switch to fallback providers if subscription timeout is exhausted
+    /// * Attempt to receive from the current subscription
+    /// * Handle errors by switching to fallback providers
+    /// * Periodically attempt to reconnect to the primary provider
+    /// * Will switch to fallback providers if subscription timeout is exhausted
     ///
     /// # Errors
     ///

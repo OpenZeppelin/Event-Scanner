@@ -349,9 +349,9 @@ impl<N: Network> RobustProvider<N> {
     /// Subscribe to new block headers with automatic failover and reconnection.
     ///
     /// Returns a `RobustSubscription` that automatically:
-    /// - Handles connection errors by switching to fallback providers
-    /// - Detects and recovers from lagged subscriptions
-    /// - Periodically attempts to reconnect to the primary provider
+    /// * Handles connection errors by switching to fallback providers
+    /// * Detects and recovers from lagged subscriptions
+    /// * Periodically attempts to reconnect to the primary provider
     ///
     /// # Errors
     ///
@@ -390,12 +390,12 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
+    /// * Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
     ///   and all fallback providers failed" if the overall timeout elapses and no fallback
     ///   providers succeed.
-    /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
+    /// * Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
-    /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
+    /// * Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
     pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
