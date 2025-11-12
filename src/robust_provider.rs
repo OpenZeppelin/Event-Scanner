@@ -184,8 +184,8 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
 
     /// Set the timeout for subscription operations.
     ///
-    /// This should be set higher than `max_timeout` to accommodate chains with slow block times.
-    /// Default is 2 minutes.
+    /// This should be set higher than [`max_timeout`](Self::max_timeout) to accommodate chains with
+    /// slow block times. Default is [`DEFAULT_SUBSCRIPTION_TIMEOUT`].
     #[must_use]
     pub fn subscription_timeout(mut self, timeout: Duration) -> Self {
         self.subscription_timeout = timeout;
