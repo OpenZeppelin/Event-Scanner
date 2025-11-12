@@ -368,14 +368,13 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
 
-        if let Err(e) = &subscription {
-            error!(error = %e, "eth_subscribe failed");
-            return Err(e.clone());
+        match subscription {
+            Ok(sub) => Ok(RobustSubscription::new(sub, self.clone(), DEFAULT_RECONNECT_INTERVAL)),
+            Err(e) => {
+                error!(error = %e, "eth_subscribe failed");
+                Err(e)
+            }
         }
-
-        let subscription = subscription?;
-
-        Ok(RobustSubscription::new(subscription, self.clone(), DEFAULT_RECONNECT_INTERVAL))
     }
 
     /// Execute `operation` with exponential backoff and a total timeout.
