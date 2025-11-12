@@ -240,11 +240,8 @@ impl<N: Network> RobustProvider<N> {
     /// Fetch a block by number with retry and timeout.
     ///
     /// # Errors
-    /// <a name="retry-errors"></a>
     ///
-    /// Returns an error if the RPC call fails after exhausting all retry attempts
-    /// or if the call times out. When fallback providers are configured, the error
-    /// returned will be from the final provider that was attempted.
+    /// See [retry errors](#retry-errors).
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -376,6 +373,7 @@ impl<N: Network> RobustProvider<N> {
     /// If `require_pubsub` is true, providers that don't support pubsub will be skipped.
     ///
     /// # Errors
+    /// <a name="retry-errors"></a>
     ///
     /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
     ///   and all fallback providers failed" if the overall timeout elapses and no fallback
