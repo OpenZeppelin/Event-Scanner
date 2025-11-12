@@ -295,8 +295,8 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    pub async fn get_confirmed_block_number(&self, confirmations: u64) -> Result<u64, Error> {
-        info!("get_confirmed_block_number called with confirmations={}", confirmations);
+    pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
+        info!("get_latest_confirmed called with confirmations={}", confirmations);
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
         Ok(confirmed_block)

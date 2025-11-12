@@ -370,7 +370,7 @@ impl<N: Network> Service<N> {
         };
 
         let get_confirmed_tip = async || -> Result<BlockNumber, ScannerError> {
-            let confirmed_block = provider.get_confirmed_block_number(block_confirmations).await?;
+            let confirmed_block = provider.get_latest_confirmed(block_confirmations).await?;
             Ok(confirmed_block)
         };
 
