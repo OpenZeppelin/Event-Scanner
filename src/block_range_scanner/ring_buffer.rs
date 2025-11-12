@@ -28,4 +28,8 @@ impl<T> RingBuffer<T> {
     pub fn back(&self) -> Option<&T> {
         self.inner.back()
     }
+
+    pub fn clear(&mut self) {
+        self.inner.clear()
+    }
 }
