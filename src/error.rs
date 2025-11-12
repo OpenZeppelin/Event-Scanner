@@ -21,6 +21,9 @@ pub enum ScannerError {
 
     #[error("Operation timed out")]
     Timeout,
+
+    #[error("Block number {0} exceeds latest block {1}")]
+    BlockExceedsLatest(u64, u64),
 }
 
 impl From<RobustProviderError> for ScannerError {

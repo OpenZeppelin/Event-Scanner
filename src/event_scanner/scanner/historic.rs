@@ -25,13 +25,11 @@ impl EventScannerBuilder<Historic> {
     /// Validates that the maximum of `from_block` and `to_block` does not exceed
     /// the latest block on the chain.
     ///
-    /// # Panics
-    ///
-    /// If to or from block > latest block
-    ///
     /// # Errors
     ///
-    /// Returns an error if the provider connection fails
+    /// Returns an error if:
+    /// - The provider connection fails
+    /// - The specified block range exceeds the latest block on the chain
     pub async fn connect<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
@@ -46,7 +44,9 @@ impl EventScannerBuilder<Historic> {
 
         let max_block = from_num.max(to_num);
 
-        assert!((max_block <= latest_block), "Invalid historical block range");
+        if max_block > latest_block {
+            return Err(ScannerError::BlockExceedsLatest(max_block, latest_block));
+        }
 
         Ok(scanner)
     }
@@ -133,34 +133,68 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "Invalid historical block range")]
-    async fn test_from_block_above_latest_panics() {
+    async fn test_from_block_above_latest_returns_error() {
         let anvil = Anvil::new().try_spawn().unwrap();
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
         let latest_block = provider.get_block_number().await.unwrap();
 
-        let _scanner = EventScannerBuilder::historic()
+        let result = EventScannerBuilder::historic()
             .from_block(latest_block + 100)
             .to_block(latest_block)
             .connect(provider)
-            .await
-            .unwrap();
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest(max, latest)) => {
+                assert_eq!(max, latest_block + 100);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error"),
+        }
     }
 
     #[tokio::test]
-    #[should_panic(expected = "Invalid historical block range")]
-    async fn test_to_block_above_latest_panics() {
+    async fn test_to_block_above_latest_returns_error() {
         let anvil = Anvil::new().try_spawn().unwrap();
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
         let latest_block = provider.get_block_number().await.unwrap();
 
-        let _scanner = EventScannerBuilder::historic()
+        let result = EventScannerBuilder::historic()
             .from_block(0)
             .to_block(latest_block + 100)
             .connect(provider)
-            .await
-            .unwrap();
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest(max, latest)) => {
+                assert_eq!(max, latest_block + 100);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_to_and_from_block_above_latest_returns_error() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let result = EventScannerBuilder::historic()
+            .to_block(latest_block + 50)
+            .to_block(latest_block + 100)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest(max, latest)) => {
+                assert_eq!(max, latest_block + 100);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error"),
+        }
     }
 }
