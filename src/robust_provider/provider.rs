@@ -13,7 +13,7 @@ use tracing::{error, info};
 
 use crate::{
     RobustSubscription,
-    robust_provider::{Error, robust_subscription::DEFAULT_RECONNECT_INTERVAL},
+    robust_provider::{Error, subscription::DEFAULT_RECONNECT_INTERVAL},
 };
 
 /// Provider wrapper with built-in retry and timeout mechanisms.

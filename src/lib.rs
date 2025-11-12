@@ -18,5 +18,5 @@ pub use event_scanner::{
 
 pub use robust_provider::{
     builder::RobustProviderBuilder, provider::RobustProvider,
-    robust_subscription::RobustSubscription, types::IntoRobustProvider,
+    provider_conversions::IntoRobustProvider, subscription::RobustSubscription,
 };
