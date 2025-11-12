@@ -484,6 +484,7 @@ mod tests {
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
             .fallback(http_provider)
             .max_timeout(Duration::from_millis(500))
+            .subscription_timeout(Duration::from_millis(500))
             .build()
             .await?;
 
