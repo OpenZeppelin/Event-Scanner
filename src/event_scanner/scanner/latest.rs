@@ -30,11 +30,16 @@ impl EventScannerBuilder<LatestEvents> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the provider connection fails.
+    /// Returns an error if:
+    /// * The provider connection fails
+    /// * The event count is zero
     pub async fn connect<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<LatestEvents, N>, ScannerError> {
+        if self.config.count == 0 {
+            return Err(ScannerError::InvalidEventCount);
+        }
         self.build(provider).await
     }
 }
@@ -76,6 +81,12 @@ impl<N: Network> EventScanner<LatestEvents, N> {
 
 #[cfg(test)]
 mod tests {
+    use alloy::{
+        network::Ethereum,
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
+
     use super::*;
 
     #[test]
@@ -123,5 +134,16 @@ mod tests {
         assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(200)));
         assert_eq!(builder.config.block_confirmations, 7);
         assert_eq!(builder.block_range_scanner.max_block_range, 60);
+    }
+
+    #[tokio::test]
+    async fn test_latest_returns_error_with_zero_count() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::latest(0).connect(provider).await;
+
+        match result {
+            Err(ScannerError::InvalidEventCount) => {}
+            _ => panic!("Expected InvalidEventCount error"),
+        }
     }
 }

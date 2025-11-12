@@ -24,6 +24,9 @@ pub enum ScannerError {
 
     #[error("Block number {0} exceeds latest block {1}")]
     BlockExceedsLatest(u64, u64),
+
+    #[error("Event count must be greater than 0")]
+    InvalidEventCount,
 }
 
 impl From<RobustProviderError> for ScannerError {

@@ -228,10 +228,6 @@ impl EventScannerBuilder<Unspecified> {
 
     /// Streams the latest `count` matching events per registered listener.
     ///
-    /// # Panics
-    ///
-    /// If `count` is zero
-    ///
     /// # Example
     ///
     /// ```no_run
@@ -302,7 +298,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Arguments
     ///
-    /// * `count` - Maximum number of recent events to collect per listener
+    /// * `count` - Maximum number of recent events to collect per listener (must be greater than 0)
     ///
     /// # Reorg behavior
     ///
@@ -326,7 +322,6 @@ impl EventScannerBuilder<Unspecified> {
     /// [reorg]: crate::ScannerStatus::ReorgDetected
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
-        assert!(count != 0, "count must be greater than 0");
         EventScannerBuilder::<LatestEvents>::new(count)
     }
 }
@@ -491,10 +486,18 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    #[should_panic(expected = "count must be greater than 0")]
-    fn test_latest_panics_with_zero_count() {
-        let _ = EventScannerBuilder::latest(0);
+    #[tokio::test]
+    async fn test_latest_returns_error_with_zero_count() {
+        use alloy::providers::{RootProvider, mock::Asserter};
+        use alloy::rpc::client::RpcClient;
+        
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::latest(0).connect(provider).await;
+        
+        match result {
+            Err(ScannerError::InvalidEventCount) => {}
+            _ => panic!("Expected InvalidEventCount error"),
+        }
     }
 
     #[test]

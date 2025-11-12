@@ -82,7 +82,7 @@ impl EventScannerBuilder<Synchronize> {
     /// # Arguments
     ///
     /// * `count` - Maximum number of recent events to collect per listener before switching to live
-    ///   streaming
+    ///   streaming (must be greater than 0)
     ///
     /// # Important notes
     ///
