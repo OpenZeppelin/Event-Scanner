@@ -4,7 +4,7 @@ use alloy::{network::Network, providers::Provider};
 
 use crate::{
     RobustProvider,
-    robust_provider::{error::Error, types::IntoProvider},
+    robust_provider::{error::Error, provider_conversion::IntoProvider},
 };
 
 // RPC retry and timeout settings

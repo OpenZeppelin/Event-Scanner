@@ -292,9 +292,9 @@ impl<N: Network> RobustProvider<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        RobustProviderBuilder,
-        robust_provider::{Error, builder::DEFAULT_SUBSCRIPTION_TIMEOUT},
+    use crate::robust_provider::{
+        Error,
+        builder::{DEFAULT_SUBSCRIPTION_TIMEOUT, RobustProviderBuilder},
     };
 
     use super::*;

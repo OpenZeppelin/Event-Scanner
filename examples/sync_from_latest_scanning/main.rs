@@ -1,6 +1,8 @@
 use alloy::{providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
-use event_scanner::{EventFilter, EventScannerBuilder, Message, RobustProviderBuilder};
+use event_scanner::{
+    EventFilter, EventScannerBuilder, Message, robust_provider::builder::RobustProviderBuilder,
+};
 
 use tokio_stream::StreamExt;
 use tracing::{error, info};
