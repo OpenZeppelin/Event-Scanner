@@ -629,7 +629,7 @@ impl<N: Network> Service<N> {
                 Err(e) => {
                     error!(error = %e, "Error receiving block from stream");
                     // Error from subscription, exit the stream
-                    _ = sender.try_stream(e);
+                    _ = sender.try_stream(e).await;
                     return;
                 }
             };
