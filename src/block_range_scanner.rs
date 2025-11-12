@@ -301,6 +301,7 @@ impl<N: Network> Service<N> {
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let latest = self.provider.get_block_number().await?;
+        let provider = self.provider.clone();
         let mut reorg_handler = self.reorg_handler.clone();
 
         // the next block returned by the underlying subscription will always be `latest + 1`,
@@ -317,6 +318,7 @@ impl<N: Network> Service<N> {
                 range_start,
                 subscription,
                 sender,
+                &provider,
                 block_confirmations,
                 max_block_range,
                 &mut reorg_handler,
@@ -334,6 +336,7 @@ impl<N: Network> Service<N> {
         sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
+        let provider = self.provider.clone();
 
         let (start_block, end_block) = tokio::try_join!(
             self.provider.get_block_by_number(start_height),
@@ -358,6 +361,7 @@ impl<N: Network> Service<N> {
                 end_block_num,
                 max_block_range,
                 &sender,
+                &provider,
                 &mut reorg_handler,
             )
             .await;
@@ -412,6 +416,7 @@ impl<N: Network> Service<N> {
                     start_block,
                     subscription,
                     sender,
+                    &provider,
                     block_confirmations,
                     max_block_range,
                     &mut reorg_handler,
@@ -432,6 +437,7 @@ impl<N: Network> Service<N> {
                     confirmed_tip,
                     max_block_range,
                     &sender,
+                    &provider,
                     &mut reorg_handler,
                 )
                 .await;
@@ -470,6 +476,7 @@ impl<N: Network> Service<N> {
                 start_block,
                 subscription,
                 sender,
+                &provider,
                 block_confirmations,
                 max_block_range,
                 &mut reorg_handler,
@@ -599,6 +606,7 @@ impl<N: Network> Service<N> {
         end: BlockNumber,
         max_block_range: u64,
         sender: &mpsc::Sender<Message>,
+        provider: &RobustProvider<N>,
         reorg_handler: &mut ReorgHandler<N>,
     ) {
         let mut batch_count = 0;
@@ -608,10 +616,17 @@ impl<N: Network> Service<N> {
         // must be <= to include the edge case when start == end (i.e. return the single block
         // range)
         while next_start_block <= end {
-            let batch_end_block_number =
-                next_start_block.saturating_add(max_block_range - 1).min(end);
+            let batch_end_num = next_start_block.saturating_add(max_block_range - 1).min(end);
+            let batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
+                Ok(block) => block.header().clone(),
+                Err(e) => {
+                    error!(batch_start = next_start_block, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                    _ = sender.try_stream(e).await;
+                    return;
+                }
+            };
 
-            if !sender.try_stream(next_start_block..=batch_end_block_number).await {
+            if !sender.try_stream(next_start_block..=batch_end_num).await {
                 break;
             }
 
@@ -620,15 +635,14 @@ impl<N: Network> Service<N> {
                 debug!(batch_count = batch_count, "Processed historical batches");
             }
 
-            let reorged_opt =
-                match reorg_handler.check_by_block_number(batch_end_block_number).await {
-                    Ok(opt) => opt,
-                    Err(e) => {
-                        error!(error = %e, "Failed to perform reorg check");
-                        _ = sender.try_stream(e).await;
-                        return;
-                    }
-                };
+            let reorged_opt = match reorg_handler.check(&batch_end).await {
+                Ok(opt) => opt,
+                Err(e) => {
+                    error!(error = %e, "Failed to perform reorg check");
+                    _ = sender.try_stream(e).await;
+                    return;
+                }
+            };
 
             next_start_block = if let Some(common_ancestor) = reorged_opt {
                 if !sender.try_stream(ScannerStatus::ReorgDetected).await {
@@ -636,7 +650,7 @@ impl<N: Network> Service<N> {
                 }
                 common_ancestor + 1
             } else {
-                batch_end_block_number.saturating_add(1)
+                batch_end_num.saturating_add(1)
             };
         }
 
@@ -647,6 +661,7 @@ impl<N: Network> Service<N> {
         stream_start: BlockNumber,
         subscription: Subscription<N::HeaderResponse>,
         sender: mpsc::Sender<Message>,
+        provider: &RobustProvider<N>,
         block_confirmations: u64,
         max_block_range: u64,
         reorg_handler: &mut ReorgHandler<N>,
@@ -673,21 +688,30 @@ impl<N: Network> Service<N> {
         let mut inner_batch_start = batch_start;
         let mut batch_end;
         loop {
-            batch_end = confirmed.min(inner_batch_start.saturating_add(max_block_range - 1));
-            if !sender.try_stream(inner_batch_start..=batch_end).await {
+            let batch_end_num =
+                confirmed.min(inner_batch_start.saturating_add(max_block_range - 1));
+            batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
+                Ok(block) => block.header().clone(),
+                Err(e) => {
+                    error!(batch_start = inner_batch_start, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                    _ = sender.try_stream(e).await;
+                    return;
+                }
+            };
+            if !sender.try_stream(inner_batch_start..=batch_end_num).await {
                 return;
             }
-            if batch_end == confirmed {
+            if batch_end_num == confirmed {
                 break;
             }
-            inner_batch_start = batch_end + 1;
+            inner_batch_start = batch_end_num + 1;
         }
 
         while let Some(incoming_block) = stream.next().await {
             let incoming_block_num = incoming_block.number();
             info!(block_number = incoming_block_num, "Received block header");
 
-            let reorged_opt = match reorg_handler.check_by_block_number(batch_end).await {
+            let reorged_opt = match reorg_handler.check(&batch_end).await {
                 Ok(opt) => opt,
                 Err(e) => {
                     error!(error = %e, "Failed to perform reorg check");
@@ -697,16 +721,14 @@ impl<N: Network> Service<N> {
             };
 
             if let Some(common_ancestor) = reorged_opt {
-                if common_ancestor < batch_start {
-                    if !sender.try_stream(ScannerStatus::ReorgDetected).await {
-                        return;
-                    }
-                    // no need to stream blocks prior to the previously specified starting block
-                    if common_ancestor < stream_start {
-                        batch_start = stream_start;
-                    } else {
-                        batch_start = common_ancestor + 1;
-                    }
+                if !sender.try_stream(ScannerStatus::ReorgDetected).await {
+                    return;
+                }
+                // no need to stream blocks prior to the previously specified starting block
+                if common_ancestor < stream_start {
+                    batch_start = stream_start;
+                } else {
+                    batch_start = common_ancestor + 1;
                 }
 
                 // TODO: explain in docs that the returned block after a reorg will be the
@@ -717,7 +739,7 @@ impl<N: Network> Service<N> {
                 // no reorg happened, move the block range start
                 //
                 // SAFETY: Overflow cannot realistically happen
-                batch_start = batch_end + 1;
+                batch_start = batch_end.number() + 1;
             }
 
             let confirmed = incoming_block_num.saturating_sub(block_confirmations);
@@ -726,15 +748,23 @@ impl<N: Network> Service<N> {
                 loop {
                     // NOTE: Edge case when difference between range end and range start >= max
                     // reads
-                    batch_end =
+                    let batch_end_num =
                         confirmed.min(inner_batch_start.saturating_add(max_block_range - 1));
-                    if !sender.try_stream(inner_batch_start..=batch_end).await {
+                    batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
+                        Ok(block) => block.header().clone(),
+                        Err(e) => {
+                            error!(batch_start = inner_batch_start, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                            _ = sender.try_stream(e).await;
+                            return;
+                        }
+                    };
+                    if !sender.try_stream(inner_batch_start..=batch_end_num).await {
                         return;
                     }
-                    if batch_end == confirmed {
+                    if batch_end_num == confirmed {
                         break;
                     }
-                    inner_batch_start = batch_end + 1;
+                    inner_batch_start = batch_end_num + 1;
                 }
             }
         }

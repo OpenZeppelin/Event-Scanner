@@ -24,19 +24,13 @@ impl<N: Network> ReorgHandler<N> {
         Self { provider, buffer: RingBuffer::new(10) }
     }
 
-    pub async fn check_by_block_number(
-        &mut self,
-        block: impl Into<BlockNumberOrTag>,
-    ) -> Result<Option<BlockNumber>, ScannerError> {
-        let block = self.provider.get_block_by_number(block.into()).await?;
-        self.check(block.header()).await
-    }
-
     pub async fn check(
         &mut self,
         block: &N::HeaderResponse,
     ) -> Result<Option<BlockNumber>, ScannerError> {
+        info!(block_hash = %block.hash(), block_number = block.number(), "Checking if block was reorged");
         if !self.reorg_detected(block).await? {
+            info!(block_hash = %block.hash(), block_number = block.number(), "No reorg detected");
             // store the incoming block's hash for future reference
             self.buffer.push(block.hash());
             return Ok(None);
