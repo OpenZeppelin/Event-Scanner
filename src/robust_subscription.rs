@@ -14,7 +14,7 @@ use tokio::{
     sync::{broadcast::error::RecvError, mpsc},
     time::timeout,
 };
-use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
 use crate::robust_provider::{Error, RobustProvider};
@@ -24,6 +24,9 @@ pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Maximum number of consecutive lags before switching providers
 const MAX_LAG_COUNT: usize = 3;
+
+/// Max amount of buffered blocks stream can hold
+pub const MAX_BUFFERED_BLOCKS: usize = 50000;
 
 /// A robust subscription wrapper that automatically handles provider failover
 /// and periodic reconnection attempts to the primary provider.
@@ -188,35 +191,35 @@ impl<N: Network> RobustSubscription<N> {
     /// and forwards items to a channel, which is then wrapped in a Stream.
     #[must_use]
     pub fn into_stream(mut self) -> RobustSubscriptionStream<N> {
-        // TODO: This shouldnt be unbounded need choose an appropriate bound (Maybe same as max
-        // buffer probably should be bigger)
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(MAX_BUFFERED_BLOCKS);
 
         tokio::spawn(async move {
             loop {
                 match self.recv().await {
                     Ok(item) => {
-                        if tx.send(Ok(item)).is_err() {
-                            // Receiver dropped, exit the loop
+                        if let Err(err) = tx.send(Ok(item)).await {
+                            warn!(error = %err, "Downstream channel closed, stopping stream");
                             break;
                         }
                     }
                     Err(e) => {
                         // Send the error and exit
-                        let _ = tx.send(Err(e));
+                        if let Err(err) = tx.send(Err(e)).await {
+                            warn!(error = %err, "Downstream channel closed, stopping stream");
+                        }
                         break;
                     }
                 }
             }
         });
 
-        RobustSubscriptionStream { inner: UnboundedReceiverStream::new(rx) }
+        RobustSubscriptionStream { inner: ReceiverStream::new(rx) }
     }
 }
 
 /// A stream wrapper around [`RobustSubscription`] that implements the [`Stream`] trait.
 pub struct RobustSubscriptionStream<N: Network> {
-    inner: UnboundedReceiverStream<Result<N::HeaderResponse, Error>>,
+    inner: ReceiverStream<Result<N::HeaderResponse, Error>>,
 }
 
 impl<N: Network> Stream for RobustSubscriptionStream<N> {
