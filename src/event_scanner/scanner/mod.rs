@@ -76,8 +76,8 @@ impl EventScannerBuilder<Unspecified> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, RobustProviderBuilder};
+    /// # use alloy::{network::Ethereum, primitives::Address, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::builder::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -103,7 +103,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, RobustProviderBuilder};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::builder::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// // Stream events between blocks [1_000_000, 2_000_000]
@@ -143,7 +143,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::builder::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -230,8 +230,8 @@ impl EventScannerBuilder<Unspecified> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::{network::Ethereum, primitives::Address, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, RobustProviderBuilder};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::builder::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -258,7 +258,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, RobustProviderBuilder};
+    /// # use event_scanner::{EventScannerBuilder, robust_provider::builder::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// // Collect the latest 5 events between blocks [1_000_000, 1_100_000]

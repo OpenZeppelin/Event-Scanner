@@ -7,11 +7,12 @@
 //!
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
-//!     RobustProviderBuilder, ScannerError,
+//!     ScannerError,
 //!     block_range_scanner::{
 //!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
 //!         DEFAULT_MAX_BLOCK_RANGE, Message,
 //!     },
+//!     robust_provider::builder::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
