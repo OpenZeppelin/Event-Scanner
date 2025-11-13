@@ -682,27 +682,29 @@ impl<N: Network> Service<N> {
         // (e.g. in case max_block_range=2, and the range is 100..=106)
 
         let mut batch_start = stream_start;
-        let mut inner_batch_start = batch_start;
-        let mut batch_end;
+        let mut batch_end: Option<<N as Network>::BlockResponse>;
         loop {
-            let batch_end_num =
-                confirmed.min(inner_batch_start.saturating_add(max_block_range - 1));
+            let batch_end_num = confirmed.min(batch_start.saturating_add(max_block_range - 1));
             batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
                 Ok(block) => Some(block),
                 Err(e) => {
-                    error!(batch_start = inner_batch_start, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                    error!(batch_start = batch_start, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
                     _ = sender.try_stream(e).await;
                     return;
                 }
             };
-            if !sender.try_stream(inner_batch_start..=batch_end_num).await {
+            if !sender.try_stream(batch_start..=batch_end_num).await {
                 return;
             }
             if batch_end_num == confirmed {
                 break;
             }
-            inner_batch_start = batch_end_num + 1;
+            batch_start = batch_end_num + 1;
         }
+
+        // reset batch start
+        let mut batch_start = stream_start;
+        // batch_end is now set
 
         while let Some(incoming_block) = stream.next().await {
             let incoming_block_num = incoming_block.number();
@@ -738,7 +740,7 @@ impl<N: Network> Service<N> {
                 // - the first post-reorg block
                 // - the previous range_start
             } else {
-                // no reorg happened, move the block range start
+                // no reorg happened, move the block range back to expected next start
                 //
                 // SAFETY: Overflow cannot realistically happen
                 if let Some(batch_end) = batch_end.as_ref() {
@@ -748,27 +750,29 @@ impl<N: Network> Service<N> {
 
             let confirmed = incoming_block_num.saturating_sub(block_confirmations);
             if confirmed >= batch_start {
-                let mut inner_batch_start = batch_start;
                 loop {
                     // NOTE: Edge case when difference between range end and range start >= max
                     // reads
                     let batch_end_num =
-                        confirmed.min(inner_batch_start.saturating_add(max_block_range - 1));
+                        confirmed.min(batch_start.saturating_add(max_block_range - 1));
                     batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
                         Ok(block) => Some(block),
                         Err(e) => {
-                            error!(batch_start = inner_batch_start, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                            error!(batch_start = batch_start, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
                             _ = sender.try_stream(e).await;
                             return;
                         }
                     };
-                    if !sender.try_stream(inner_batch_start..=batch_end_num).await {
+                    if !sender.try_stream(batch_start..=batch_end_num).await {
                         return;
                     }
+
+                    // SAFETY: Overflow cannot realistically happen
+                    batch_start = batch_end_num + 1;
+
                     if batch_end_num == confirmed {
                         break;
                     }
-                    inner_batch_start = batch_end_num + 1;
                 }
             }
         }
