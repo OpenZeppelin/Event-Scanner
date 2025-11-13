@@ -300,14 +300,14 @@ impl<N: Network> Service<N> {
         sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
-        let latest = self.provider.get_block_number().await?;
+        let confirmed = self.provider.get_latest_confirmed(block_confirmations).await?;
         let provider = self.provider.clone();
         let mut reorg_handler = self.reorg_handler.clone();
 
-        // the next block returned by the underlying subscription will always be `latest + 1`,
-        // because `latest` was already mined and subscription by definition only streams after new
-        // blocks have been mined
-        let range_start = (latest + 1).saturating_sub(block_confirmations);
+        // the next block returned by the underlying subscription will always be `confirmed + 1`,
+        // because `confirmed` was already mined and subscription by definition only streams after
+        // new blocks have been mined
+        let stream_start = confirmed + 1;
 
         let subscription = self.provider.subscribe_blocks().await?;
 
@@ -315,7 +315,7 @@ impl<N: Network> Service<N> {
 
         tokio::spawn(async move {
             Self::stream_live_blocks(
-                range_start,
+                stream_start,
                 subscription,
                 sender,
                 &provider,
@@ -439,17 +439,16 @@ impl<N: Network> Service<N> {
                 )
                 .await;
 
-                let latest = match provider.get_block_by_number(BlockNumberOrTag::Latest).await {
-                    Ok(block) => block.header().number(),
+                start_block = confirmed_tip + 1;
+
+                confirmed_tip = match provider.get_latest_confirmed(block_confirmations).await {
+                    Ok(number) => number,
                     Err(e) => {
                         error!(error = %e, "Error latest block when calculating next historical batch, shutting down");
                         _ = sender.try_stream(e).await;
                         return;
                     }
                 };
-
-                start_block = confirmed_tip + 1;
-                confirmed_tip = latest.saturating_sub(block_confirmations);
             }
 
             info!("Chain tip reached, switching to live");
