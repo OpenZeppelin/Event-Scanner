@@ -12,7 +12,7 @@
 //!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
 //!         DEFAULT_MAX_BLOCK_RANGE, Message,
 //!     },
-//!     robust_provider::builder::RobustProviderBuilder,
+//!     robust_provider::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
@@ -69,10 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerMessage,
     error::ScannerError,
-    robust_provider::{
-        Error as RobustProviderError, provider::RobustProvider,
-        provider_conversion::IntoRobustProvider,
-    },
+    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
     types::{ScannerStatus, TryStream},
 };
 use alloy::{

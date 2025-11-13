@@ -270,7 +270,7 @@ impl<N: Network> RobustProvider<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robust_provider::builder::RobustProviderBuilder;
+    use crate::robust_provider::RobustProviderBuilder;
     use alloy::{
         consensus::BlockHeader,
         providers::{ProviderBuilder, WsConnect, ext::AnvilApi},

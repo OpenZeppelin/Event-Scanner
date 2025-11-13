@@ -6,4 +6,4 @@ pub mod provider_conversion;
 pub use builder::RobustProviderBuilder;
 pub use error::Error;
 pub use provider::RobustProvider;
-pub use provider_conversion::IntoProvider;
+pub use provider_conversion::{IntoProvider, IntoRobustProvider};

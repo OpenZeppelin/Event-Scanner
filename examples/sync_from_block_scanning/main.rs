@@ -3,7 +3,7 @@ use std::time::Duration;
 use alloy::{providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 use event_scanner::{
-    EventFilter, EventScannerBuilder, Message, robust_provider::builder::RobustProviderBuilder,
+    EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder,
 };
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
