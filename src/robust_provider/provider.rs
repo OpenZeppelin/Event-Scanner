@@ -411,6 +411,8 @@ mod tests {
 
         drop(anvil_1);
 
+        sleep(Duration::from_secs(1)).await;
+
         let mut subscription = robust.subscribe_blocks().await?;
 
         ws_provider_2.anvil_mine(Some(2), None).await?;
