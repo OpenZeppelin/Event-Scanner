@@ -4,8 +4,8 @@ pub mod provider;
 pub mod provider_conversion;
 pub mod subscription;
 
-pub use builder::RobustProviderBuilder;
+pub use builder::{DEFAULT_SUBSCRIPTION_TIMEOUT, RobustProviderBuilder};
 pub use error::Error;
 pub use provider::RobustProvider;
-pub use provider_conversion::IntoProvider;
+pub use provider_conversion::{IntoProvider, IntoRobustProvider};
 pub use subscription::RobustSubscription;

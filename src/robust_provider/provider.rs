@@ -289,7 +289,7 @@ impl<N: Network> RobustProvider<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robust_provider::builder::{DEFAULT_SUBSCRIPTION_TIMEOUT, RobustProviderBuilder};
+    use crate::robust_provider::RobustProviderBuilder;
     use alloy::{
         consensus::BlockHeader,
         providers::{ProviderBuilder, WsConnect, ext::AnvilApi},
