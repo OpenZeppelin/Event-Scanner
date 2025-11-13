@@ -6,8 +6,8 @@ use crate::robust_provider::{Error, IntoProvider, RobustProvider};
 
 // RPC retry and timeout settings
 /// Default timeout used by `RobustProvider`
-pub const DEFAULT_MAX_TIMEOUT: Duration = Duration::from_secs(60);
-/// Default timeout for subscriptions (longer to accommodate slow block times)
+pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default timeout for subscriptions
 pub const DEFAULT_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default maximum number of retry attempts.
 pub const DEFAULT_MAX_RETRIES: usize = 3;
@@ -17,7 +17,7 @@ pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 #[derive(Clone)]
 pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
     providers: Vec<P>,
-    max_timeout: Duration,
+    call_timeout: Duration,
     subscription_timeout: Duration,
     max_retries: usize,
     min_delay: Duration,
@@ -32,7 +32,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     pub fn new(provider: P) -> Self {
         Self {
             providers: vec![provider],
-            max_timeout: DEFAULT_MAX_TIMEOUT,
+            call_timeout: DEFAULT_CALL_TIMEOUT,
             subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             min_delay: DEFAULT_MIN_DELAY,
@@ -59,15 +59,15 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
 
     /// Set the maximum timeout for RPC operations.
     #[must_use]
-    pub fn max_timeout(mut self, timeout: Duration) -> Self {
-        self.max_timeout = timeout;
+    pub fn call_timeout(mut self, timeout: Duration) -> Self {
+        self.call_timeout = timeout;
         self
     }
 
     /// Set the timeout for subscription operations.
     ///
-    /// This should be set higher than [`max_timeout`](Self::max_timeout) to accommodate chains with
-    /// slow block times. Default is [`DEFAULT_SUBSCRIPTION_TIMEOUT`].
+    /// This should be set higher than [`call_timeout`](Self::call_timeout) to accommodate chains
+    /// with slow block times. Default is [`DEFAULT_SUBSCRIPTION_TIMEOUT`].
     #[must_use]
     pub fn subscription_timeout(mut self, timeout: Duration) -> Self {
         self.subscription_timeout = timeout;
@@ -102,7 +102,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         }
         Ok(RobustProvider {
             providers,
-            max_timeout: self.max_timeout,
+            call_timeout: self.call_timeout,
             subscription_timeout: self.subscription_timeout,
             max_retries: self.max_retries,
             min_delay: self.min_delay,

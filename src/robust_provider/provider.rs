@@ -22,7 +22,7 @@ use crate::robust_provider::{Error, RobustSubscription, subscription::DEFAULT_RE
 #[derive(Clone, Debug)]
 pub struct RobustProvider<N: Network = Ethereum> {
     pub(crate) providers: Vec<RootProvider<N>>,
-    pub(crate) max_timeout: Duration,
+    pub(crate) call_timeout: Duration,
     pub(crate) subscription_timeout: Duration,
     pub(crate) max_retries: usize,
     pub(crate) min_delay: Duration,
@@ -174,9 +174,9 @@ impl<N: Network> RobustProvider<N> {
 
     /// Execute `operation` with exponential backoff and a total timeout.
     ///
-    /// Wraps the retry logic with `tokio::time::timeout(self.max_timeout, ...)` so
+    /// Wraps the retry logic with `tokio::time::timeout(self.call_timeout, ...)` so
     /// the entire operation (including time spent inside the RPC call) cannot exceed
-    /// `max_timeout`.
+    /// `call_timeout`.
     ///
     /// If the timeout is exceeded and fallback providers are available, it will
     /// attempt to use each fallback provider in sequence.
@@ -267,7 +267,7 @@ impl<N: Network> RobustProvider<N> {
             .with_min_delay(self.min_delay);
 
         timeout(
-            self.max_timeout,
+            self.call_timeout,
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
                 .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
@@ -302,7 +302,7 @@ mod tests {
     fn test_provider(timeout: u64, max_retries: usize, min_delay: u64) -> RobustProvider {
         RobustProvider {
             providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
-            max_timeout: Duration::from_millis(timeout),
+            call_timeout: Duration::from_millis(timeout),
             subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries,
             min_delay: Duration::from_millis(min_delay),
@@ -373,14 +373,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_retry_with_timeout_respects_max_timeout() {
-        let max_timeout = 50;
-        let provider = test_provider(max_timeout, 10, 1);
+    async fn test_retry_with_timeout_respects_call_timeout() {
+        let call_timeout = 50;
+        let provider = test_provider(call_timeout, 10, 1);
 
         let result = provider
             .try_operation_with_failover(
                 move |_provider| async move {
-                    sleep(Duration::from_millis(max_timeout + 10)).await;
+                    sleep(Duration::from_millis(call_timeout + 10)).await;
                     Ok(42)
                 },
                 false,
@@ -404,7 +404,7 @@ mod tests {
 
         let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
             .fallback(ws_provider_2.clone())
-            .max_timeout(Duration::from_secs(1))
+            .call_timeout(Duration::from_secs(1))
             .subscription_timeout(Duration::from_secs(1))
             .build()
             .await?;
@@ -430,7 +430,7 @@ mod tests {
 
         let robust = RobustProviderBuilder::new(http_provider.clone())
             .fallback(http_provider)
-            .max_timeout(Duration::from_secs(5))
+            .call_timeout(Duration::from_secs(5))
             .min_delay(Duration::from_millis(100))
             .build()
             .await?;
@@ -462,7 +462,7 @@ mod tests {
 
         let robust = RobustProviderBuilder::fragile(http_provider)
             .fallback(ws_provider)
-            .max_timeout(Duration::from_secs(5))
+            .call_timeout(Duration::from_secs(5))
             .build()
             .await?;
 
@@ -484,7 +484,7 @@ mod tests {
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
             .fallback(http_provider)
-            .max_timeout(Duration::from_millis(500))
+            .call_timeout(Duration::from_millis(500))
             .subscription_timeout(Duration::from_secs(1))
             .build()
             .await?;
