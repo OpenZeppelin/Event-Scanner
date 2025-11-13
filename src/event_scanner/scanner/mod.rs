@@ -231,7 +231,7 @@ impl EventScannerBuilder<Unspecified> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::{network::Ethereum, primitives::Address, providers::{Provider, ProviderBuilder}};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
     /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
