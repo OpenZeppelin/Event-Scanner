@@ -40,25 +40,28 @@ impl EventScannerBuilder<Historic> {
         let provider = scanner.block_range_scanner.provider();
         let latest_block = provider.get_block_number().await?;
 
-        let from_num = resolve_block_number(&scanner.config.from_block, latest_block);
-        let to_num = resolve_block_number(&scanner.config.to_block, latest_block);
+        let from_num = scanner.config.from_block.as_number().unwrap_or(0);
+        let to_num = scanner.config.to_block.as_number().unwrap_or(0);
 
-        let max_block = from_num.max(to_num);
+        let from_exceeds = from_num > latest_block;
+        let to_exceeds = to_num > latest_block;
 
-        if max_block > latest_block {
-            return Err(ScannerError::BlockExceedsLatest(max_block, latest_block));
+        match (from_exceeds, to_exceeds) {
+            (true, true) => Err(ScannerError::BlockExceedsLatest(
+                "from_block and to_block",
+                from_num.max(to_num),
+                latest_block,
+            ))?,
+            (true, false) => {
+                Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
+            }
+            (false, true) => {
+                Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
+            }
+            (false, false) => {}
         }
 
         Ok(scanner)
-    }
-}
-
-/// Helper function to resolve `BlockNumberOrTag` to u64
-fn resolve_block_number(block: &BlockNumberOrTag, latest: u64) -> u64 {
-    match block {
-        BlockNumberOrTag::Number(n) => *n,
-        BlockNumberOrTag::Earliest => 0,
-        _ => latest,
     }
 }
 
@@ -151,7 +154,7 @@ mod tests {
             .await;
 
         match result {
-            Err(ScannerError::BlockExceedsLatest(max, latest)) => {
+            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
                 assert_eq!(max, latest_block + 100);
                 assert_eq!(latest, latest_block);
             }
@@ -173,7 +176,7 @@ mod tests {
             .await;
 
         match result {
-            Err(ScannerError::BlockExceedsLatest(max, latest)) => {
+            Err(ScannerError::BlockExceedsLatest("to_block", max, latest)) => {
                 assert_eq!(max, latest_block + 100);
                 assert_eq!(latest, latest_block);
             }
@@ -189,17 +192,17 @@ mod tests {
         let latest_block = provider.get_block_number().await.unwrap();
 
         let result = EventScannerBuilder::historic()
-            .to_block(latest_block + 50)
+            .from_block(latest_block + 50)
             .to_block(latest_block + 100)
             .connect(provider)
             .await;
 
         match result {
-            Err(ScannerError::BlockExceedsLatest(max, latest)) => {
+            Err(ScannerError::BlockExceedsLatest("from_block and to_block", max, latest)) => {
                 assert_eq!(max, latest_block + 100);
                 assert_eq!(latest, latest_block);
             }
-            _ => panic!("Expected BlockExceedsLatest error"),
+            _ => panic!("Expected BlockExceedsLatest error with 'from_block and to_block'"),
         }
     }
 
