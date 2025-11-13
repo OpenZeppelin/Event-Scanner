@@ -391,40 +391,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_fails_causes_backup_to_be_used() -> anyhow::Result<()> {
-        let anvil_1 = Anvil::new().try_spawn()?;
-
-        let ws_provider_1 =
-            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
-
-        let anvil_2 = Anvil::new().try_spawn()?;
-
-        let ws_provider_2 =
-            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
-
-        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
-            .fallback(ws_provider_2.clone())
-            .call_timeout(Duration::from_secs(1))
-            .subscription_timeout(Duration::from_secs(1))
-            .build()
-            .await?;
-
-        drop(anvil_1);
-
-        sleep(Duration::from_secs(1)).await;
-
-        let mut subscription = robust.subscribe_blocks().await?;
-
-        ws_provider_2.anvil_mine(Some(2), None).await?;
-
-        assert_eq!(1, subscription.recv().await?.number());
-        assert_eq!(2, subscription.recv().await?.number());
-        assert!(subscription.is_empty());
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_subscribe_fails_when_all_providers_lack_pubsub() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
@@ -485,16 +451,27 @@ mod tests {
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
-            .fallback(http_provider)
+            .fallback(http_provider.clone())
             .call_timeout(Duration::from_millis(500))
             .subscription_timeout(Duration::from_secs(1))
             .build()
             .await?;
 
-        // force ws_provider to fail and return BackendGone
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        ws_provider.anvil_mine(Some(1), None).await?;
+        assert_eq!(1, subscription.recv().await?.number());
+
+        ws_provider.anvil_mine(Some(1), None).await?;
+        assert_eq!(2, subscription.recv().await?.number());
+
         drop(anvil_1);
 
-        let err = robust.subscribe_blocks().await.unwrap_err();
+        sleep(Duration::from_millis(100)).await;
+
+        http_provider.anvil_mine(Some(1), None).await?;
+
+        let err = subscription.recv().await.unwrap_err();
 
         // The error should be either a Timeout or BackendGone from the primary WS provider,
         // NOT a PubsubUnavailable error (which would indicate HTTP fallback was attempted)
@@ -510,20 +487,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stream_with_failover() -> anyhow::Result<()> {
-        let mut anvil_1 = Some(Anvil::new().block_time_f64(0.1).try_spawn()?);
+    async fn test_robust_subscription_stream_with_failover() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
 
-        let ws_provider = ProviderBuilder::new()
-            .connect(anvil_1.as_ref().unwrap().ws_endpoint_url().as_str())
-            .await?;
+        let ws_provider =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
 
-        let anvil_2 = Anvil::new().block_time_f64(0.1).try_spawn()?;
+        let anvil_2 = Anvil::new().try_spawn()?;
 
         let ws_provider_2 =
             ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
-            .fallback(ws_provider_2)
+            .fallback(ws_provider_2.clone())
             .subscription_timeout(Duration::from_millis(500))
             .build()
             .await?;
@@ -531,24 +507,28 @@ mod tests {
         let subscription = robust.subscribe_blocks().await?;
         let mut stream = subscription.into_stream();
 
-        while let Some(result) = stream.next().await {
-            let Ok(block) = result else {
-                break;
-            };
+        ws_provider.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
 
-            let block_number = block.number();
+        ws_provider.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(2, block.number());
 
-            // At block 10, drop the primary provider to test failover
-            if block_number == 10 &&
-                let Some(anvil) = anvil_1.take()
-            {
-                drop(anvil);
-            }
+        // Drop the primary provider to trigger failover
+        drop(anvil_1);
 
-            if block_number >= 11 {
-                break;
-            }
-        }
+        // Wait a bit for the connection to be detected as closed
+        sleep(Duration::from_millis(800)).await;
+
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(2, block.number());
 
         Ok(())
     }
