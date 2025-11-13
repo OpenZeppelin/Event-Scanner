@@ -2,7 +2,7 @@ use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
     network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
-    primitives::{BlockHash, BlockNumber},
+    primitives::BlockHash,
 };
 use tracing::{info, warn};
 
@@ -26,8 +26,9 @@ impl<N: Network> ReorgHandler<N> {
 
     pub async fn check(
         &mut self,
-        block: &N::HeaderResponse,
-    ) -> Result<Option<BlockNumber>, ScannerError> {
+        block: &N::BlockResponse,
+    ) -> Result<Option<N::BlockResponse>, ScannerError> {
+        let block = block.header();
         info!(block_hash = %block.hash(), block_number = block.number(), "Checking if block was reorged");
         if !self.reorg_detected(block).await? {
             info!(block_hash = %block.hash(), block_number = block.number(), "No reorg detected");
@@ -42,25 +43,27 @@ impl<N: Network> ReorgHandler<N> {
             info!(block_hash = %block_hash, "Checking if block exists on-chain");
             match self.provider.get_block_by_hash(block_hash).await {
                 Ok(common_ancestor) => {
-                    let common_ancestor = common_ancestor.header();
+                    let common_ancestor_header = common_ancestor.header();
 
                     let finalized =
                         self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
-                    let finalized = finalized.header();
+                    let finalized_header = finalized.header();
 
-                    let common_ancestor = if finalized.number() <= common_ancestor.number() {
-                        info!(common_ancestor = %common_ancestor.hash(), block_number = common_ancestor.number(), "Common ancestor found");
+                    let common_ancestor = if finalized_header.number() <=
+                        common_ancestor_header.number()
+                    {
+                        info!(common_ancestor = %common_ancestor_header.hash(), block_number = common_ancestor_header.number(), "Common ancestor found");
                         common_ancestor
                     } else {
                         warn!(
-                            finalized_hash = %finalized.hash(), block_number = finalized.number(), "Possible deep reorg detected, using finalized block as common ancestor"
+                            finalized_hash = %finalized_header.hash(), block_number = finalized_header.number(), "Possible deep reorg detected, using finalized block as common ancestor"
                         );
                         // all buffered blocks are finalized, so no more need to track them
                         self.buffer.clear();
                         finalized
                     };
 
-                    return Ok(Some(common_ancestor.number()));
+                    return Ok(Some(common_ancestor));
                 }
                 Err(robust_provider::Error::BlockNotFound(_)) => {
                     // block was reorged
@@ -80,7 +83,7 @@ impl<N: Network> ReorgHandler<N> {
         let header = finalized.header();
         info!(finalized_hash = %header.hash(), block_number = header.number(), "Finalized block set as common ancestor");
 
-        Ok(Some(header.number()))
+        Ok(Some(finalized))
     }
 
     async fn reorg_detected(&self, block: &N::HeaderResponse) -> Result<bool, ScannerError> {
