@@ -90,7 +90,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn reorg_depth_one() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
