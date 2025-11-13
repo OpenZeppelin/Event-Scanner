@@ -388,18 +388,15 @@ impl<N: Network> Service<N> {
             Ok(block)
         };
 
-        let get_latest_block = async || -> Result<BlockNumber, ScannerError> {
-            let block =
-                provider.get_block_by_number(BlockNumberOrTag::Latest).await?.header().number();
-            Ok(block)
+        let get_confirmed_tip = async || -> Result<BlockNumber, ScannerError> {
+            let confirmed_block = provider.get_latest_confirmed(block_confirmations).await?;
+            Ok(confirmed_block)
         };
 
         // Step 1:
-        // Fetches the starting block and end block for historical sync in parallel
-        let (mut start_block, latest_block) =
-            tokio::try_join!(get_start_block(), get_latest_block())?;
-
-        let mut confirmed_tip = latest_block.saturating_sub(block_confirmations);
+        // Fetches the starting block and confirmed tip for historical sync in parallel
+        let (mut start_block, mut confirmed_tip) =
+            tokio::try_join!(get_start_block(), get_confirmed_tip())?;
 
         // If start is beyond confirmed tip, skip historical and go straight to live
         if start_block > confirmed_tip {

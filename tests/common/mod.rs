@@ -5,6 +5,7 @@
 pub mod setup_scanner;
 pub mod test_counter;
 
+use event_scanner::robust_provider::{RobustProvider, RobustProviderBuilder};
 pub(crate) use setup_scanner::{
     LiveScannerSetup, SyncScannerSetup, setup_common, setup_historic_scanner, setup_latest_scanner,
     setup_live_scanner, setup_sync_from_latest_scanner, setup_sync_scanner,
@@ -13,7 +14,6 @@ pub(crate) use test_counter::{TestCounter, deploy_counter};
 
 use alloy::{network::Ethereum, providers::ProviderBuilder};
 use alloy_node_bindings::{Anvil, AnvilInstance};
-use event_scanner::robust_provider::{RobustProvider, RobustProviderBuilder};
 
 pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
     let mut anvil = Anvil::new();
