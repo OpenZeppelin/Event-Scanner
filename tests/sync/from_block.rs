@@ -22,10 +22,6 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    // now emit new events
-    contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
-
     // historical events
     assert_next!(
         stream,
@@ -35,6 +31,10 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
+
+    // now emit new events
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     // chain tip reached
     assert_next!(stream, ScannerStatus::SwitchingToLive);
