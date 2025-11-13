@@ -17,7 +17,7 @@ use tokio::{
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
-use crate::{RobustProvider, robust_provider::Error};
+use crate::robust_provider::{Error, RobustProvider};
 
 /// Default time interval between primary provider reconnection attempts
 pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);

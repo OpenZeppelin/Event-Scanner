@@ -59,6 +59,7 @@
 //! }
 //! ```
 
+use crate::robust_provider::subscription::RobustSubscription;
 use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     sync::{mpsc, oneshot},

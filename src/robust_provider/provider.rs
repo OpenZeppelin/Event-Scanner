@@ -12,10 +12,7 @@ use backon::{ExponentialBuilder, Retryable};
 use tokio::time::timeout;
 use tracing::{error, info};
 
-use crate::{
-    RobustSubscription,
-    robust_provider::{Error, subscription::DEFAULT_RECONNECT_INTERVAL},
-};
+use crate::robust_provider::{Error, RobustSubscription, subscription::DEFAULT_RECONNECT_INTERVAL};
 
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
