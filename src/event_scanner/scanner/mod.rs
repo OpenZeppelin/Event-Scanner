@@ -231,7 +231,7 @@ impl EventScannerBuilder<Unspecified> {
     /// # Example
     ///
     /// ```no_run
-    /// # use alloy::{network::Ethereum, primitives::Address, providers::{Provider, ProviderBuilder}};
+    /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
     /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
     /// # use tokio_stream::StreamExt;
     /// #
@@ -298,7 +298,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Arguments
     ///
-    /// * `count` - Maximum number of recent events to collect per listener
+    /// * `count` - Maximum number of recent events to collect per listener (must be greater than 0)
     ///
     /// # Reorg behavior
     ///
@@ -373,7 +373,7 @@ impl<M> EventScannerBuilder<M> {
     ///
     /// # Arguments
     ///
-    /// * `max_block_range` - Maximum number of blocks to process per batch.
+    /// * `max_block_range` - Maximum number of blocks to process per batch (must be greater than 0)
     ///
     /// # Example
     ///
@@ -388,17 +388,16 @@ impl<M> EventScannerBuilder<M> {
         self
     }
 
-    /// Connects to an existing provider.
+    /// Builds the scanner by connecting to an existing provider.
     ///
-    /// Final builder method: consumes the builder and returns the built [`EventScanner`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the provider connection fails.
-    pub async fn connect<N: Network>(
+    /// This is a shared method used internally by scanner-specific `connect()` methods.
+    async fn build<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<M, N>, ScannerError> {
+        if self.block_range_scanner.max_block_range == 0 {
+            return Err(ScannerError::InvalidMaxBlockRange);
+        }
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
@@ -458,7 +457,7 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
+        let mut scanner = EventScannerBuilder::historic().build(provider).await?;
 
         assert!(scanner.listeners.is_empty());
 
@@ -475,7 +474,7 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
+        let mut scanner = EventScannerBuilder::historic().build(provider).await?;
 
         let _ = scanner.subscribe(EventFilter::new());
 
@@ -483,5 +482,21 @@ mod tests {
         assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_latest_returns_error_with_zero_count() {
+        use alloy::{
+            providers::{RootProvider, mock::Asserter},
+            rpc::client::RpcClient,
+        };
+
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::latest(0).connect(provider).await;
+
+        match result {
+            Err(ScannerError::InvalidEventCount) => {}
+            _ => panic!("Expected InvalidEventCount error"),
+        }
     }
 }
