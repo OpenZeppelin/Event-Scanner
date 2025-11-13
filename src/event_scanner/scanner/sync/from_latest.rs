@@ -18,6 +18,7 @@ use crate::{
             common::{ConsumerMode, handle_stream},
         },
     },
+    robust_provider::IntoRobustProvider,
 };
 
 impl EventScannerBuilder<SyncFromLatestEvents> {
@@ -25,6 +26,24 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;
         self
+    }
+
+    /// Connects to an existing provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * The provider connection fails
+    /// * The event count is zero
+    /// * The max block range is zero
+    pub async fn connect<N: Network>(
+        self,
+        provider: impl IntoRobustProvider<N>,
+    ) -> Result<EventScanner<SyncFromLatestEvents, N>, ScannerError> {
+        if self.config.count == 0 {
+            return Err(ScannerError::InvalidEventCount);
+        }
+        self.build(provider).await
     }
 }
 
@@ -101,5 +120,39 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         });
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy::{
+        network::Ethereum,
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_sync_from_latest_returns_error_with_zero_count() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::sync().from_latest(0).connect(provider).await;
+
+        match result {
+            Err(ScannerError::InvalidEventCount) => {}
+            _ => panic!("Expected InvalidEventCount error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sync_from_latest_returns_error_with_zero_max_block_range() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result =
+            EventScannerBuilder::sync().from_latest(10).max_block_range(0).connect(provider).await;
+
+        match result {
+            Err(ScannerError::InvalidMaxBlockRange) => {}
+            _ => panic!("Expected InvalidMaxBlockRange error"),
+        }
     }
 }
