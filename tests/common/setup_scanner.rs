@@ -7,7 +7,7 @@ use alloy::{
 use alloy_node_bindings::AnvilInstance;
 use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
-    RobustProvider, SyncFromBlock, SyncFromLatestEvents,
+    SyncFromBlock, SyncFromLatestEvents, robust_provider::RobustProvider,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
