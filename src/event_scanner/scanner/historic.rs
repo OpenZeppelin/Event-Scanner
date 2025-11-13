@@ -43,22 +43,12 @@ impl EventScannerBuilder<Historic> {
         let from_num = scanner.config.from_block.as_number().unwrap_or(0);
         let to_num = scanner.config.to_block.as_number().unwrap_or(0);
 
-        let from_exceeds = from_num > latest_block;
-        let to_exceeds = to_num > latest_block;
+        if from_num > latest_block {
+            Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
+        }
 
-        match (from_exceeds, to_exceeds) {
-            (true, true) => Err(ScannerError::BlockExceedsLatest(
-                "from_block and to_block",
-                from_num.max(to_num),
-                latest_block,
-            ))?,
-            (true, false) => {
-                Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
-            }
-            (false, true) => {
-                Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
-            }
-            (false, false) => {}
+        if to_num > latest_block {
+            Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
         }
 
         Ok(scanner)
@@ -198,11 +188,11 @@ mod tests {
             .await;
 
         match result {
-            Err(ScannerError::BlockExceedsLatest("from_block and to_block", max, latest)) => {
-                assert_eq!(max, latest_block + 100);
+            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
+                assert_eq!(max, latest_block + 50);
                 assert_eq!(latest, latest_block);
             }
-            _ => panic!("Expected BlockExceedsLatest error with 'from_block and to_block'"),
+            _ => panic!("Expected BlockExceedsLatest error for 'from_block'"),
         }
     }
 
