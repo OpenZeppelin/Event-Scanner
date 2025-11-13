@@ -2,10 +2,7 @@ use std::{marker::PhantomData, time::Duration};
 
 use alloy::{network::Network, providers::Provider};
 
-use crate::{
-    RobustProvider,
-    robust_provider::{error::Error, provider_conversion::IntoProvider},
-};
+use crate::robust_provider::{Error, IntoProvider, RobustProvider};
 
 // RPC retry and timeout settings
 /// Default timeout used by `RobustProvider`

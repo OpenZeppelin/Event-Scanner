@@ -5,7 +5,7 @@
 pub mod setup_scanner;
 pub mod test_counter;
 
-use event_scanner::{RobustProvider, robust_provider::builder::RobustProviderBuilder};
+use event_scanner::robust_provider::{RobustProvider, RobustProviderBuilder};
 pub(crate) use setup_scanner::{
     LiveScannerSetup, SyncScannerSetup, setup_common, setup_historic_scanner, setup_latest_scanner,
     setup_live_scanner, setup_sync_from_latest_scanner, setup_sync_scanner,
