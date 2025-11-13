@@ -88,11 +88,6 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    // emit "live" events
-    for _ in 0..2 {
-        contract.increase().send().await?.watch().await?;
-    }
-
     // assert historic events are streamed in a batch
     assert_next!(
         stream,
@@ -101,6 +96,12 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(2) }
         ]
     );
+
+    // emit "live" events
+    for _ in 0..2 {
+        contract.increase().send().await?.watch().await?;
+    }
+
     // switching to "live" phase
     assert_next!(stream, ScannerStatus::SwitchingToLive);
     // assert confirmed live events are streamed separately
