@@ -36,6 +36,7 @@ pub struct RobustSubscription<N: Network> {
     robust_provider: RobustProvider<N>,
     last_reconnect_attempt: Option<Instant>,
     consecutive_lags: usize,
+    current_fallback_index: Option<usize>,
 }
 
 impl<N: Network> RobustSubscription<N> {
@@ -49,6 +50,7 @@ impl<N: Network> RobustSubscription<N> {
             robust_provider,
             last_reconnect_attempt: None,
             consecutive_lags: 0,
+            current_fallback_index: None,
         }
     }
 
@@ -64,7 +66,9 @@ impl<N: Network> RobustSubscription<N> {
     ///
     /// Returns an error if all providers have been exhausted and failed.
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
+        let subscription_timeout = self.robust_provider.subscription_timeout;
         loop {
+            // Check if we should reconnect to primary before attempting to receive
             if self.should_reconnect_to_primary() {
                 info!("Attempting to reconnect to primary provider");
                 if let Err(e) = self.try_reconnect_to_primary().await {
@@ -75,36 +79,16 @@ impl<N: Network> RobustSubscription<N> {
             }
 
             if let Some(subscription) = &mut self.subscription {
-                let subscription_timeout = self.robust_provider.subscription_timeout;
-                match timeout(subscription_timeout, subscription.recv()).await {
+                let recv_result = timeout(subscription_timeout, subscription.recv()).await;
+                match recv_result {
                     Ok(recv_result) => match recv_result {
                         Ok(header) => {
                             self.consecutive_lags = 0;
                             return Ok(header);
                         }
-                        Err(recv_error) => match recv_error {
-                            RecvError::Closed => {
-                                error!("Subscription channel closed, switching provider");
-                                let error =
-                                    RpcError::Transport(TransportErrorKind::BackendGone).into();
-                                self.switch_to_fallback(error).await?;
-                            }
-                            RecvError::Lagged(skipped) => {
-                                self.consecutive_lags += 1;
-                                warn!(
-                                    skipped = skipped,
-                                    consecutive_lags = self.consecutive_lags,
-                                    "Subscription lagged"
-                                );
-
-                                if self.consecutive_lags >= MAX_LAG_COUNT {
-                                    error!("Too many consecutive lags, switching provider");
-                                    let error =
-                                        RpcError::Transport(TransportErrorKind::BackendGone).into();
-                                    self.switch_to_fallback(error).await?;
-                                }
-                            }
-                        },
+                        Err(recv_error) => {
+                            self.process_recv_error(recv_error).await?;
+                        }
                     },
                     Err(e) => {
                         error!(
@@ -119,6 +103,32 @@ impl<N: Network> RobustSubscription<N> {
                 return Err(RpcError::Transport(TransportErrorKind::BackendGone).into());
             }
         }
+    }
+
+    /// Process subscription receive errors and handle failover
+    async fn process_recv_error(&mut self, recv_error: RecvError) -> Result<(), Error> {
+        match recv_error {
+            RecvError::Closed => {
+                error!("Subscription channel closed, switching provider");
+                let error = RpcError::Transport(TransportErrorKind::BackendGone).into();
+                self.switch_to_fallback(error).await?;
+            }
+            RecvError::Lagged(skipped) => {
+                self.consecutive_lags += 1;
+                warn!(
+                    skipped = skipped,
+                    consecutive_lags = self.consecutive_lags,
+                    "Subscription lagged"
+                );
+
+                if self.consecutive_lags >= MAX_LAG_COUNT {
+                    error!("Too many consecutive lags, switching provider");
+                    let error = RpcError::Transport(TransportErrorKind::BackendGone).into();
+                    self.switch_to_fallback(error).await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn should_reconnect_to_primary(&self) -> bool {
@@ -142,6 +152,7 @@ impl<N: Network> RobustSubscription<N> {
         match subscription {
             Ok(sub) => {
                 self.subscription = Some(sub);
+                self.current_fallback_index = None;
                 Ok(())
             }
             Err(e) => {
@@ -158,16 +169,23 @@ impl<N: Network> RobustSubscription<N> {
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
-        let subscription =
-            self.robust_provider.try_fallback_providers(&operation, true, last_error).await;
+
+        // Start searching from the next provider after the current one
+        let start_index = self.current_fallback_index.map_or(0, |idx| idx + 1);
+
+        let subscription = self
+            .robust_provider
+            .try_fallback_providers_from(&operation, true, last_error, start_index)
+            .await;
 
         match subscription {
-            Ok(sub) => {
+            Ok((sub, fallback_idx)) => {
                 self.subscription = Some(sub);
+                self.current_fallback_index = Some(fallback_idx);
                 Ok(())
             }
             Err(e) => {
-                error!(error = %e, "eth_subscribe failed");
+                error!(error = %e, "eth_subscribe failed - no fallbacks available");
                 Err(e)
             }
         }
@@ -200,7 +218,6 @@ impl<N: Network> RobustSubscription<N> {
                         }
                     }
                     Err(e) => {
-                        // Send the error and exit
                         if let Err(err) = tx.send(Err(e)).await {
                             warn!(error = %err, "Downstream channel closed, stopping stream");
                         }
