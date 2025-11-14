@@ -565,9 +565,7 @@ mod tests {
         assert_eq!(1, block.number());
 
         drop(anvil_1);
-        drop(ws_provider_1);
 
-        // Wait a bit and receive from fallback (will timeout on primary and failover)
         sleep(Duration::from_millis(800)).await;
         ws_provider_2.anvil_mine(Some(1), None).await?;
         let block = stream.next().await.unwrap()?;
@@ -590,6 +588,86 @@ mod tests {
         let block = stream.next().await.unwrap()?;
         assert_eq!(2, block.number());
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscription_cycles_through_multiple_fallbacks() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
+
+        let anvil_2 = Anvil::new().try_spawn()?;
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
+
+        let anvil_3 = Anvil::new().try_spawn()?;
+        let ws_provider_3 =
+            ProviderBuilder::new().connect(anvil_3.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
+            .fallback(ws_provider_2.clone())
+            .fallback(ws_provider_3.clone())
+            .subscription_timeout(Duration::from_millis(500))
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+
+        let mut stream = subscription.into_stream();
+
+        ws_provider_1.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        drop(anvil_1);
+
+        sleep(Duration::from_millis(600)).await;
+
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        drop(anvil_2);
+
+        sleep(Duration::from_millis(600)).await;
+
+        ws_provider_3.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscription_fails_with_no_fallbacks() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let ws_provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider.clone())
+            .subscription_timeout(Duration::from_millis(500))
+            .build()
+            .await?;
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        // Receive initial block successfully
+        ws_provider.anvil_mine(Some(1), None).await?;
+        let _block = subscription.recv().await?;
+
+        drop(anvil);
+
+        sleep(Duration::from_millis(600)).await;
+
+        let err = subscription.recv().await.unwrap_err();
+
+        match err {
+            Error::Timeout => {}
+            Error::RpcError(e) => {
+                assert!(matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)));
+            }
+            Error::BlockNotFound(_) => panic!("Unexpected error type"),
+        }
         Ok(())
     }
 }
