@@ -61,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let robust_provider = RobustProviderBuilder::new(provider)
-        .max_timeout(Duration::from_secs(30))
+        .call_timeout(Duration::from_secs(30))
         .max_retries(5)
         .min_delay(Duration::from_millis(500))
         .build()

@@ -1,10 +1,10 @@
 use std::{fmt::Debug, time::Duration};
 
 use alloy::{
+    self,
     eips::BlockNumberOrTag,
     network::{Ethereum, Network},
     providers::{Provider, RootProvider},
-    pubsub::Subscription,
     rpc::types::{Filter, Log},
     transports::{RpcError, TransportErrorKind},
 };
@@ -12,31 +12,28 @@ use backon::{ExponentialBuilder, Retryable};
 use tokio::time::timeout;
 use tracing::{error, info};
 
-use crate::robust_provider::Error;
+use crate::robust_provider::{Error, RobustSubscription};
 
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
 /// This wrapper around Alloy providers automatically handles retries,
 /// timeouts, and error logging for RPC calls.
-/// The first provider in the vector is treated as the primary provider.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RobustProvider<N: Network = Ethereum> {
-    pub(crate) providers: Vec<RootProvider<N>>,
-    pub(crate) max_timeout: Duration,
+    pub(crate) primary_provider: RootProvider<N>,
+    pub(crate) fallback_providers: Vec<RootProvider<N>>,
+    pub(crate) call_timeout: Duration,
+    pub(crate) subscription_timeout: Duration,
     pub(crate) max_retries: usize,
     pub(crate) min_delay: Duration,
+    pub(crate) reconnect_interval: Duration,
 }
 
 impl<N: Network> RobustProvider<N> {
-    /// Get a reference to the primary provider (the first provider in the list)
-    ///
-    /// # Panics
-    ///
-    /// If there are no providers set (this should never happen)
+    /// Get a reference to the primary provider
     #[must_use]
     pub fn primary(&self) -> &RootProvider<N> {
-        // Safe to unwrap because we always have at least one provider
-        self.providers.first().expect("providers vector should never be empty")
+        &self.primary_provider
     }
 
     /// Fetch a block by number with retry and timeout.
@@ -50,7 +47,7 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByNumber called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_number(number).await },
                 false,
             )
@@ -70,7 +67,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_block_number(&self) -> Result<u64, Error> {
         info!("eth_getBlockNumber called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number().await },
                 false,
             )
@@ -112,7 +109,7 @@ impl<N: Network> RobustProvider<N> {
     ) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_hash(hash).await },
                 false,
             )
@@ -132,7 +129,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_logs(filter).await },
                 false,
             )
@@ -143,30 +140,39 @@ impl<N: Network> RobustProvider<N> {
         result
     }
 
-    /// Subscribe to new block headers with retry and timeout.
+    /// Subscribe to new block headers with automatic failover and reconnection.
+    ///
+    /// Returns a `RobustSubscription` that automatically:
+    /// * Handles connection errors by switching to fallback providers
+    /// * Detects and recovers from lagged subscriptions
+    /// * Periodically attempts to reconnect to the primary provider
     ///
     /// # Errors
     ///
     /// see [retry errors](#retry-errors).
-    pub async fn subscribe_blocks(&self) -> Result<Subscription<N::HeaderResponse>, Error> {
+    pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
         info!("eth_subscribe called");
-        let result = self
-            .retry_with_total_timeout(
+        let subscription = self
+            .try_operation_with_failover(
                 move |provider| async move { provider.subscribe_blocks().await },
                 true,
             )
             .await;
-        if let Err(e) = &result {
-            error!(error = %e, "eth_subscribe failed");
+
+        match subscription {
+            Ok(sub) => Ok(RobustSubscription::new(sub, self.clone())),
+            Err(e) => {
+                error!(error = %e, "eth_subscribe failed");
+                Err(e)
+            }
         }
-        result
     }
 
     /// Execute `operation` with exponential backoff and a total timeout.
     ///
-    /// Wraps the retry logic with `tokio::time::timeout(self.max_timeout, ...)` so
+    /// Wraps the retry logic with `tokio::time::timeout(self.call_timeout, ...)` so
     /// the entire operation (including time spent inside the RPC call) cannot exceed
-    /// `max_timeout`.
+    /// `call_timeout`.
     ///
     /// If the timeout is exceeded and fallback providers are available, it will
     /// attempt to use each fallback provider in sequence.
@@ -176,13 +182,13 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     /// <a name="retry-errors"></a>
     ///
-    /// - Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
+    /// * Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
     ///   and all fallback providers failed" if the overall timeout elapses and no fallback
     ///   providers succeed.
-    /// - Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
+    /// * Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
-    /// - Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    async fn retry_with_total_timeout<T: Debug, F, Fut>(
+    /// * Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
+    pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
         require_pubsub: bool,
@@ -191,50 +197,75 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
-        let mut providers = self.providers.iter();
-        let primary = providers.next().expect("should have primary provider");
-
+        let primary = self.primary();
         let result = self.try_provider_with_timeout(primary, &operation).await;
 
         if result.is_ok() {
             return result;
         }
 
-        let mut last_error = result.unwrap_err();
+        let last_error = result.unwrap_err();
 
-        let num_providers = self.providers.len();
-        if num_providers > 1 {
+        self.try_fallback_providers(&operation, require_pubsub, last_error).await
+    }
+
+    pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
+        &self,
+        operation: F,
+        require_pubsub: bool,
+        last_error: Error,
+    ) -> Result<T, Error>
+    where
+        F: Fn(RootProvider<N>) -> Fut,
+        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
+    {
+        self.try_fallback_providers_from(operation, require_pubsub, last_error, 0)
+            .await
+            .map(|(value, _idx)| value)
+    }
+
+    pub(crate) async fn try_fallback_providers_from<T: Debug, F, Fut>(
+        &self,
+        operation: F,
+        require_pubsub: bool,
+        mut last_error: Error,
+        start_index: usize,
+    ) -> Result<(T, usize), Error>
+    where
+        F: Fn(RootProvider<N>) -> Fut,
+        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
+    {
+        let num_fallbacks = self.fallback_providers.len();
+        if num_fallbacks > 0 && start_index == 0 {
             info!("Primary provider failed, trying fallback provider(s)");
         }
 
-        // This loop starts at index 1 automatically
-        for (idx, provider) in providers.enumerate() {
-            let fallback_num = idx + 1;
+        let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
+        for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                info!("Fallback provider {} doesn't support pubsub, skipping", fallback_num);
+                info!("Fallback provider {} doesn't support pubsub, skipping", fallback_idx + 1);
                 continue;
             }
-            info!("Attempting fallback provider {}/{}", fallback_num, num_providers - 1);
+            info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
-                    info!(provider_num = fallback_num, "Fallback provider succeeded");
-                    return Ok(value);
+                    info!(provider_num = fallback_idx + 1, "Fallback provider succeeded");
+                    return Ok((value, fallback_idx));
                 }
                 Err(e) => {
-                    error!(provider_num = fallback_num, err = %e, "Fallback provider failed");
+                    error!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
                     last_error = e;
                 }
             }
         }
-
-        // Return the last error encountered
+        // All fallbacks failed / skipped, return the last error
         error!("All providers failed or timed out - returning the last providers attempt's error");
         Err(last_error)
     }
 
     /// Try executing an operation with a specific provider with retry and timeout.
-    async fn try_provider_with_timeout<T, F, Fut>(
+    pub(crate) async fn try_provider_with_timeout<T, F, Fut>(
         &self,
         provider: &RootProvider<N>,
         operation: F,
@@ -248,7 +279,7 @@ impl<N: Network> RobustProvider<N> {
             .with_min_delay(self.min_delay);
 
         timeout(
-            self.max_timeout,
+            self.call_timeout,
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
                 .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
@@ -270,7 +301,10 @@ impl<N: Network> RobustProvider<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robust_provider::RobustProviderBuilder;
+    use crate::robust_provider::{
+        RobustProviderBuilder, builder::DEFAULT_SUBSCRIPTION_TIMEOUT,
+        subscription::DEFAULT_RECONNECT_INTERVAL,
+    };
     use alloy::{
         consensus::BlockHeader,
         providers::{ProviderBuilder, WsConnect, ext::AnvilApi},
@@ -278,13 +312,17 @@ mod tests {
     use alloy_node_bindings::Anvil;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
+    use tokio_stream::StreamExt;
 
     fn test_provider(timeout: u64, max_retries: usize, min_delay: u64) -> RobustProvider {
         RobustProvider {
-            providers: vec![RootProvider::new_http("http://localhost:8545".parse().unwrap())],
-            max_timeout: Duration::from_millis(timeout),
+            primary_provider: RootProvider::new_http("http://localhost:8545".parse().unwrap()),
+            fallback_providers: vec![],
+            call_timeout: Duration::from_millis(timeout),
+            subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries,
             min_delay: Duration::from_millis(min_delay),
+            reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
         }
     }
 
@@ -295,7 +333,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     let count = call_count.load(Ordering::SeqCst);
@@ -315,7 +353,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     let count = call_count.load(Ordering::SeqCst);
@@ -338,7 +376,7 @@ mod tests {
         let call_count = AtomicUsize::new(0);
 
         let result: Result<(), Error> = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     Err(TransportErrorKind::BackendGone.into())
@@ -352,14 +390,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_retry_with_timeout_respects_max_timeout() {
-        let max_timeout = 50;
-        let provider = test_provider(max_timeout, 10, 1);
+    async fn test_retry_with_timeout_respects_call_timeout() {
+        let call_timeout = 50;
+        let provider = test_provider(call_timeout, 10, 1);
 
         let result = provider
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |_provider| async move {
-                    sleep(Duration::from_millis(max_timeout + 10)).await;
+                    sleep(Duration::from_millis(call_timeout + 10)).await;
                     Ok(42)
                 },
                 false,
@@ -370,38 +408,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Either anvil or the failover for subscription is flaky so best to ignore for now"]
-    async fn test_subscribe_fails_causes_backup_to_be_used() -> anyhow::Result<()> {
-        let anvil_1 = Anvil::new().try_spawn()?;
-
-        let ws_provider_1 =
-            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
-
-        let anvil_2 = Anvil::new().try_spawn()?;
-
-        let ws_provider_2 =
-            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
-
-        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
-            .fallback(ws_provider_2.clone())
-            .max_timeout(Duration::from_secs(1))
-            .build()
-            .await?;
-
-        drop(anvil_1);
-
-        let mut subscription = robust.subscribe_blocks().await?;
-
-        ws_provider_2.anvil_mine(Some(2), None).await?;
-
-        assert_eq!(1, subscription.recv().await?.number());
-        assert_eq!(2, subscription.recv().await?.number());
-        assert!(subscription.is_empty());
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_subscribe_fails_when_all_providers_lack_pubsub() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
 
@@ -409,7 +415,7 @@ mod tests {
 
         let robust = RobustProviderBuilder::new(http_provider.clone())
             .fallback(http_provider)
-            .max_timeout(Duration::from_secs(5))
+            .call_timeout(Duration::from_secs(5))
             .min_delay(Duration::from_millis(100))
             .build()
             .await?;
@@ -441,7 +447,7 @@ mod tests {
 
         let robust = RobustProviderBuilder::fragile(http_provider)
             .fallback(ws_provider)
-            .max_timeout(Duration::from_secs(5))
+            .call_timeout(Duration::from_secs(5))
             .build()
             .await?;
 
@@ -462,15 +468,26 @@ mod tests {
         let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
-            .fallback(http_provider)
-            .max_timeout(Duration::from_millis(500))
+            .fallback(http_provider.clone())
+            .call_timeout(Duration::from_millis(500))
+            .subscription_timeout(Duration::from_secs(1))
             .build()
             .await?;
 
-        // force ws_provider to fail and return BackendGone
-        drop(anvil_1);
+        let mut subscription = robust.subscribe_blocks().await?;
 
-        let err = robust.subscribe_blocks().await.unwrap_err();
+        ws_provider.anvil_mine(Some(1), None).await?;
+        assert_eq!(1, subscription.recv().await?.number());
+
+        ws_provider.anvil_mine(Some(1), None).await?;
+        assert_eq!(2, subscription.recv().await?.number());
+
+        // simulate ws stream gone via no blocks mined > sub timeout
+        sleep(Duration::from_millis(600)).await;
+
+        http_provider.anvil_mine(Some(1), None).await?;
+
+        let err = subscription.recv().await.unwrap_err();
 
         // The error should be either a Timeout or BackendGone from the primary WS provider,
         // NOT a PubsubUnavailable error (which would indicate HTTP fallback was attempted)
@@ -482,6 +499,174 @@ mod tests {
             Error::BlockNotFound(id) => panic!("Unexpected error type: BlockNotFound({id})"),
         }
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_robust_subscription_stream_with_failover() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
+
+        let ws_provider =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
+
+        let anvil_2 = Anvil::new().try_spawn()?;
+
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider.clone())
+            .fallback(ws_provider_2.clone())
+            .subscription_timeout(Duration::from_millis(500))
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+        let mut stream = subscription.into_stream();
+
+        ws_provider.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        ws_provider.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(2, block.number());
+
+        // simulate ws stream gone via no blocks mined > sub timeout
+        sleep(Duration::from_millis(600)).await;
+
+        // Now mine blocks on fallback - the subscription should be connected to fallback now
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(2, block.number());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscription_reconnects_to_primary() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
+
+        let anvil_2 = Anvil::new().try_spawn()?;
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
+            .fallback(ws_provider_2.clone())
+            .subscription_timeout(Duration::from_millis(500))
+            .reconnect_interval(Duration::from_secs(2))
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+        let mut stream = subscription.into_stream();
+
+        // Verify primary works
+        ws_provider_1.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        sleep(Duration::from_millis(600)).await;
+
+        // Verify fallback works
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        for _ in 0..30 {
+            ws_provider_2.anvil_mine(Some(10), None).await?;
+            let _ = stream.next().await.unwrap()?;
+            sleep(Duration::from_millis(100)).await;
+            // Mine on primary - should reconnect and receive from primary
+            ws_provider_1.anvil_mine(Some(1), None).await?;
+        }
+
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(31 + 1, block.number());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscription_cycles_through_multiple_fallbacks() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
+
+        let anvil_2 = Anvil::new().try_spawn()?;
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
+
+        let anvil_3 = Anvil::new().try_spawn()?;
+        let ws_provider_3 =
+            ProviderBuilder::new().connect(anvil_3.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
+            .fallback(ws_provider_2.clone())
+            .fallback(ws_provider_3.clone())
+            .subscription_timeout(Duration::from_millis(500))
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+
+        let mut stream = subscription.into_stream();
+
+        ws_provider_1.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        // simulate ws stream gone via no blocks mined > sub timeout
+        sleep(Duration::from_millis(600)).await;
+
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        // simulate ws stream gone via no blocks mined > sub timeout
+        sleep(Duration::from_millis(600)).await;
+
+        ws_provider_3.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscription_fails_with_no_fallbacks() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let ws_provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider.clone())
+            .subscription_timeout(Duration::from_millis(500))
+            .build()
+            .await?;
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        // simulate ws stream gone via no blocks mined > sub timeout
+        ws_provider.anvil_mine(Some(1), None).await?;
+        let _block = subscription.recv().await?;
+
+        // simulate ws stream gone via no blocks mined > sub timeout
+        sleep(Duration::from_millis(600)).await;
+
+        let err = subscription.recv().await.unwrap_err();
+
+        match err {
+            Error::Timeout => {}
+            Error::RpcError(e) => {
+                assert!(matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)));
+            }
+            Error::BlockNotFound(_) => panic!("Unexpected error type"),
+        }
         Ok(())
     }
 }

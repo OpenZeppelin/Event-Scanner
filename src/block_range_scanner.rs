@@ -59,6 +59,7 @@
 //! }
 //! ```
 
+use crate::robust_provider::subscription::RobustSubscription;
 use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -77,7 +78,6 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
-    pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
 use tracing::{debug, error, info, warn};
@@ -609,16 +609,29 @@ impl<N: Network> Service<N> {
 
     async fn stream_live_blocks(
         mut range_start: BlockNumber,
-        subscription: Subscription<N::HeaderResponse>,
+        subscription: RobustSubscription<N>,
         sender: mpsc::Sender<Message>,
         block_confirmations: u64,
         max_block_range: u64,
     ) {
         // ensure we start streaming only after the expected_next_block cutoff
         let cutoff = range_start;
-        let mut stream = subscription.into_stream().skip_while(|header| header.number() < cutoff);
+        let mut stream = subscription.into_stream().skip_while(|result| match result {
+            Ok(header) => header.number() < cutoff,
+            Err(_) => false,
+        });
 
-        while let Some(incoming_block) = stream.next().await {
+        while let Some(result) = stream.next().await {
+            let incoming_block = match result {
+                Ok(block) => block,
+                Err(e) => {
+                    error!(error = %e, "Error receiving block from stream");
+                    // Error from subscription, exit the stream
+                    _ = sender.try_stream(e).await;
+                    return;
+                }
+            };
+
             let incoming_block_num = incoming_block.number();
             info!(block_number = incoming_block_num, "Received block header");
 
