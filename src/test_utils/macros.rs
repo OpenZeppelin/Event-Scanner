@@ -13,7 +13,7 @@ macro_rules! assert_next {
         if let Some(msg) = message {
             assert_eq!(msg, $expected)
         } else {
-            panic!("Expected {:?}, got: {message:?}", $expected)
+            panic!("Expected {:?}, but channel is closed", $expected)
         }
     };
 }
