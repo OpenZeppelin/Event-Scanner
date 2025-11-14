@@ -18,7 +18,8 @@ pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
-    providers: Vec<P>,
+    primary_provider: P,
+    fallback_providers: Vec<P>,
     call_timeout: Duration,
     subscription_timeout: Duration,
     max_retries: usize,
@@ -34,7 +35,8 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     #[must_use]
     pub fn new(provider: P) -> Self {
         Self {
-            providers: vec![provider],
+            primary_provider: provider,
+            fallback_providers: vec![],
             call_timeout: DEFAULT_CALL_TIMEOUT,
             subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
@@ -57,7 +59,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     /// Fallback providers are used when the primary provider times out or fails.
     #[must_use]
     pub fn fallback(mut self, provider: P) -> Self {
-        self.providers.push(provider);
+        self.fallback_providers.push(provider);
         self
     }
 
@@ -111,12 +113,16 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     ///
     /// Returns an error if any of the providers fail to connect.
     pub async fn build(self) -> Result<RobustProvider<N>, Error> {
-        let mut providers = vec![];
-        for p in self.providers {
-            providers.push(p.into_provider().await?.root().to_owned());
+        let primary_provider = self.primary_provider.into_provider().await?.root().to_owned();
+
+        let mut fallback_providers = vec![];
+        for p in self.fallback_providers {
+            fallback_providers.push(p.into_provider().await?.root().to_owned());
         }
+
         Ok(RobustProvider {
-            providers,
+            primary_provider,
+            fallback_providers,
             call_timeout: self.call_timeout,
             subscription_timeout: self.subscription_timeout,
             max_retries: self.max_retries,
