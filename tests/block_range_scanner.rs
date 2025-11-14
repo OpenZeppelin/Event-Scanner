@@ -107,7 +107,7 @@ async fn stream_from_starts_at_latest_once_it_has_enough_confirmations() -> anyh
     let mut stream = assert_empty!(stream);
 
     provider.anvil_mine(Some(1), None).await?;
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerStatus::StartingLiveStream);
     assert_next!(stream, 20..=20);
     let mut stream = assert_empty!(stream);
 

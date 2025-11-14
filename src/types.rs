@@ -14,7 +14,7 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
 
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub enum ScannerStatus {
-    SwitchingToLive,
+    StartingLiveStream,
     ReorgDetected,
 }
 

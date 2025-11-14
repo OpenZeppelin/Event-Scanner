@@ -37,7 +37,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
 
     // chain tip reached
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerStatus::StartingLiveStream);
 
     // live events
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
@@ -68,7 +68,7 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     // Act: emit an event that will be mined in block == future_start
     contract.increase().send().await?.watch().await?;
 
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerStatus::StartingLiveStream);
     // Assert: the first streamed message arrives and contains the expected event
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
     assert_empty!(stream);
@@ -104,7 +104,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     }
 
     // switching to "live" phase
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerStatus::StartingLiveStream);
     // assert confirmed live events are streamed separately
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);

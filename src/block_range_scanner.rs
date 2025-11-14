@@ -675,7 +675,7 @@ impl<N: Network> Service<N> {
         };
 
         if notify {
-            if !sender.try_stream(ScannerStatus::SwitchingToLive).await {
+            if !sender.try_stream(ScannerStatus::StartingLiveStream).await {
                 return;
             }
         }
