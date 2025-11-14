@@ -34,7 +34,6 @@ pub const MAX_BUFFERED_BLOCKS: usize = 50000;
 pub struct RobustSubscription<N: Network> {
     subscription: Option<Subscription<N::HeaderResponse>>,
     robust_provider: RobustProvider<N>,
-    reconnect_interval: Duration,
     last_reconnect_attempt: Option<Instant>,
     consecutive_lags: usize,
 }
@@ -44,12 +43,10 @@ impl<N: Network> RobustSubscription<N> {
     pub(crate) fn new(
         subscription: Subscription<N::HeaderResponse>,
         robust_provider: RobustProvider<N>,
-        reconnect_interval: Duration,
     ) -> Self {
         Self {
             subscription: Some(subscription),
             robust_provider,
-            reconnect_interval,
             last_reconnect_attempt: None,
             consecutive_lags: 0,
         }
@@ -128,7 +125,7 @@ impl<N: Network> RobustSubscription<N> {
         // Only attempt reconnection if enough time has passed since last attempt
         match self.last_reconnect_attempt {
             None => false,
-            Some(last_attempt) => last_attempt.elapsed() >= self.reconnect_interval,
+            Some(last_attempt) => last_attempt.elapsed() >= self.robust_provider.reconnect_interval,
         }
     }
 

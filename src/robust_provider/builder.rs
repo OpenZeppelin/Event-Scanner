@@ -2,7 +2,9 @@ use std::{marker::PhantomData, time::Duration};
 
 use alloy::{network::Network, providers::Provider};
 
-use crate::robust_provider::{Error, IntoProvider, RobustProvider};
+use crate::robust_provider::{
+    Error, IntoProvider, RobustProvider, subscription::DEFAULT_RECONNECT_INTERVAL,
+};
 
 // RPC retry and timeout settings
 /// Default timeout used by `RobustProvider`
@@ -21,6 +23,7 @@ pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
     subscription_timeout: Duration,
     max_retries: usize,
     min_delay: Duration,
+    reconnect_interval: Duration,
     _network: PhantomData<N>,
 }
 
@@ -36,6 +39,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
             subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries: DEFAULT_MAX_RETRIES,
             min_delay: DEFAULT_MIN_DELAY,
+            reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
             _network: PhantomData,
         }
     }
@@ -88,6 +92,17 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         self
     }
 
+    /// Set the interval for attempting to reconnect to the primary provider.
+    ///
+    /// After a failover to a fallback provider, the subscription will periodically
+    /// attempt to reconnect to the primary provider at this interval.
+    /// Default is [`DEFAULT_RECONNECT_INTERVAL`].
+    #[must_use]
+    pub fn reconnect_interval(mut self, reconnect_interval: Duration) -> Self {
+        self.reconnect_interval = reconnect_interval;
+        self
+    }
+
     /// Build the `RobustProvider`.
     ///
     /// Final builder method: consumes the builder and returns the built [`RobustProvider`].
@@ -106,6 +121,7 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
             subscription_timeout: self.subscription_timeout,
             max_retries: self.max_retries,
             min_delay: self.min_delay,
+            reconnect_interval: self.reconnect_interval,
         })
     }
 }

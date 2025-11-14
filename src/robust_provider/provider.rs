@@ -12,7 +12,7 @@ use backon::{ExponentialBuilder, Retryable};
 use tokio::time::timeout;
 use tracing::{error, info};
 
-use crate::robust_provider::{Error, RobustSubscription, subscription::DEFAULT_RECONNECT_INTERVAL};
+use crate::robust_provider::{Error, RobustSubscription};
 
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
@@ -26,6 +26,7 @@ pub struct RobustProvider<N: Network = Ethereum> {
     pub(crate) subscription_timeout: Duration,
     pub(crate) max_retries: usize,
     pub(crate) min_delay: Duration,
+    pub(crate) reconnect_interval: Duration,
 }
 
 impl<N: Network> RobustProvider<N> {
@@ -164,7 +165,7 @@ impl<N: Network> RobustProvider<N> {
             .await;
 
         match subscription {
-            Ok(sub) => Ok(RobustSubscription::new(sub, self.clone(), DEFAULT_RECONNECT_INTERVAL)),
+            Ok(sub) => Ok(RobustSubscription::new(sub, self.clone())),
             Err(e) => {
                 error!(error = %e, "eth_subscribe failed");
                 Err(e)
@@ -289,7 +290,10 @@ impl<N: Network> RobustProvider<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robust_provider::{RobustProviderBuilder, builder::DEFAULT_SUBSCRIPTION_TIMEOUT};
+    use crate::robust_provider::{
+        RobustProviderBuilder, builder::DEFAULT_SUBSCRIPTION_TIMEOUT,
+        subscription::DEFAULT_RECONNECT_INTERVAL,
+    };
     use alloy::{
         consensus::BlockHeader,
         providers::{ProviderBuilder, WsConnect, ext::AnvilApi},
@@ -306,6 +310,7 @@ mod tests {
             subscription_timeout: DEFAULT_SUBSCRIPTION_TIMEOUT,
             max_retries,
             min_delay: Duration::from_millis(min_delay),
+            reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
         }
     }
 
@@ -518,7 +523,6 @@ mod tests {
         // Drop the primary provider to trigger failover
         drop(anvil_1);
 
-        // Wait a bit for the connection to be detected as closed
         sleep(Duration::from_millis(800)).await;
 
         ws_provider_2.anvil_mine(Some(1), None).await?;
@@ -527,6 +531,62 @@ mod tests {
         assert_eq!(1, block.number());
 
         ws_provider_2.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(2, block.number());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscription_reconnects_to_primary() -> anyhow::Result<()> {
+        let anvil_1 = Anvil::new().try_spawn()?;
+        let anvil_1_port = anvil_1.port();
+
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
+
+        let anvil_2 = Anvil::new().try_spawn()?;
+        let ws_provider_2 =
+            ProviderBuilder::new().connect(anvil_2.ws_endpoint_url().as_str()).await?;
+
+        let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
+            .fallback(ws_provider_2.clone())
+            .subscription_timeout(Duration::from_millis(500))
+            .reconnect_interval(Duration::from_secs(2))
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+
+        let mut stream = subscription.into_stream();
+
+        ws_provider_1.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        drop(anvil_1);
+        drop(ws_provider_1);
+
+        // Wait a bit and receive from fallback (will timeout on primary and failover)
+        sleep(Duration::from_millis(800)).await;
+        ws_provider_2.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        // Spawn new anvil on the same port as primary (simulating primary coming back)
+        let anvil_3 = Anvil::new().port(anvil_1_port).try_spawn()?;
+
+        let ws_provider_1 =
+            ProviderBuilder::new().connect(anvil_3.ws_endpoint_url().as_str()).await?;
+
+        // Wait for reconnect interval to elapse (2 seconds) plus buffer
+        sleep(Duration::from_millis(2200)).await;
+
+        ws_provider_1.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(1, block.number());
+
+        ws_provider_1.anvil_mine(Some(1), None).await?;
         let block = stream.next().await.unwrap()?;
         assert_eq!(2, block.number());
 
