@@ -64,7 +64,7 @@ async fn latest_scanner_fewer_available_than_count_returns_all() -> anyhow::Resu
 }
 
 #[tokio::test]
-async fn latest_scanner_no_events_returns_empty() -> anyhow::Result<()> {
+async fn latest_scanner_no_past_events_returns_empty() -> anyhow::Result<()> {
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let scanner = setup.scanner;
@@ -72,9 +72,6 @@ async fn latest_scanner_no_events_returns_empty() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    let expected: &[TestCounter::CountIncreased] = &[];
-
-    assert_next!(stream, expected);
     assert_closed!(stream);
 
     Ok(())
@@ -218,7 +215,7 @@ async fn latest_scanner_different_filters_receive_different_results() -> anyhow:
 #[tokio::test]
 async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()> {
     let count = 2;
-    let setup = setup_latest_scanner(None, None, count, None, None).await?;
+    let setup = setup_latest_scanner(Some(0.1), None, count, None, None).await?;
     let contract = setup.contract;
     let mut scanner = setup.scanner;
     let mut stream_inc = setup.stream; // CountIncreased by default
@@ -229,17 +226,11 @@ async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> any
         .event(TestCounter::CountDecreased::SIGNATURE);
     let mut stream_dec = scanner.subscribe(filter_dec);
 
-    // Sequence: inc(1), inc(2), dec(1), inc(2), dec(1)
-    // inc -> 1
-    contract.increase().send().await?.watch().await?;
-    // inc -> 2
-    contract.increase().send().await?.watch().await?;
-    // dec -> 1
-    contract.decrease().send().await?.watch().await?;
-    // inc -> 2
-    contract.increase().send().await?.watch().await?;
-    // dec -> 1
-    contract.decrease().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?; // inc(1)
+    contract.increase().send().await?.watch().await?; // inc(2)
+    contract.decrease().send().await?.watch().await?; // dec(1)
+    contract.increase().send().await?.watch().await?; // inc(2)
+    contract.decrease().send().await?.watch().await?; // dec(1)
 
     scanner.start().await?;
 

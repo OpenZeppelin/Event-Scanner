@@ -322,6 +322,7 @@ impl<N: Network> Service<N> {
                 block_confirmations,
                 max_block_range,
                 &mut reorg_handler,
+                false,
             )
             .await;
         });
@@ -403,10 +404,11 @@ impl<N: Network> Service<N> {
             info!(
                 start_block = start_block,
                 confirmed_tip = confirmed_tip,
-                "Start block is beyond confirmed tip, starting live stream"
+                "Start block is at or beyond confirmed tip, starting live stream"
             );
 
-            let subscription = self.provider.subscribe_blocks().await?;
+            let subscription: Subscription<<N as Network>::HeaderResponse> =
+                self.provider.subscribe_blocks().await?;
 
             tokio::spawn(async move {
                 Self::stream_live_blocks(
@@ -417,6 +419,7 @@ impl<N: Network> Service<N> {
                     block_confirmations,
                     max_block_range,
                     &mut reorg_handler,
+                    true,
                 )
                 .await;
             });
@@ -463,10 +466,6 @@ impl<N: Network> Service<N> {
                 }
             };
 
-            if !sender.try_stream(ScannerStatus::SwitchingToLive).await {
-                return;
-            }
-
             info!("Successfully transitioned from historical to live data");
 
             Self::stream_live_blocks(
@@ -477,6 +476,7 @@ impl<N: Network> Service<N> {
                 block_confirmations,
                 max_block_range,
                 &mut reorg_handler,
+                true,
             )
             .await;
         });
@@ -662,9 +662,9 @@ impl<N: Network> Service<N> {
         block_confirmations: u64,
         max_block_range: u64,
         reorg_handler: &mut ReorgHandler<N>,
+        notify: bool,
     ) {
         // ensure we start streaming only after the specified starting block
-
         let mut stream = subscription.into_stream().skip_while(|header| {
             header.number().saturating_sub(block_confirmations) < stream_start
         });
@@ -674,15 +674,20 @@ impl<N: Network> Service<N> {
             return;
         };
 
+        if notify {
+            if !sender.try_stream(ScannerStatus::SwitchingToLive).await {
+                return;
+            }
+        }
+
         let incoming_block_num = incoming_block.number();
         info!(block_number = incoming_block_num, "Received block header");
 
         let confirmed = incoming_block_num.saturating_sub(block_confirmations);
-        // TODO: stream `batch_start..=batch_end` in batches of `max_block_range`
-        // (e.g. in case max_block_range=2, and the range is 100..=106)
 
         let mut batch_start = stream_start;
         let mut batch_end: Option<<N as Network>::BlockResponse>;
+        // TODO: include reorg handling here, maybe rely on historic handling fn
         loop {
             let batch_end_num = confirmed.min(batch_start.saturating_add(max_block_range - 1));
             batch_end = match provider.get_block_by_number(batch_end_num.into()).await {

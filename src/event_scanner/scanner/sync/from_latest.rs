@@ -4,13 +4,10 @@ use alloy::{
     network::{BlockResponse, Network},
 };
 
-use tokio::sync::mpsc;
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{
-    EventScannerBuilder, ScannerError, ScannerStatus,
-    block_range_scanner::Message as BlockRangeMessage,
+    EventScannerBuilder, ScannerError,
     event_scanner::{
         EventScanner,
         scanner::{
@@ -19,6 +16,7 @@ use crate::{
         },
     },
     robust_provider::IntoRobustProvider,
+    types::TryStream,
 };
 
 impl EventScannerBuilder<SyncFromLatestEvents> {
@@ -80,11 +78,6 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
 
         // Setup rewind and live streams to run in parallel.
         let rewind_stream = client.rewind(BlockNumberOrTag::Earliest, latest_block).await?;
-        // We actually rely on the sync mode for the live stream, to
-        // ensure that we don't miss any events in case a new block was minted while
-        // we were setting up the streams or a reorg happens.
-        let sync_stream =
-            client.stream_from(latest_block + 1, self.config.block_confirmations).await?;
 
         // Start streaming...
         tokio::spawn(async move {
@@ -100,20 +93,20 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             )
             .await;
 
-            // Notify the client that we're now streaming live.
-            info!("Switching to live stream");
-
-            // Use a one-off channel for the notification.
-            let (tx, rx) = mpsc::channel::<BlockRangeMessage>(1);
-            let stream = ReceiverStream::new(rx);
-            tx.send(BlockRangeMessage::Status(ScannerStatus::SwitchingToLive))
-                .await
-                .expect("receiver exists");
-
-            // close the channel to stop the stream
-            drop(tx);
-
-            let sync_stream = stream.chain(sync_stream);
+            // We actually rely on the sync mode for the live stream, as more blocks could have been
+            // minted while the scanner was collecting the latest `count` events.
+            // Note: Sync mode will notify the client when it switches to live streaming.
+            let sync_stream =
+                match client.stream_from(latest_block + 1, self.config.block_confirmations).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!(error = %e, "Error during sync mode setup");
+                        for listener in listeners {
+                            _ = listener.sender.try_stream(e.clone()).await;
+                        }
+                        return;
+                    }
+                };
 
             // Start the live (sync) stream.
             handle_stream(sync_stream, &provider, &listeners, ConsumerMode::Stream).await;

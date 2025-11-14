@@ -91,7 +91,7 @@ async fn live_with_block_confirmations_always_emits_genesis_block() -> anyhow::R
 }
 
 #[tokio::test]
-async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> {
+async fn stream_from_starts_at_latest_once_it_has_enough_confirmations() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
@@ -107,6 +107,7 @@ async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> 
     let mut stream = assert_empty!(stream);
 
     provider.anvil_mine(Some(1), None).await?;
+    assert_next!(stream, ScannerStatus::SwitchingToLive);
     assert_next!(stream, 20..=20);
     let mut stream = assert_empty!(stream);
 

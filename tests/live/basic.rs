@@ -7,10 +7,10 @@ use std::{
 };
 
 use crate::common::{TestCounter, deploy_counter, setup_live_scanner};
-use alloy::sol_types::SolEvent;
-use event_scanner::{EventFilter, Message};
+use alloy::{primitives::U256, sol_types::SolEvent};
+use event_scanner::{EventFilter, Message, assert_empty, assert_next};
 use tokio::time::timeout;
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn basic_single_event_scanning() -> anyhow::Result<()> {
@@ -73,60 +73,29 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let b_filter = EventFilter::new()
         .contract_address(*b.address())
         .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
-    let expected_events_a = 3;
-    let expected_events_b = 2;
 
     let mut scanner = setup.scanner;
 
-    let a_stream = scanner.subscribe(a_filter);
-    let b_stream = scanner.subscribe(b_filter);
+    let mut a_stream = scanner.subscribe(a_filter);
+    let mut b_stream = scanner.subscribe(b_filter);
 
     scanner.start().await?;
 
-    for _ in 0..expected_events_a {
-        a.increase().send().await?.watch().await?;
-    }
+    a.increase().send().await?.watch().await?;
+    a.increase().send().await?.watch().await?;
+    a.increase().send().await?.watch().await?;
 
-    for _ in 0..expected_events_b {
-        b.increase().send().await?.watch().await?;
-    }
+    b.increase().send().await?.watch().await?;
+    b.increase().send().await?.watch().await?;
 
-    let make_assertion = async |stream: ReceiverStream<Message>, expected_events| {
-        let mut stream = stream.take(expected_events);
+    assert_next!(a_stream, &[TestCounter::CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(a_stream, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
+    assert_next!(a_stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
+    assert_empty!(a_stream);
 
-        let count = Arc::new(AtomicUsize::new(0));
-        let count_clone = Arc::clone(&count);
-
-        let event_counting = async move {
-            let mut expected_new_count = 1;
-            while let Some(message) = stream.next().await {
-                match message {
-                    Message::Data(logs) => {
-                        count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-
-                        for log in logs {
-                            let TestCounter::CountIncreased { newCount } =
-                                log.log_decode().unwrap().inner.data;
-                            assert_eq!(newCount, expected_new_count);
-                            expected_new_count += 1;
-                        }
-                    }
-                    Message::Error(e) => {
-                        panic!("panicked with error: {e}");
-                    }
-                    Message::Status(_) => {
-                        // Handle info if needed
-                    }
-                }
-            }
-        };
-
-        _ = timeout(Duration::from_secs(1), event_counting).await;
-        assert_eq!(count.load(Ordering::SeqCst), expected_events);
-    };
-
-    make_assertion(a_stream, expected_events_a).await;
-    make_assertion(b_stream, expected_events_b).await;
+    assert_next!(b_stream, &[TestCounter::CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(b_stream, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
+    assert_empty!(b_stream);
 
     Ok(())
 }
@@ -144,60 +113,26 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         .contract_address(contract_address)
         .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
 
-    let expected_incr_events = 6;
-    let expected_decr_events = 2;
-
     let mut scanner = setup.scanner;
 
-    let mut incr_stream = scanner.subscribe(increase_filter).take(expected_incr_events);
-    let mut decr_stream = scanner.subscribe(decrease_filter).take(expected_decr_events);
+    let mut incr_stream = scanner.subscribe(increase_filter);
+    let mut decr_stream = scanner.subscribe(decrease_filter);
 
     scanner.start().await?;
 
-    for _ in 0..expected_incr_events {
-        contract.increase().send().await?.watch().await?;
-    }
+    contract.increase().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?;
 
     contract.decrease().send().await?.watch().await?;
     contract.decrease().send().await?.watch().await?;
 
-    let incr_count = Arc::new(AtomicUsize::new(0));
-    let decr_count = Arc::new(AtomicUsize::new(0));
-    let incr_count_clone = Arc::clone(&incr_count);
-    let decr_count_clone = Arc::clone(&decr_count);
+    assert_next!(incr_stream, &[TestCounter::CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(incr_stream, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
+    assert_empty!(incr_stream);
 
-    let event_counting = async move {
-        let mut expected_new_count = 0;
-
-        // process CountIncreased
-        while let Some(Message::Data(logs)) = incr_stream.next().await {
-            incr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-
-            for log in logs {
-                expected_new_count += 1;
-                let TestCounter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
-                assert_eq!(newCount, expected_new_count);
-            }
-        }
-
-        expected_new_count -= 1;
-
-        // process CountDecreased
-        while let Some(Message::Data(logs)) = decr_stream.next().await {
-            decr_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-
-            for log in logs {
-                let TestCounter::CountDecreased { newCount } = log.log_decode().unwrap().inner.data;
-                assert_eq!(newCount, expected_new_count);
-                expected_new_count -= 1;
-            }
-        }
-    };
-
-    _ = timeout(Duration::from_secs(2), event_counting).await;
-
-    assert_eq!(incr_count.load(Ordering::SeqCst), expected_incr_events);
-    assert_eq!(decr_count.load(Ordering::SeqCst), expected_decr_events);
+    assert_next!(decr_stream, &[TestCounter::CountDecreased { newCount: U256::from(1) }]);
+    assert_next!(decr_stream, &[TestCounter::CountDecreased { newCount: U256::from(0) }]);
+    assert_empty!(decr_stream);
 
     Ok(())
 }
