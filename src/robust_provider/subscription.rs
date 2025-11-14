@@ -68,15 +68,7 @@ impl<N: Network> RobustSubscription<N> {
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         let subscription_timeout = self.robust_provider.subscription_timeout;
         loop {
-            // Check if we should reconnect to primary before attempting to receive
-            if self.should_reconnect_to_primary() {
-                info!("Attempting to reconnect to primary provider");
-                if let Err(e) = self.try_reconnect_to_primary().await {
-                    warn!(error = %e, "Failed to reconnect to primary provider");
-                } else {
-                    info!("Successfully reconnected to primary provider");
-                }
-            }
+            self.try_reconnect_to_primary().await;
 
             if let Some(subscription) = &mut self.subscription {
                 let recv_result = timeout(subscription_timeout, subscription.recv()).await;
@@ -90,12 +82,13 @@ impl<N: Network> RobustSubscription<N> {
                             self.process_recv_error(recv_error).await?;
                         }
                     },
-                    Err(e) => {
+                    Err(elapsed_err) => {
                         error!(
                             timeout_secs = subscription_timeout.as_secs(),
                             "Subscription timeout - no block received, switching provider"
                         );
-                        self.switch_to_fallback(e.into()).await?;
+
+                        self.switch_to_fallback(elapsed_err.into()).await?;
                     }
                 }
             } else {
@@ -131,15 +124,21 @@ impl<N: Network> RobustSubscription<N> {
         Ok(())
     }
 
-    fn should_reconnect_to_primary(&self) -> bool {
-        // Only attempt reconnection if enough time has passed since last attempt
-        match self.last_reconnect_attempt {
+    /// Try to reconnect to the primary provider if enough time has elapsed.
+    /// Returns true if reconnection was successful, false if it's not time yet or if it failed.
+    async fn try_reconnect_to_primary(&mut self) -> bool {
+        // Check if we should attempt reconnection
+        let should_reconnect = match self.last_reconnect_attempt {
             None => false,
             Some(last_attempt) => last_attempt.elapsed() >= self.robust_provider.reconnect_interval,
-        }
-    }
+        };
 
-    async fn try_reconnect_to_primary(&mut self) -> Result<(), Error> {
+        if !should_reconnect {
+            return false;
+        }
+
+        info!("Attempting to reconnect to primary provider");
+
         self.last_reconnect_attempt = Some(Instant::now());
 
         let operation =
@@ -151,13 +150,14 @@ impl<N: Network> RobustSubscription<N> {
 
         match subscription {
             Ok(sub) => {
+                info!("Successfully reconnected to primary provider");
                 self.subscription = Some(sub);
                 self.current_fallback_index = None;
-                Ok(())
+                true
             }
             Err(e) => {
-                error!(error = %e, "eth_subscribe failed");
-                Err(e)
+                warn!(error = %e, "Failed to reconnect to primary provider");
+                false
             }
         }
     }
