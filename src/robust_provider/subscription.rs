@@ -88,6 +88,14 @@ impl<N: Network> RobustSubscription<N> {
                             "Subscription timeout - no block received, switching provider"
                         );
 
+                        // If we're on a fallback, try reconnecting to primary one more time
+                        // before switching to the next fallback
+                        if self.current_fallback_index.is_some() &&
+                            self.try_reconnect_to_primary().await
+                        {
+                            continue;
+                        }
+
                         self.switch_to_fallback(elapsed_err.into()).await?;
                     }
                 }
@@ -156,6 +164,7 @@ impl<N: Network> RobustSubscription<N> {
                 true
             }
             Err(e) => {
+                println!("what");
                 warn!(error = %e, "Failed to reconnect to primary provider");
                 false
             }

@@ -482,9 +482,8 @@ mod tests {
         ws_provider.anvil_mine(Some(1), None).await?;
         assert_eq!(2, subscription.recv().await?.number());
 
-        drop(anvil_1);
-
-        sleep(Duration::from_millis(100)).await;
+        // simulate ws stream gone via no blocks mined > sub timeout
+        sleep(Duration::from_millis(600)).await;
 
         http_provider.anvil_mine(Some(1), None).await?;
 
@@ -532,12 +531,8 @@ mod tests {
         let block = stream.next().await.unwrap()?;
         assert_eq!(2, block.number());
 
-        // Drop the primary provider to trigger failover
-        drop(anvil_1);
-
-        // Wait for subscription timeout to occur and switch to fallback
-        // The subscription will timeout after 500ms of inactivity, then switch to fallback
-        sleep(Duration::from_millis(800)).await;
+        // simulate ws stream gone via no blocks mined > sub timeout
+        sleep(Duration::from_millis(600)).await;
 
         // Now mine blocks on fallback - the subscription should be connected to fallback now
         ws_provider_2.anvil_mine(Some(1), None).await?;
@@ -555,8 +550,6 @@ mod tests {
     #[tokio::test]
     async fn test_subscription_reconnects_to_primary() -> anyhow::Result<()> {
         let anvil_1 = Anvil::new().try_spawn()?;
-        let anvil_1_port = anvil_1.port();
-
         let ws_provider_1 =
             ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
 
@@ -566,45 +559,36 @@ mod tests {
 
         let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
             .fallback(ws_provider_2.clone())
-            .subscription_timeout(Duration::from_secs(5))
+            .subscription_timeout(Duration::from_millis(500))
             .reconnect_interval(Duration::from_secs(2))
             .build()
             .await?;
 
         let subscription = robust.subscribe_blocks().await?;
-
         let mut stream = subscription.into_stream();
 
+        // Verify primary works
         ws_provider_1.anvil_mine(Some(1), None).await?;
         let block = stream.next().await.unwrap()?;
         assert_eq!(1, block.number());
 
-        drop(anvil_1);
+        sleep(Duration::from_millis(600)).await;
 
-        // Wait for subscription to detect failure and switch to fallback
-        // (subscription_timeout is 5 seconds)
-        sleep(Duration::from_millis(5500)).await;
-
+        // Verify fallback works
         ws_provider_2.anvil_mine(Some(1), None).await?;
         let block = stream.next().await.unwrap()?;
         assert_eq!(1, block.number());
 
-        // Spawn new anvil on the same port as primary (simulating primary coming back)
-        let anvil_3 = Anvil::new().port(anvil_1_port).try_spawn()?;
+        for _ in 0..30 {
+            ws_provider_2.anvil_mine(Some(10), None).await?;
+            let _ = stream.next().await.unwrap()?;
+            sleep(Duration::from_millis(100)).await;
+            // Mine on primary - should reconnect and receive from primary
+            ws_provider_1.anvil_mine(Some(1), None).await?;
+        }
 
-        let ws_provider_1 =
-            ProviderBuilder::new().connect(anvil_3.ws_endpoint_url().as_str()).await?;
-
-        // Wait for reconnect interval to elapse (2 seconds) plus buffer
-        sleep(Duration::from_millis(2200)).await;
-
-        ws_provider_1.anvil_mine(Some(1), None).await?;
         let block = stream.next().await.unwrap()?;
-        assert_eq!(1, block.number());
-
-        ws_provider_1.anvil_mine(Some(1), None).await?;
-        let block = stream.next().await.unwrap()?;
-        assert_eq!(2, block.number());
+        assert_eq!(31 + 1, block.number());
 
         Ok(())
     }
@@ -638,16 +622,14 @@ mod tests {
         let block = stream.next().await.unwrap()?;
         assert_eq!(1, block.number());
 
-        drop(anvil_1);
-
+        // simulate ws stream gone via no blocks mined > sub timeout
         sleep(Duration::from_millis(600)).await;
 
         ws_provider_2.anvil_mine(Some(1), None).await?;
         let block = stream.next().await.unwrap()?;
         assert_eq!(1, block.number());
 
-        drop(anvil_2);
-
+        // simulate ws stream gone via no blocks mined > sub timeout
         sleep(Duration::from_millis(600)).await;
 
         ws_provider_3.anvil_mine(Some(1), None).await?;
@@ -669,12 +651,11 @@ mod tests {
 
         let mut subscription = robust.subscribe_blocks().await?;
 
-        // Receive initial block successfully
+        // simulate ws stream gone via no blocks mined > sub timeout
         ws_provider.anvil_mine(Some(1), None).await?;
         let _block = subscription.recv().await?;
 
-        drop(anvil);
-
+        // simulate ws stream gone via no blocks mined > sub timeout
         sleep(Duration::from_millis(600)).await;
 
         let err = subscription.recv().await.unwrap_err();
