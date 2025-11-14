@@ -1,7 +1,7 @@
 use alloy::{primitives::U256, providers::ext::AnvilApi};
 
 use crate::common::{TestCounter, setup_sync_from_latest_scanner};
-use event_scanner::{ScannerStatus, assert_empty, assert_next, assert_next_any};
+use event_scanner::{ScannerStatus, assert_empty, assert_next};
 
 #[tokio::test]
 async fn happy_path_no_duplicates() -> anyhow::Result<()> {
@@ -127,16 +127,8 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
 
     assert_next!(stream, ScannerStatus::StartingLiveStream);
-    assert_next_any!(
-        stream,
-        [
-            vec![TestCounter::CountIncreased { newCount: U256::from(1) }],
-            vec![
-                TestCounter::CountIncreased { newCount: U256::from(1) },
-                TestCounter::CountIncreased { newCount: U256::from(2) }
-            ]
-        ]
-    );
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(1) }]);
+    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
 
     Ok(())
 }
