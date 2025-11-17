@@ -236,13 +236,23 @@ impl<N: Network> RobustSubscription<N> {
             }
         });
 
-        RobustSubscriptionStream { inner: ReceiverStream::new(rx) }
+        RobustSubscriptionStream::new(ReceiverStream::new(rx))
     }
 }
 
 /// A stream wrapper around [`RobustSubscription`] that implements the [`Stream`] trait.
 pub struct RobustSubscriptionStream<N: Network> {
     inner: ReceiverStream<Result<N::HeaderResponse, Error>>,
+}
+
+impl<N: Network> RobustSubscriptionStream<N> {
+    pub fn new(inner: ReceiverStream<Result<<N as Network>::HeaderResponse, Error>>) -> Self {
+        Self { inner }
+    }
+
+    pub fn into_inner(self) -> ReceiverStream<Result<N::HeaderResponse, Error>> {
+        self.inner
+    }
 }
 
 impl<N: Network> Stream for RobustSubscriptionStream<N> {

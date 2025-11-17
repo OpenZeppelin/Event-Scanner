@@ -301,9 +301,13 @@ impl<N: Network> RobustProvider<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robust_provider::{
-        RobustProviderBuilder, builder::DEFAULT_SUBSCRIPTION_TIMEOUT,
-        subscription::DEFAULT_RECONNECT_INTERVAL,
+    use crate::{
+        assert_empty,
+        robust_provider::{
+            RobustProviderBuilder,
+            builder::DEFAULT_SUBSCRIPTION_TIMEOUT,
+            subscription::{DEFAULT_RECONNECT_INTERVAL, RobustSubscriptionStream},
+        },
     };
     use alloy::{
         consensus::BlockHeader,
@@ -324,6 +328,14 @@ mod tests {
             min_delay: Duration::from_millis(min_delay),
             reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
         }
+    }
+
+    fn assert_empty<N: Network>(
+        stream: RobustSubscriptionStream<N>,
+    ) -> RobustSubscriptionStream<N> {
+        let inner = stream.into_inner();
+        let inner = assert_empty!(inner);
+        RobustSubscriptionStream::new(inner)
     }
 
     #[tokio::test]
@@ -477,17 +489,17 @@ mod tests {
         let mut subscription = robust.subscribe_blocks().await?;
 
         ws_provider.anvil_mine(Some(1), None).await?;
-        assert_eq!(1, subscription.recv().await?.number());
+        assert_eq!(1, subscription.try_recv_block().await?.number());
 
         ws_provider.anvil_mine(Some(1), None).await?;
-        assert_eq!(2, subscription.recv().await?.number());
+        assert_eq!(2, subscription.try_recv_block().await?.number());
 
         // simulate ws stream gone via no blocks mined > sub timeout
         sleep(Duration::from_millis(600)).await;
 
         http_provider.anvil_mine(Some(1), None).await?;
 
-        let err = subscription.recv().await.unwrap_err();
+        let err = subscription.try_recv_block().await.unwrap_err();
 
         // The error should be either a Timeout or BackendGone from the primary WS provider,
         // NOT a PubsubUnavailable error (which would indicate HTTP fallback was attempted)
@@ -559,8 +571,8 @@ mod tests {
 
         let robust = RobustProviderBuilder::fragile(ws_provider_1.clone())
             .fallback(ws_provider_2.clone())
-            .subscription_timeout(Duration::from_millis(500))
-            .reconnect_interval(Duration::from_secs(2))
+            .subscription_timeout(Duration::from_millis(100))
+            .reconnect_interval(Duration::from_millis(100))
             .build()
             .await?;
 
@@ -571,24 +583,26 @@ mod tests {
         ws_provider_1.anvil_mine(Some(1), None).await?;
         let block = stream.next().await.unwrap()?;
         assert_eq!(1, block.number());
+        let mut stream = assert_empty(stream);
 
-        sleep(Duration::from_millis(600)).await;
+        sleep(Duration::from_millis(150)).await;
 
         // Verify fallback works
-        ws_provider_2.anvil_mine(Some(1), None).await?;
+        ws_provider_2.anvil_mine(Some(2), None).await?;
         let block = stream.next().await.unwrap()?;
         assert_eq!(1, block.number());
-
-        for _ in 0..30 {
-            ws_provider_2.anvil_mine(Some(10), None).await?;
-            let _ = stream.next().await.unwrap()?;
-            sleep(Duration::from_millis(100)).await;
-            // Mine on primary - should reconnect and receive from primary
-            ws_provider_1.anvil_mine(Some(1), None).await?;
-        }
-
         let block = stream.next().await.unwrap()?;
-        assert_eq!(31 + 1, block.number());
+        assert_eq!(2, block.number());
+        let mut stream = assert_empty(stream);
+
+        // lag the fallback to force switching back to primary
+        sleep(Duration::from_millis(150)).await;
+
+        // Verify fallback works
+        ws_provider_1.anvil_mine(Some(1), None).await?;
+        let block = stream.next().await.unwrap()?;
+        assert_eq!(2, block.number());
+        assert_empty(stream);
 
         Ok(())
     }
@@ -653,12 +667,12 @@ mod tests {
 
         // simulate ws stream gone via no blocks mined > sub timeout
         ws_provider.anvil_mine(Some(1), None).await?;
-        let _block = subscription.recv().await?;
+        let _block = subscription.try_recv_block().await?;
 
         // simulate ws stream gone via no blocks mined > sub timeout
         sleep(Duration::from_millis(600)).await;
 
-        let err = subscription.recv().await.unwrap_err();
+        let err = subscription.try_recv_block().await.unwrap_err();
 
         match err {
             Error::Timeout => {}
