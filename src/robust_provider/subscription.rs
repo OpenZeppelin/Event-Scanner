@@ -145,8 +145,6 @@ impl<N: Network> RobustSubscription<N> {
 
         info!("Attempting to reconnect to primary provider");
 
-        self.last_reconnect_attempt = Some(Instant::now());
-
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
 
@@ -159,10 +157,11 @@ impl<N: Network> RobustSubscription<N> {
                 info!("Successfully reconnected to primary provider");
                 self.subscription = Some(sub);
                 self.current_fallback_index = None;
+                self.last_reconnect_attempt = None;
                 true
             }
             Err(e) => {
-                println!("what");
+                self.last_reconnect_attempt = Some(Instant::now());
                 warn!(error = %e, "Failed to reconnect to primary provider");
                 false
             }
