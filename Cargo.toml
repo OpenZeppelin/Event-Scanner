@@ -69,6 +69,7 @@ alloy-node-bindings.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
 backon.workspace = true
+tokio-util = "0.7.17"
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

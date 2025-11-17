@@ -1,6 +1,6 @@
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
 
@@ -10,11 +10,9 @@ use alloy::{
     pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
-use tokio::{
-    sync::{broadcast::error::RecvError, mpsc},
-    time::timeout,
-};
-use tokio_stream::{Stream, wrappers::ReceiverStream};
+use tokio::{sync::broadcast::error::RecvError, time::timeout};
+use tokio_stream::Stream;
+use tokio_util::sync::ReusableBoxFuture;
 use tracing::{error, info, warn};
 
 use crate::robust_provider::{Error, RobustProvider};
@@ -214,41 +212,47 @@ impl<N: Network> RobustSubscription<N> {
     /// This spawns a background task that continuously receives from the subscription
     /// and forwards items to a channel, which is then wrapped in a Stream.
     #[must_use]
-    pub fn into_stream(mut self) -> RobustSubscriptionStream<N> {
-        let (tx, rx) = mpsc::channel(MAX_BUFFERED_BLOCKS);
-
-        tokio::spawn(async move {
-            loop {
-                match self.try_recv_block().await {
-                    Ok(item) => {
-                        if let Err(err) = tx.send(Ok(item)).await {
-                            warn!(error = %err, "Downstream channel closed, stopping stream");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        if let Err(err) = tx.send(Err(e)).await {
-                            warn!(error = %err, "Downstream channel closed, stopping stream");
-                        }
-                        break;
-                    }
-                }
-            }
-        });
-
-        RobustSubscriptionStream { inner: ReceiverStream::new(rx) }
+    pub fn into_stream(self) -> RobustSubscriptionStream<N> {
+        RobustSubscriptionStream::from(self)
     }
 }
 
-/// A stream wrapper around [`RobustSubscription`] that implements the [`Stream`] trait.
+type SubscriptionResult<N> = (Result<<N as Network>::HeaderResponse, Error>, RobustSubscription<N>);
+
 pub struct RobustSubscriptionStream<N: Network> {
-    inner: ReceiverStream<Result<N::HeaderResponse, Error>>,
+    inner: ReusableBoxFuture<'static, SubscriptionResult<N>>,
 }
 
-impl<N: Network> Stream for RobustSubscriptionStream<N> {
+async fn make_future<N: Network>(mut rx: RobustSubscription<N>) -> SubscriptionResult<N> {
+    let result = rx.try_recv_block().await;
+    (result, rx)
+}
+
+impl<N: 'static + Clone + Send + Network> RobustSubscriptionStream<N> {
+    /// Create a new `RobustSubscriptionStream`.
+    #[must_use]
+    pub fn new(rx: RobustSubscription<N>) -> Self {
+        Self { inner: ReusableBoxFuture::new(make_future(rx)) }
+    }
+}
+
+impl<N: 'static + Clone + Send + Network> Stream for RobustSubscriptionStream<N> {
     type Item = Result<N::HeaderResponse, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.inner).poll_next(cx)
+        let (result, rx) = ready!(self.inner.poll(cx));
+        self.inner.set(make_future(rx));
+        match result {
+            Ok(item) => Poll::Ready(Some(Ok(item))),
+            Err(e) => Poll::Ready(Some(Err(e))),
+        }
+    }
+}
+
+impl<N: 'static + Clone + Send + Network> From<RobustSubscription<N>>
+    for RobustSubscriptionStream<N>
+{
+    fn from(recv: RobustSubscription<N>) -> Self {
+        Self::new(recv)
     }
 }
