@@ -62,6 +62,7 @@ macro_rules! assert_event_sequence {
     };
 }
 
+#[allow(clippy::missing_panics_doc)]
 pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
     stream: &mut S,
     expected_options: impl IntoIterator<Item = &(LogData, String)>,
@@ -73,12 +74,12 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
 
     while let Some(expected) = remaining.next() {
         let elapsed = start.elapsed();
-        if elapsed >= timeout_duration {
-            panic!(
-                "Timed out waiting for events. Still expecting: {:#?}",
-                remaining.collect::<Vec<_>>()
-            );
-        }
+
+        assert!(
+            elapsed < timeout_duration,
+            "Timed out waiting for events. Still expecting: {:#?}",
+            remaining.collect::<Vec<_>>()
+        );
 
         let time_left = timeout_duration - elapsed;
         let message = tokio::time::timeout(time_left, tokio_stream::StreamExt::next(stream))
@@ -92,25 +93,23 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
                 assert_eq!(
                     &expected.0,
                     event.data(),
-                    "Unexpected event: {:#?}\nExpected: {}\nRemaining: {:#?}",
-                    event,
+                    "Unexpected event: {event:#?}\nExpected: {}\nRemaining: {:#?}",
                     expected.1,
                     remaining.collect::<Vec<_>>()
                 );
                 while let Some(event) = batch.next() {
-                    let expected = remaining.next().unwrap_or_else(|| panic!("Received more events than expected, current: {:#?}\nStreamed batch: {:#?}", event, batch));
+                    let expected = remaining.next().unwrap_or_else(|| panic!("Received more events than expected, current: {event:#?}\nStreamed batch: {batch:#?}"));
                     assert_eq!(
                         &expected.0,
                         event.data(),
-                        "Unexpected event: {:#?}\nExpected: {}\nRemaining: {:#?}",
-                        event,
+                        "Unexpected event: {event:#?}\nExpected: {}\nRemaining: {:#?}",
                         expected.1,
                         remaining.collect::<Vec<_>>()
                     );
                 }
             }
             Some(other) => {
-                panic!("Expected Message::Data, got: {:#?}", other);
+                panic!("Expected Message::Data, got: {other:#?}");
             }
             None => {
                 panic!("Stream closed while still expecting: {:#?}", remaining.collect::<Vec<_>>());
