@@ -229,17 +229,11 @@ async fn latest_scanner_mixed_events_and_filters_return_correct_streams() -> any
         .event(TestCounter::CountDecreased::SIGNATURE);
     let mut stream_dec = scanner.subscribe(filter_dec);
 
-    // Sequence: inc(1), inc(2), dec(1), inc(2), dec(1)
-    // inc -> 1
-    contract.increase().send().await?.watch().await?;
-    // inc -> 2
-    contract.increase().send().await?.watch().await?;
-    // dec -> 1
-    contract.decrease().send().await?.watch().await?;
-    // inc -> 2
-    contract.increase().send().await?.watch().await?;
-    // dec -> 1
-    contract.decrease().send().await?.watch().await?;
+    contract.increase().send().await?.watch().await?; // inc(1)
+    contract.increase().send().await?.watch().await?; // inc(2)
+    contract.decrease().send().await?.watch().await?; // dec(1)
+    contract.increase().send().await?.watch().await?; // inc(2)
+    contract.decrease().send().await?.watch().await?; // dec(1)
 
     scanner.start().await?;
 
