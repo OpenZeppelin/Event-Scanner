@@ -246,10 +246,12 @@ pub struct RobustSubscriptionStream<N: Network> {
 }
 
 impl<N: Network> RobustSubscriptionStream<N> {
+    #[must_use]
     pub fn new(inner: ReceiverStream<Result<<N as Network>::HeaderResponse, Error>>) -> Self {
         Self { inner }
     }
 
+    #[must_use]
     pub fn into_inner(self) -> ReceiverStream<Result<N::HeaderResponse, Error>> {
         self.inner
     }
