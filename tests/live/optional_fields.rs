@@ -14,39 +14,40 @@ use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn track_all_events_from_contract() -> anyhow::Result<()> {
-    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
-    let contract = setup.contract.clone();
+    let setup = setup_live_scanner(None, None, 0).await?;
+    let contract = setup.contract;
     let contract_address = *contract.address();
 
     let mut scanner = setup.scanner;
 
     // Create filter that tracks ALL events from a specific contract (no event signature specified)
     let filter = EventFilter::new().contract_address(contract_address);
-    let expected_event_count = 5;
 
-    let mut stream = scanner.subscribe(filter).take(expected_event_count);
+    let mut stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
     // Generate both increase and decrease events
-    for _ in 0..expected_event_count {
+    for _ in 0..5 {
         contract.increase().send().await?.watch().await?;
     }
 
     // Also generate some decrease events to ensure we're tracking all events
     contract.decrease().send().await?.watch().await?;
+    contract.decrease().send().await?.watch().await?;
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let event_count_clone = Arc::clone(&event_count);
-    let event_counting = async move {
-        while let Some(Message::Data(logs)) = stream.next().await {
-            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-        }
-    };
-
-    _ = timeout(Duration::from_secs(2), event_counting).await;
-
-    assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
+    assert_event_sequence!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+            TestCounter::CountIncreased { newCount: U256::from(4) },
+            TestCounter::CountIncreased { newCount: U256::from(5) },
+            TestCounter::CountDecreased { newCount: U256::from(4) },
+            TestCounter::CountDecreased { newCount: U256::from(3) }
+        ]
+    );
 
     Ok(())
 }
