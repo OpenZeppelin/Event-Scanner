@@ -25,6 +25,39 @@ macro_rules! assert_next {
 
 // TODO: implement assert_range_coverage
 
+/// Asserts that the stream emits the given events in order.
+///
+/// The macro asserts that all of the provided events are emitted in the order they are provided, no
+/// matter how many stream batches are necessary to emit them, that no other events are emitted in
+/// between, and that the final event is the last event in the last batch of the stream.
+///
+/// The provided events can be of any type that implements [`SolEvent`](alloy::sol_types::SolEvent).
+///
+/// # Examples
+///
+/// ```
+/// let mut stream = scanner.subscribe(EventFilter::new().contract_address(contract_address));
+/// assert_event_sequence!(
+///     stream,
+///     &[CountIncreased { newCount: U256::from(1) }, CountIncreased { newCount: U256::from(2) },]
+/// );
+/// ```
+///
+/// The above assertion will pass if next stream batches are any of the following:
+///
+/// 1. Each event separate:
+///     - Batch 1: `[CountIncreased { newCount: U256::from(1) }]`
+///     - Batch 2: `[CountIncreased { newCount: U256::from(2) }]`
+/// 2. Events in the same batch:
+///     - Batch 1: `[CountIncreased { newCount: U256::from(1) }, CountIncreased { newCount:
+///    U256::from(2) }]`
+///
+/// # Panics
+///
+/// * If the stream emits a different event than the next expected one
+/// * If the stream is closed before all of the expected events are emitted
+/// * If the stream emits more events than expected
+/// * If the stream times out before all of the expected events are emitted
 #[macro_export]
 macro_rules! assert_event_sequence {
     // owned slices just pass to the borrowed slices variant
