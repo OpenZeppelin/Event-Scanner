@@ -4,7 +4,7 @@ use crate::common::{TestCounter, setup_sync_from_latest_scanner};
 use event_scanner::{ScannerStatus, assert_empty, assert_event_sequence, assert_next};
 
 #[tokio::test]
-async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> {
+async fn happy_path_no_duplicates() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
@@ -49,7 +49,7 @@ async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> 
 }
 
 #[tokio::test]
-async fn scan_latest_then_live_fewer_historical_then_continues_live() -> anyhow::Result<()> {
+async fn fewer_historical_then_continues_live() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 5, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
@@ -87,7 +87,7 @@ async fn scan_latest_then_live_fewer_historical_then_continues_live() -> anyhow:
 }
 
 #[tokio::test]
-async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Result<()> {
+async fn exact_historical_count_then_live() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 4, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
@@ -120,7 +120,7 @@ async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Res
 }
 
 #[tokio::test]
-async fn scan_latest_then_live_no_historical_only_live_streams() -> anyhow::Result<()> {
+async fn no_historical_only_live_streams() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 5, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
@@ -149,7 +149,7 @@ async fn scan_latest_then_live_no_historical_only_live_streams() -> anyhow::Resu
 }
 
 #[tokio::test]
-async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
+async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let provider = setup.provider;
     let contract = setup.contract;
@@ -178,16 +178,18 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
         ]
     );
     assert_next!(stream, ScannerStatus::SwitchingToLive);
+    let mut stream = assert_empty!(stream);
 
     // Immediately produce a new live event in a new block
     contract.increase().send().await?.watch().await?;
+
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn scan_latest_then_live_waiting_on_live_logs_arriving() -> anyhow::Result<()> {
+async fn waiting_on_live_logs_arriving() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;

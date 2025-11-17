@@ -155,7 +155,7 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn live_filters_malformed_signature_graceful() -> anyhow::Result<()> {
+async fn filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let setup = setup_live_scanner(Some(0.1), None, 0).await?;
     let contract = setup.contract.clone();
 

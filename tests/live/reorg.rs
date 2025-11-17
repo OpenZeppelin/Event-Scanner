@@ -9,7 +9,7 @@ use alloy::{
 use event_scanner::{ScannerStatus, assert_empty, assert_event_sequence, assert_next};
 
 #[tokio::test]
-async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
+async fn rescans_events_within_same_block() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
@@ -58,7 +58,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
+async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
@@ -107,7 +107,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn reorg_depth_one() -> anyhow::Result<()> {
+async fn depth_one() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
@@ -145,7 +145,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn reorg_depth_two() -> anyhow::Result<()> {
+async fn depth_two() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
