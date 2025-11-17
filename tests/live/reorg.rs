@@ -6,7 +6,7 @@ use alloy::{
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{ScannerStatus, assert_empty, assert_next};
+use event_scanner::{ScannerStatus, assert_empty, assert_event_sequence, assert_next};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
@@ -21,11 +21,16 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     }
 
     // assert initial events are emitted as expected
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(5) }]);
+    assert_event_sequence!(
+        stream,
+        &[
+            CountIncreased { newCount: U256::from(1) },
+            CountIncreased { newCount: U256::from(2) },
+            CountIncreased { newCount: U256::from(3) },
+            CountIncreased { newCount: U256::from(4) },
+            CountIncreased { newCount: U256::from(5) }
+        ]
+    );
     let mut stream = assert_empty!(stream);
 
     // reorg the chain
@@ -65,11 +70,16 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     }
 
     // assert initial events are emitted as expected
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(5) }]);
+    assert_event_sequence!(
+        stream,
+        &[
+            CountIncreased { newCount: U256::from(1) },
+            CountIncreased { newCount: U256::from(2) },
+            CountIncreased { newCount: U256::from(3) },
+            CountIncreased { newCount: U256::from(4) },
+            CountIncreased { newCount: U256::from(5) }
+        ]
+    );
     let mut stream = assert_empty!(stream);
 
     // reorg the chain
@@ -83,9 +93,14 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 
     // assert expected messages post-reorg
     assert_next!(stream, ScannerStatus::ReorgDetected);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    assert_event_sequence!(
+        stream,
+        &[
+            CountIncreased { newCount: U256::from(2) },
+            CountIncreased { newCount: U256::from(3) },
+            CountIncreased { newCount: U256::from(4) }
+        ]
+    );
     assert_empty!(stream);
 
     Ok(())
@@ -104,10 +119,15 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     }
 
     // assert initial events are emitted as expected
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    assert_event_sequence!(
+        stream,
+        &[
+            CountIncreased { newCount: U256::from(1) },
+            CountIncreased { newCount: U256::from(2) },
+            CountIncreased { newCount: U256::from(3) },
+            CountIncreased { newCount: U256::from(4) }
+        ]
+    );
     let mut stream = assert_empty!(stream);
 
     // reorg the chain
@@ -137,10 +157,15 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     }
 
     // assert initial events are emitted as expected
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
+    assert_event_sequence!(
+        stream,
+        &[
+            CountIncreased { newCount: U256::from(1) },
+            CountIncreased { newCount: U256::from(2) },
+            CountIncreased { newCount: U256::from(3) },
+            CountIncreased { newCount: U256::from(4) }
+        ]
+    );
     let mut stream = assert_empty!(stream);
 
     // reorg the chain
@@ -193,11 +218,14 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     provider.primary().anvil_mine(Some(10), None).await?;
 
     // no `ReorgDetected` should be emitted
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(1) }]);
-    assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
-    assert_next!(
+    assert_event_sequence!(
         stream,
-        &[CountIncreased { newCount: U256::from(3) }, CountIncreased { newCount: U256::from(4) }]
+        &[
+            CountIncreased { newCount: U256::from(1) },
+            CountIncreased { newCount: U256::from(2) },
+            CountIncreased { newCount: U256::from(3) },
+            CountIncreased { newCount: U256::from(4) }
+        ]
     );
     assert_empty!(stream);
 

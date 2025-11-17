@@ -4,7 +4,7 @@ use alloy::{
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{ScannerStatus, assert_empty, assert_next};
+use event_scanner::{ScannerStatus, assert_empty, assert_event_sequence, assert_next};
 
 use crate::common::{SyncScannerSetup, TestCounter, setup_sync_scanner};
 
@@ -40,8 +40,13 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     assert_next!(stream, ScannerStatus::SwitchingToLive);
 
     // live events
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) }]);
+    assert_event_sequence!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(4) },
+            TestCounter::CountIncreased { newCount: U256::from(5) }
+        ]
+    );
     assert_empty!(stream);
 
     Ok(())
@@ -104,8 +109,13 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // switching to "live" phase
     assert_next!(stream, ScannerStatus::SwitchingToLive);
     // assert confirmed live events are streamed separately
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
+    assert_event_sequence!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+            TestCounter::CountIncreased { newCount: U256::from(4) }
+        ]
+    );
     let stream = assert_empty!(stream);
 
     // Perform a shallow reorg on the live tail
@@ -124,14 +134,14 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     provider.primary().anvil_mine(Some(10), None).await?;
 
     // no `ReorgDetected` should be emitted
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) }]);
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(6) }]);
-    assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(7) }]);
-    assert_next!(
+    assert_event_sequence!(
         stream,
         &[
+            TestCounter::CountIncreased { newCount: U256::from(5) },
+            TestCounter::CountIncreased { newCount: U256::from(6) },
+            TestCounter::CountIncreased { newCount: U256::from(7) },
             TestCounter::CountIncreased { newCount: U256::from(8) },
-            TestCounter::CountIncreased { newCount: U256::from(9) }
+            TestCounter::CountIncreased { newCount: U256::from(9) },
         ]
     );
     assert_empty!(stream);
