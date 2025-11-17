@@ -1,3 +1,8 @@
+use alloy::primitives::LogData;
+use tokio_stream::Stream;
+
+use crate::Message;
+
 #[macro_export]
 macro_rules! assert_next {
     ($stream: expr, $expected: expr) => {
@@ -22,48 +27,96 @@ macro_rules! assert_next {
 
 #[macro_export]
 macro_rules! assert_event_sequence {
-    ($stream: expr, $expected_options: expr) => {
-        assert_event_sequence!($stream, $expected_options, timeout = 5)
+    // owned slices just pass to the borrowed slices variant
+    ($stream: expr, [$($event:expr),+ $(,)?]) => {
+        assert_event_sequence!($stream, &[$($event),+], timeout = 5)
     };
-    ($stream: expr, $expected_options: expr, timeout = $secs: expr) => {
-        let expected_options = $expected_options;
-        if expected_options.is_empty() {
-            panic!("assert_event_sequence! called with empty array. Use assert_empty! macro instead to check for no pending messages.");
+    ($stream: expr, [$($event:expr),+ $(,)?], timeout = $secs: expr) => {
+        assert_event_sequence!($stream, &[$($event),+], timeout = $secs)
+    };
+    // borrowed slices
+    ($stream: expr, &[$($event:expr),+ $(,)?]) => {
+        assert_event_sequence!($stream, &[$($event),+], timeout = 5)
+    };
+    ($stream: expr, &[$($event:expr),+ $(,)?], timeout = $secs: expr) => {
+        let expected_options = &[
+            $(
+                {
+                    let event = &$event;
+                    let encoded_data = alloy::sol_types::SolEvent::encode_log_data(event);
+                    let debug_string = format!("{:#?}", event);
+                    (encoded_data, debug_string)
+                }
+            ),+
+        ];
+
+       $crate::test_utils::macros::assert_event_sequence(&mut $stream, expected_options, $secs).await
+    };
+    // variables and non-slice expressions
+    ($stream: expr, $events: expr) => {
+        assert_event_sequence!($stream, $events, timeout = 5)
+    };
+    ($stream: expr, $events: expr, timeout = $secs: expr) => {
+        let expected_options = $events.iter().map(|e| (alloy::sol_types::SolEvent::encode_log_data(e), format!("{e:#?}"))).collect::<Vec<_>>();
+        $crate::test_utils::macros::assert_event_sequence(&mut $stream, expected_options.iter(), $secs).await
+    };
+}
+
+pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
+    stream: &mut S,
+    expected_options: impl IntoIterator<Item = &(LogData, String)>,
+    timeout_secs: u64,
+) {
+    let mut remaining = expected_options.into_iter();
+    let start = std::time::Instant::now();
+    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
+    while let Some(expected) = remaining.next() {
+        let elapsed = start.elapsed();
+        if elapsed >= timeout_duration {
+            panic!(
+                "Timed out waiting for events. Still expecting: {:#?}",
+                remaining.collect::<Vec<_>>()
+            );
         }
 
-        let mut remaining = expected_options.iter();
-        let start = std::time::Instant::now();
-        let timeout_duration = std::time::Duration::from_secs($secs);
+        let time_left = timeout_duration - elapsed;
+        let message = tokio::time::timeout(time_left, tokio_stream::StreamExt::next(stream))
+            .await
+            .expect("timed out waiting for next batch");
 
-        while let Some(expected) = remaining.next() {
-            let elapsed = start.elapsed();
-            if elapsed >= timeout_duration {
-                panic!("Timed out waiting for events. Still expecting: {:#?}", remaining);
+        match message {
+            Some(Message::Data(batch)) => {
+                let mut batch = batch.iter();
+                let event = batch.next().expect("Streamed batch should not be empty");
+                assert_eq!(
+                    &expected.0,
+                    event.data(),
+                    "Unexpected event: {:#?}\nExpected: {}\nRemaining: {:#?}",
+                    event,
+                    expected.1,
+                    remaining.collect::<Vec<_>>()
+                );
+                while let Some(event) = batch.next() {
+                    let expected = remaining.next().unwrap_or_else(|| panic!("Received more events than expected, current: {:#?}\nStreamed batch: {:#?}", event, batch));
+                    assert_eq!(
+                        &expected.0,
+                        event.data(),
+                        "Unexpected event: {:#?}\nExpected: {}\nRemaining: {:#?}",
+                        event,
+                        expected.1,
+                        remaining.collect::<Vec<_>>()
+                    );
+                }
             }
-
-            let time_left = timeout_duration - elapsed;
-            let message =
-                tokio::time::timeout(time_left, tokio_stream::StreamExt::next(&mut $stream))
-                    .await
-                    .expect("timed out waiting for next batch");
-
-            match message {
-                Some($crate::ScannerMessage::Data(batch)) => {
-                    let mut batch = batch.iter();
-                    let event = batch.next().expect("Streamed batch should not be empty");
-                    assert_eq!(&alloy::sol_types::SolEvent::encode_log_data(expected), event.data(), "Unexpected event: {:#?}\nExpected: {:#?}\nRemaining: {:#?}", event, expected, remaining);
-                    while let Some(event) = batch.next() {
-                        let expected = remaining.next().unwrap_or_else(|| panic!("Received more events than expected, current: {:#?}\nStreamed batch: {:#?}", event, batch));
-                        assert_eq!(&alloy::sol_types::SolEvent::encode_log_data(expected), event.data(), "Unexpected event: {:#?}\nExpected: {:#?}\nRemaining: {:#?}", event, expected, remaining);
-                    }
-                }
-                Some(other) => {
-                    panic!("Expected ScannerMessage::Data, got: {:#?}", other);
-                }
-                None => {panic!("Stream closed while still expecting: {:#?}", remaining);}
+            Some(other) => {
+                panic!("Expected Message::Data, got: {:#?}", other);
+            }
+            None => {
+                panic!("Stream closed while still expecting: {:#?}", remaining.collect::<Vec<_>>());
             }
         }
-    };
+    }
 }
 
 #[macro_export]
