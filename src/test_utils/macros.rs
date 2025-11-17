@@ -18,6 +18,8 @@ macro_rules! assert_next {
     };
 }
 
+// TODO: implement assert_range_coverage
+
 #[macro_export]
 macro_rules! assert_event_sequence {
     ($stream: expr, $expected_options: expr) => {
