@@ -266,6 +266,43 @@ All examples spin up a local `anvil` instance, deploy a demo counter contract, a
 
 ---
 
+## Robust Provider
+
+`event-scanner` ships with a `robust_provider` module that wraps Alloy providers with:
+
+- bounded per-call timeouts and exponential backoff retries,
+- automatic failover from a primary provider to one or more fallbacks,
+- resilient WebSocket block subscriptions with timeout handling and reconnection.
+
+The main entry point is `robust_provider::RobustProviderBuilder`, which accepts a wide
+range of provider types (URLs, `RootProvider`, layered providers, etc.) through the
+`IntoProvider` and `IntoRobustProvider` traits.
+
+A typical setup looks like:
+
+```rust,no_run
+use std::time::Duration;
+use alloy::providers::ProviderBuilder;
+use event_scanner::robust_provider::RobustProviderBuilder;
+
+# async fn example() -> anyhow::Result<()> {
+let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+let http = ProviderBuilder::new().connect_http("http://localhost:8545");
+
+let robust = RobustProviderBuilder::new(ws)
+    .fallback(http)
+    .call_timeout(Duration::from_secs(30))
+    .subscription_timeout(Duration::from_secs(120))
+    .build()
+    .await?;
+# Ok(()) }
+```
+
+You can then pass this `robust` provider into `EventScannerBuilder::connect` just like
+any other provider.
+
+---
+
 ## Testing
 
 (We recommend using [nextest](https://crates.io/crates/cargo-nextest) to run the tests)
