@@ -22,13 +22,13 @@
 //!
 //! # Examples
 //!
-//! Creating a robust WebSocket provider with an HTTP fallback and passing it to
-//! the event scanner:
+//! Creating a robust WebSocket provider with an HTTP fallback:
 //!
 //! ```rust,no_run
-//! use alloy::providers::ProviderBuilder;
-//! use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+//! use alloy::providers::{Provider, ProviderBuilder};
+//! use event_scanner::robust_provider::RobustProviderBuilder;
 //! use std::time::Duration;
+//! use tokio_stream::StreamExt;
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
@@ -41,8 +41,19 @@
 //!     .build()
 //!     .await?;
 //!
-//! let mut scanner = EventScannerBuilder::live().connect(robust);
-//! // register filters and start the scanner...
+//! // Make RPC calls with automatic retries and fallback
+//! let block_number = robust.get_block_number().await?;
+//! println!("Current block: {}", block_number);
+//!
+//! // Create subscriptions that automatically reconnect on failure
+//! let sub = robust.subscribe_blocks().await?;
+//! let mut stream = sub.into_stream();
+//! while let Some(response) = stream.next().await {
+//!     match response {
+//!         Ok(block) => println!("New block: {:?}", block),
+//!         Err(e) => println!("Got error: {:?}", e),
+//!     }
+//! }
 //! # Ok(()) }
 //! ```
 //!
