@@ -196,12 +196,12 @@ impl EventScannerBuilder<Unspecified> {
     /// # Reorg behavior
     ///
     /// When a reorg is detected:
-    /// 1. Emits [`ScannerStatus::ReorgDetected`][reorg] to all listeners
+    /// 1. Emits [`ScannerNotification::ReorgDetected`][reorg] to all listeners
     /// 2. Adjusts the next confirmed range using `block_confirmations`
     /// 3. Re-emits events from the corrected confirmed block range
     /// 4. Continues streaming from the new chain state
     ///
-    /// [reorg]: crate::types::ScannerStatus::ReorgDetected
+    /// [reorg]: crate::types::ScannerNotification::ReorgDetected
     #[must_use]
     pub fn live() -> EventScannerBuilder<Live> {
         EventScannerBuilder::default()
@@ -304,7 +304,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// During the scan, the scanner periodically checks the tip to detect reorgs. On reorg
     /// detection:
-    /// 1. Emits [`ScannerStatus::ReorgDetected`][reorg] to all listeners
+    /// 1. Emits [`ScannerNotification::ReorgDetected`][reorg] to all listeners
     /// 2. Resets to the updated tip
     /// 3. Restarts the scan from the new tip
     /// 4. Continues until `count` events are collected
@@ -319,7 +319,7 @@ impl EventScannerBuilder<Unspecified> {
     /// [subscribe]: EventScanner::subscribe
     /// [start]: EventScanner::start
     /// [sync_from_latest]: EventScannerBuilder::from_latest
-    /// [reorg]: crate::ScannerStatus::ReorgDetected
+    /// [reorg]: crate::ScannerNotification::ReorgDetected
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
         EventScannerBuilder::<LatestEvents>::new(count)
