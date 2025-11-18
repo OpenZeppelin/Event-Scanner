@@ -207,9 +207,7 @@ impl<N: Network> RobustSubscription<N> {
     }
 
     /// Convert the subscription into a stream.
-    ///
-    /// This spawns a background task that continuously receives from the subscription
-    /// and forwards items to a channel, which is then wrapped in a Stream.
+    /// Note: This stream will only receive blocks when polled.
     #[must_use]
     pub fn into_stream(self) -> RobustSubscriptionStream<N> {
         RobustSubscriptionStream::from(self)
@@ -318,6 +316,22 @@ mod tests {
         };
     }
 
+    /// Triggers a failover by waiting for timeout, then mines a block on the fallback provider
+    /// and asserts the next block number received from the stream.
+    async fn trigger_fb_and_assert_next_block(
+        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
+        fallback_provider: RootProvider,
+        expected_block: u64,
+    ) -> anyhow::Result<()> {
+        let task = tokio::spawn(async move {
+            sleep(SHORT_TIMEOUT + BUFFER_TIME).await;
+            fallback_provider.anvil_mine(Some(1), None).await.unwrap();
+        });
+        assert_next_block!(*stream, expected_block);
+        task.await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn ws_fails_http_fallback_returns_primary_error() -> anyhow::Result<()> {
         // Setup: Create WS primary and HTTP fallback
@@ -345,12 +359,13 @@ mod tests {
         ws_provider.anvil_mine(Some(1), None).await?;
         assert_next_block!(stream, 2);
 
-        // Wait long enough to trigger timeout, then mine on HTTP fallback
-        sleep(Duration::from_millis(600)).await;
-        http_provider.anvil_mine(Some(1), None).await?;
-
         // Verify: HTTP fallback can't provide subscription, so we get an error
+        let task = tokio::spawn(async move {
+            sleep(SHORT_TIMEOUT + BUFFER_TIME).await;
+            http_provider.anvil_mine(Some(1), None).await.unwrap();
+        });
         let err = stream.next().await.unwrap().unwrap_err();
+        task.await?;
         assert_backend_gone_or_timeout(err);
 
         Ok(())
@@ -378,11 +393,7 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // After timeout, should failover to fallback provider
-        let mining_task =
-            tokio::spawn(mine_after_delay(fallback.clone(), 1, SHORT_TIMEOUT + BUFFER_TIME));
-
-        assert_next_block!(stream, 1);
-        mining_task.await?;
+        trigger_fb_and_assert_next_block(&mut stream, fallback.clone(), 1).await?;
 
         fallback.anvil_mine(Some(1), None).await?;
         assert_next_block!(stream, 2);
@@ -410,11 +421,7 @@ mod tests {
         assert_next_block!(stream, 1);
 
         // Trigger failover to fallback
-        let failover_task =
-            tokio::spawn(mine_after_delay(fallback.clone(), 1, SHORT_TIMEOUT + BUFFER_TIME));
-
-        assert_next_block!(stream, 1);
-        failover_task.await?;
+        trigger_fb_and_assert_next_block(&mut stream, fallback.clone(), 1).await?;
 
         fallback.anvil_mine(Some(1), None).await?;
         assert_next_block!(stream, 2);
@@ -455,16 +462,10 @@ mod tests {
         assert_next_block!(stream, 1);
 
         // Failover to second provider
-        let task_2 =
-            tokio::spawn(mine_after_delay(provider_2.clone(), 1, SHORT_TIMEOUT + BUFFER_TIME));
-        assert_next_block!(stream, 1);
-        task_2.await?;
+        trigger_fb_and_assert_next_block(&mut stream, provider_2.clone(), 1).await?;
 
         // Failover to third provider
-        let task_3 =
-            tokio::spawn(mine_after_delay(provider_3.clone(), 1, SHORT_TIMEOUT + BUFFER_TIME));
-        assert_next_block!(stream, 1);
-        task_3.await?;
+        trigger_fb_and_assert_next_block(&mut stream, provider_3.clone(), 1).await?;
 
         Ok(())
     }
@@ -485,9 +486,6 @@ mod tests {
         // Test: Provider works initially
         provider.anvil_mine(Some(1), None).await?;
         assert_next_block!(stream, 1);
-
-        // Wait for timeout
-        // sleep(Duration::from_millis(601)).await;
 
         // Verify: No fallback available, should error
         let task = tokio::spawn(async move {
