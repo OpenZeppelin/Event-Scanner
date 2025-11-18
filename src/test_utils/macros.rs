@@ -66,15 +66,15 @@ macro_rules! assert_next {
 ///
 /// # Panics
 ///
-/// - **Timeout**: The stream doesn't produce the next expected event within the timeout period
+/// * **Timeout**: The stream doesn't produce the next expected event within the timeout period
 ///   (default 5 seconds, configurable via `timeout = N` parameter).
-/// - **Wrong event**: The stream emits a different event than the next expected one in the
+/// * **Wrong event**: The stream emits a different event than the next expected one in the
 ///   sequence.
-/// - **Extra events**: The stream emits more events than expected after the sequence completes.
-/// - **Stream closed early**: The stream ends before all expected events are emitted.
-/// - **Wrong message type**: The stream yields a non-`Data` message (e.g., `Error` or `Status`)
+/// * **Extra events**: The stream emits more events than expected after the sequence completes.
+/// * **Stream closed early**: The stream ends before all expected events are emitted.
+/// * **Wrong message type**: The stream yields a non-`Data` message (e.g., `Error` or `Status`)
 ///   when an event is expected.
-/// - **Empty sequence**: The macro is called with an empty event collection (use `assert_empty!`
+/// * **Empty sequence**: The macro is called with an empty event collection (use `assert_empty!`
 ///   instead).
 ///
 /// On panic, the error message includes the remaining expected events for debugging.
