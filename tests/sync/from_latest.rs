@@ -44,6 +44,7 @@ async fn happy_path_no_duplicates() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(8) }
         ]
     );
+    assert_empty!(stream);
 
     Ok(())
 }
@@ -82,6 +83,7 @@ async fn fewer_historical_then_continues_live() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(4) }
         ]
     );
+    assert_empty!(stream);
 
     Ok(())
 }
@@ -144,6 +146,7 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(2) }
         ]
     );
+    assert_empty!(stream);
 
     Ok(())
 }
@@ -184,6 +187,7 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
     contract.increase().send().await?.watch().await?;
 
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
+    assert_empty!(stream);
 
     Ok(())
 }

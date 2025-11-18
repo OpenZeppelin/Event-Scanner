@@ -48,6 +48,7 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
             TestCounter::CountDecreased { newCount: U256::from(3) }
         ]
     );
+    assert_empty!(stream);
 
     Ok(())
 }

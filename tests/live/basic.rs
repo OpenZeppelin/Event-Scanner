@@ -1,10 +1,6 @@
-use std::time::Duration;
-
 use crate::common::{TestCounter, deploy_counter, setup_live_scanner};
 use alloy::{primitives::U256, sol_types::SolEvent};
 use event_scanner::{EventFilter, assert_empty, assert_event_sequence};
-use tokio::time::timeout;
-use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn basic_single_event_scanning() -> anyhow::Result<()> {
@@ -124,32 +120,21 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
 #[tokio::test]
 async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
     let setup = setup_live_scanner(Some(0.1), None, 0).await?;
-    let contract = setup.contract.clone();
+    let contract = setup.contract;
+    let mut scanner = setup.scanner;
 
     // Subscribe to CountDecreased but only emit CountIncreased
     let filter = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
 
-    let num_of_events = 3;
-
-    let mut scanner = setup.scanner;
-
-    let mut stream = scanner.subscribe(filter).take(num_of_events);
+    let stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
-    for _ in 0..num_of_events {
-        contract.increase().send().await?.watch().await?;
-    }
+    contract.increase().send().await?.watch().await?;
 
-    let event_counting = async move {
-        _ = stream.next().await;
-    };
-
-    if timeout(Duration::from_secs(1), event_counting).await.is_ok() {
-        anyhow::bail!("scanner should have ignored all of the emitted events");
-    }
+    assert_empty!(stream);
 
     Ok(())
 }
@@ -157,30 +142,19 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 #[tokio::test]
 async fn filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let setup = setup_live_scanner(Some(0.1), None, 0).await?;
-    let contract = setup.contract.clone();
+    let contract = setup.contract;
+    let mut scanner = setup.scanner;
 
     let filter =
         EventFilter::new().contract_address(*contract.address()).event("invalid-sig".to_string());
 
-    let num_of_events = 3;
-
-    let mut scanner = setup.scanner;
-
-    let mut stream = scanner.subscribe(filter).take(num_of_events);
+    let stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
-    for _ in 0..num_of_events {
-        contract.increase().send().await?.watch().await?;
-    }
+    contract.increase().send().await?.watch().await?;
 
-    let event_counting = async move {
-        _ = stream.next().await;
-    };
-
-    if timeout(Duration::from_secs(1), event_counting).await.is_ok() {
-        anyhow::bail!("scanner should have ignored all of the emitted events");
-    }
+    assert_empty!(stream);
 
     Ok(())
 }
