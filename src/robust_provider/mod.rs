@@ -2,28 +2,27 @@
 //!
 //! This module exposes [`RobustProvider`], a small wrapper around Alloy's
 //! `RootProvider` that adds:
-//! * bounded per-call timeouts,
-//! * exponential backoff retries,
-//! * transparent failover between a primary and one or more fallback providers,
-//! * more robust WebSocket block subscriptions with automatic reconnection.
+//! * bounded per-call timeouts
+//! * exponential backoff retries
+//! * transparent failover between a primary and one or more fallback providers
+//! * more robust WebSocket block subscriptions with automatic reconnection
 //!
 //! Use [`RobustProviderBuilder`] to construct a provider with sensible defaults
-//! and optional fallbacks, or use the [`IntoRobustProvider`] and [`IntoProvider`]
-//! traits to upgrade common provider types.
+//! and optional fallbacks, or implement the [`IntoRobustProvider`] and [`IntoProvider`]
+//! traits to support custom providers.
 //!
 //! # How it works
 //!
 //! All RPC calls performed through [`RobustProvider`] are wrapped in a total
 //! timeout (`call_timeout`) and retried with exponential backoff up to
 //! `max_retries`. If the primary provider keeps failing, the call is retried
-//! against the configured fallback providers in order. For subscriptions,
+//! against the configured fallback providers in the order they were added. For subscriptions,
 //! [`RobustSubscription`] also tracks lag, switches to fallbacks on repeated
-//! failure, and periodically attempts to reconnect to the primary provider
-//! (`reconnect_interval`).
+//! failure, and periodically attempts to reconnect to the primary provider.
 //!
 //! # Examples
 //!
-//! Creating a robust WebSocket provider with a HTTP fallback and passing it to
+//! Creating a robust WebSocket provider with an HTTP fallback and passing it to
 //! the event scanner:
 //!
 //! ```rust,no_run
