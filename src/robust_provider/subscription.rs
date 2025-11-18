@@ -218,6 +218,7 @@ type SubscriptionResult<N> = (Result<<N as Network>::HeaderResponse, Error>, Rob
 
 pub struct RobustSubscriptionStream<N: Network> {
     inner: ReusableBoxFuture<'static, SubscriptionResult<N>>,
+    finished: bool,
 }
 
 async fn make_future<N: Network>(mut rx: RobustSubscription<N>) -> SubscriptionResult<N> {
@@ -229,7 +230,13 @@ impl<N: 'static + Clone + Send + Network> RobustSubscriptionStream<N> {
     /// Create a new `RobustSubscriptionStream`.
     #[must_use]
     pub fn new(rx: RobustSubscription<N>) -> Self {
-        Self { inner: ReusableBoxFuture::new(make_future(rx)) }
+        Self { inner: ReusableBoxFuture::new(make_future(rx)), finished: false }
+    }
+
+    /// Returns true if the stream has reached a terminal state.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.finished
     }
 }
 
@@ -237,11 +244,21 @@ impl<N: 'static + Clone + Send + Network> Stream for RobustSubscriptionStream<N>
     type Item = Result<N::HeaderResponse, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.finished {
+            return Poll::Ready(None);
+        }
+
         let (result, rx) = ready!(self.inner.poll(cx));
-        self.inner.set(make_future(rx));
+
         match result {
-            Ok(item) => Poll::Ready(Some(Ok(item))),
-            Err(e) => Poll::Ready(Some(Err(e))),
+            Ok(item) => {
+                self.inner.set(make_future(rx));
+                Poll::Ready(Some(Ok(item)))
+            }
+            Err(e) => {
+                self.finished = true;
+                Poll::Ready(Some(Err(e)))
+            }
         }
     }
 }
@@ -263,8 +280,8 @@ mod tests {
     use tokio::time::{Duration, sleep};
     use tokio_stream::StreamExt;
 
-    const SHORT_TIMEOUT: Duration = Duration::from_millis(500);
-    const RECONNECT_INTERVAL: Duration = Duration::from_millis(800);
+    const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
+    const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
     const BUFFER_TIME: Duration = Duration::from_millis(100);
 
     async fn spawn_ws_anvil() -> anyhow::Result<(AnvilInstance, RootProvider)> {
@@ -291,6 +308,34 @@ mod tests {
                 panic!("Unexpected BlockNotFound error");
             }
         }
+    }
+
+    #[macro_export]
+    macro_rules! assert_stream_finished {
+        ($stream: expr) => {
+            $crate::assert_stream_finished!($stream, finish_secs = 3)
+        };
+        ($stream: expr, finish_secs = $finish: expr) => {{
+            let next_item = tokio_stream::StreamExt::next(&mut $stream).await;
+            match next_item {
+                Some(Ok(item)) => panic!("Expected no item during quiet window, got: {:?}", item),
+                None => {
+                    // Stream already finished, we're done
+                }
+                Some(Err(e)) => {
+                    assert!(matches!(e, Error::Timeout), "Expected Timeout error, got: {:?}", e);
+
+                    // Now verify stream actually finishes
+                    let second = tokio::time::timeout(
+                        std::time::Duration::from_secs($finish),
+                        tokio_stream::StreamExt::next(&mut $stream),
+                    )
+                    .await
+                    .expect("expected stream to finish after quiet window");
+                    assert!(second.is_none(), "Expected stream to be finished, got: {:?}", second);
+                }
+            }
+        }};
     }
 
     #[macro_export]
@@ -344,7 +389,6 @@ mod tests {
 
         let robust = RobustProviderBuilder::fragile(ws_provider.clone())
             .fallback(http_provider.clone())
-            .call_timeout(Duration::from_millis(500))
             .subscription_timeout(Duration::from_secs(1))
             .build()
             .await?;
@@ -367,6 +411,9 @@ mod tests {
         let err = stream.next().await.unwrap().unwrap_err();
         task.await?;
         assert_backend_gone_or_timeout(err);
+
+        let next = stream.next().await;
+        assert!(next.is_none(), "Expected stream to be finished, got: {next:?}");
 
         Ok(())
     }
@@ -436,6 +483,8 @@ mod tests {
         // Verify: Successfully reconnected to primary (block 2 on primary chain)
         assert_next_block!(stream, 2);
         reconnect_task.await?;
+
+        assert_stream_finished!(stream);
 
         Ok(())
     }
