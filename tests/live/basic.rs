@@ -46,7 +46,7 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
                 Message::Error(e) => {
                     panic!("panicked with error: {e}");
                 }
-                Message::Status(_) => {
+                Message::Notification(_) => {
                     // Handle info if needed
                 }
             }
@@ -114,7 +114,7 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
                     Message::Error(e) => {
                         panic!("panicked with error: {e}");
                     }
-                    Message::Status(_) => {
+                    Message::Notification(_) => {
                         // Handle info if needed
                     }
                 }

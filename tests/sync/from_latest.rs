@@ -1,7 +1,7 @@
 use alloy::{primitives::U256, providers::ext::AnvilApi};
 
 use crate::common::{TestCounter, setup_sync_from_latest_scanner};
-use event_scanner::{ScannerStatus, assert_next};
+use event_scanner::{ScannerNotification, assert_next};
 
 #[tokio::test]
 async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> {
@@ -31,7 +31,7 @@ async fn scan_latest_then_live_happy_path_no_duplicates() -> anyhow::Result<()> 
         ]
     );
     // Transition to live
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerNotification::SwitchingToLive);
 
     // Live phase: emit three more, should arrive in order without duplicating latest
     contract.increase().send().await?.watch().await?;
@@ -64,7 +64,7 @@ async fn scan_latest_then_live_fewer_historical_then_continues_live() -> anyhow:
             TestCounter::CountIncreased { newCount: U256::from(2) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerNotification::SwitchingToLive);
 
     // Live: two more arrive
     contract.increase().send().await?.watch().await?;
@@ -99,7 +99,7 @@ async fn scan_latest_then_live_exact_historical_count_then_live() -> anyhow::Res
             TestCounter::CountIncreased { newCount: U256::from(4) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerNotification::SwitchingToLive);
 
     // Live continues
     contract.increase().send().await?.watch().await?;
@@ -120,7 +120,7 @@ async fn scan_latest_then_live_no_historical_only_live_streams() -> anyhow::Resu
     // Latest is empty
     let expected: &[TestCounter::CountIncreased] = &[];
     assert_next!(stream, expected);
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerNotification::SwitchingToLive);
 
     // Live events arrive
     contract.increase().send().await?.watch().await?;
@@ -160,7 +160,7 @@ async fn scan_latest_then_live_boundary_no_duplication() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerNotification::SwitchingToLive);
 
     // Immediately produce a new live event in a new block
     contract.increase().send().await?.watch().await?;
@@ -192,7 +192,7 @@ async fn scan_latest_then_live_waiting_on_live_logs_arriving() -> anyhow::Result
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, ScannerNotification::SwitchingToLive);
 
     let inner = stream.into_inner();
     assert!(inner.is_empty());

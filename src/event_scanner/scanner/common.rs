@@ -133,7 +133,7 @@ pub fn spawn_log_consumers<N: Network>(
                             break;
                         }
                     }
-                    Ok(BlockRangeMessage::Status(status)) => {
+                    Ok(BlockRangeMessage::Notification(status)) => {
                         info!(status = ?status, "Received status message");
                         if !sender.try_stream(status).await {
                             break;

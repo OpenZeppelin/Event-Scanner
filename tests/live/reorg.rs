@@ -6,7 +6,7 @@ use alloy::{
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{ScannerStatus, assert_empty, assert_next};
+use event_scanner::{ScannerNotification, assert_empty, assert_next};
 
 #[tokio::test]
 async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
@@ -38,7 +38,7 @@ async fn reorg_rescans_events_within_same_block() -> anyhow::Result<()> {
     provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, ScannerNotification::ReorgDetected);
     assert_next!(
         stream,
         &[
@@ -82,7 +82,7 @@ async fn reorg_rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, ScannerNotification::ReorgDetected);
     assert_next!(stream, &[CountIncreased { newCount: U256::from(2) }]);
     assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
     assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
@@ -117,7 +117,7 @@ async fn reorg_depth_one() -> anyhow::Result<()> {
     provider.primary().anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, ScannerNotification::ReorgDetected);
     assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
     assert_empty!(stream);
 
@@ -150,7 +150,7 @@ async fn reorg_depth_two() -> anyhow::Result<()> {
     provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, ScannerNotification::ReorgDetected);
     assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
     assert_empty!(stream);
 
