@@ -22,7 +22,7 @@
 //!
 //! # Examples
 //!
-//! Creating a robust WebSocket provider with an HTTP fallback:
+//! Creating a robust WebSocket provider with a fallback:
 //!
 //! ```rust,no_run
 //! use alloy::providers::{Provider, ProviderBuilder};
@@ -32,10 +32,10 @@
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-//! let http = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
+//! let ws_fallback = ProviderBuilder::new().connect("ws://localhost:8456").await?;
 //!
 //! let robust = RobustProviderBuilder::new(ws)
-//!     .fallback(http)
+//!     .fallback(ws_fallback)
 //!     .call_timeout(Duration::from_secs(30))
 //!     .subscription_timeout(Duration::from_secs(120))
 //!     .build()
