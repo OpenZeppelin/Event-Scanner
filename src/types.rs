@@ -24,7 +24,11 @@ impl<T: Clone, E: Error + Clone> From<ScannerNotification> for ScannerMessage<T,
 
 impl<T: Clone, E: Error + Clone> PartialEq<ScannerNotification> for ScannerMessage<T, E> {
     fn eq(&self, other: &ScannerNotification) -> bool {
-        if let ScannerMessage::Notification(status) = self { status == other } else { false }
+        if let ScannerMessage::Notification(notification) = self {
+            notification == other
+        } else {
+            false
+        }
     }
 }
 

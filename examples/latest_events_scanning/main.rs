@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
                 error!("Received error: {}", e);
             }
             Message::Notification(info) => {
-                info!("Received status: {:?}", info);
+                info!("Received notification: {:?}", info);
             }
         }
     }

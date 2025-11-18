@@ -47,8 +47,8 @@
 //!                     }
 //!                 }
 //!             }
-//!             Message::Status(status) => {
-//!                 info!("Received status message: {:?}", status);
+//!             Message::Notification(notification) => {
+//!                 info!("Received notification: {:?}", notification);
 //!             }
 //!         }
 //!     }
@@ -684,7 +684,7 @@ impl<N: Network> Service<N> {
                     }
                 }
                 other => {
-                    // Could be error or status
+                    // Could be error or notification
                     if !sender.try_stream(other).await {
                         break;
                     }

@@ -167,8 +167,8 @@ impl EventScannerBuilder<Unspecified> {
     ///         Message::Data(logs) => {
     ///             println!("Received {} new events", logs.len());
     ///         }
-    ///         Message::Status(status) => {
-    ///             println!("Status: {:?}", status);
+    ///         Message::Notification(notification) => {
+    ///             println!("Notification received: {:?}", notification);
     ///         }
     ///         Message::Error(e) => {
     ///             eprintln!("Error: {}", e);
