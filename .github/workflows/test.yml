@@ -54,4 +54,4 @@ jobs:
 
         # https://github.com/rust-lang/cargo/issues/6669
       - name: Run doc tests
-        run: cargo test --locked --doc
+        run: cargo test --locked --doc --all-features --no-fail-fast

@@ -5,7 +5,7 @@ use alloy::{
 };
 use alloy_node_bindings::Anvil;
 use event_scanner::{
-    ScannerError, ScannerStatus, assert_closed, assert_empty, assert_next,
+    ScannerError, ScannerStatus, assert_closed, assert_empty, assert_next, assert_range_coverage,
     block_range_scanner::BlockRangeScanner,
 };
 
@@ -22,11 +22,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     provider.anvil_mine(Some(5), None).await?;
 
-    assert_next!(stream, 1..=1);
-    assert_next!(stream, 2..=2);
-    assert_next!(stream, 3..=3);
-    assert_next!(stream, 4..=4);
-    assert_next!(stream, 5..=5);
+    assert_range_coverage!(stream, 1..=5);
     let mut stream = assert_empty!(stream);
 
     provider.anvil_mine(Some(1), None).await?;
@@ -40,11 +36,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     provider.anvil_mine(Some(5), None).await?;
 
-    assert_next!(stream, 6..=6);
-    assert_next!(stream, 7..=7);
-    assert_next!(stream, 8..=8);
-    assert_next!(stream, 9..=9);
-    assert_next!(stream, 10..=10);
+    assert_range_coverage!(stream, 6..=10);
     let mut stream = assert_empty!(stream);
 
     provider.anvil_mine(Some(1), None).await?;
@@ -97,14 +89,10 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
     // assert initial block ranges immediately to avoid Anvil race condition:
     //
     // when a reorg happens after anvil_mine, Anvil occasionally first streams a non-zero block
-    // number, which makes it impossible to deterministically assert the next expected block range
+    // number, which makes it impossible to deterministically assert the first expected block range
     // streamed by the scanner
-    assert_next!(stream, 0..=0);
-    assert_next!(stream, 1..=1);
-    assert_next!(stream, 2..=2);
-    assert_next!(stream, 3..=3);
-    assert_next!(stream, 4..=4);
-    assert_next!(stream, 5..=5);
+    assert_range_coverage!(stream, 0..=5);
+    let mut stream = assert_empty!(stream);
 
     // reorg less blocks than the block_confirmation config
     provider.anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs: vec![] }).await?;
@@ -112,11 +100,7 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
     provider.anvil_mine(Some(5), None).await?;
 
     // no ReorgDetected should be emitted
-    assert_next!(stream, 6..=6);
-    assert_next!(stream, 7..=7);
-    assert_next!(stream, 8..=8);
-    assert_next!(stream, 9..=9);
-    assert_next!(stream, 10..=10);
+    assert_range_coverage!(stream, 6..=10);
     assert_empty!(stream);
 
     Ok(())
@@ -137,16 +121,10 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     // assert initial block ranges immediately to avoid Anvil race condition:
     //
     // when a reorg happens after anvil_mine, Anvil occasionally first streams a non-zero block
-    // number, which makes it impossible to deterministically assert the next expected block range
+    // number, which makes it impossible to deterministically assert the first expected block range
     // streamed by the scanner
-    assert_next!(stream, 0..=0);
-    assert_next!(stream, 1..=1);
-    assert_next!(stream, 2..=2);
-    assert_next!(stream, 3..=3);
-    assert_next!(stream, 4..=4);
-    assert_next!(stream, 5..=5);
-    assert_next!(stream, 6..=6);
-    assert_next!(stream, 7..=7);
+    assert_range_coverage!(stream, 0..=7);
+    let mut stream = assert_empty!(stream);
 
     // reorg more blocks than the block_confirmation config
     provider.anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
@@ -154,17 +132,7 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     provider.anvil_mine(Some(3), None).await?;
 
     assert_next!(stream, ScannerStatus::ReorgDetected);
-    assert_next!(stream, 0..=0);
-    assert_next!(stream, 1..=1);
-    assert_next!(stream, 2..=2);
-    assert_next!(stream, 3..=3);
-    assert_next!(stream, 4..=4);
-    assert_next!(stream, 5..=5);
-    assert_next!(stream, 6..=6);
-    assert_next!(stream, 7..=7);
-    assert_next!(stream, 8..=8);
-    assert_next!(stream, 9..=9);
-    assert_next!(stream, 10..=10);
+    assert_range_coverage!(stream, 0..=10);
     assert_empty!(stream);
 
     Ok(())
