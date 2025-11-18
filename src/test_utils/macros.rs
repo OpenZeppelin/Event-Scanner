@@ -23,41 +23,61 @@ macro_rules! assert_next {
     };
 }
 
-// TODO: implement assert_range_coverage
-
-/// Asserts that the stream emits the given events in order.
+/// Asserts that a stream emits a specific sequence of events in order.
 ///
-/// The macro asserts that all of the provided events are emitted in the order they are provided, no
-/// matter how many stream batches are necessary to emit them, that no other events are emitted in
-/// between, and that the final event is the last event in the last batch of the stream.
+/// This macro consumes messages from a stream and verifies that the provided events are emitted
+/// in the exact order specified, regardless of how they are batched. The stream may emit events
+/// across multiple batches or all at once—the macro handles both cases. It ensures no unexpected
+/// events appear between the expected ones and that the sequence completes exactly as specified.
 ///
-/// The provided events can be of any type that implements [`SolEvent`](alloy::sol_types::SolEvent).
+/// The macro accepts events of any type implementing [`SolEvent`](alloy::sol_types::SolEvent).
+/// Events are compared by their encoded log data, allowing flexible matching across different
+/// batch configurations while maintaining strict ordering requirements.
 ///
 /// # Examples
 ///
 /// ```
-/// let mut stream = scanner.subscribe(EventFilter::new().contract_address(contract_address));
-/// assert_event_sequence!(
-///     stream,
-///     &[CountIncreased { newCount: U256::from(1) }, CountIncreased { newCount: U256::from(2) },]
-/// );
+/// sol! {
+///     event CountIncreased {
+///         uint256 newCount;
+///     }
+/// }
+///
+/// #[tokio::test]
+/// async fn test_event_order() {
+///     // scanner setup...
+///
+///     let mut stream = scanner.subscribe(EventFilter::new().contract_address(contract_address));
+///
+///     // Assert these two events are emitted in order
+///     assert_event_sequence!(
+///         stream,
+///         &[
+///             CountIncreased { newCount: U256::from(1) },
+///             CountIncreased { newCount: U256::from(2) },
+///         ]
+///     );
+/// }
 /// ```
 ///
-/// The above assertion will pass if next stream batches are any of the following:
-///
-/// 1. Each event separate:
-///     - Batch 1: `[CountIncreased { newCount: U256::from(1) }]`
-///     - Batch 2: `[CountIncreased { newCount: U256::from(2) }]`
-/// 2. Events in the same batch:
-///     - Batch 1: `[CountIncreased { newCount: U256::from(1) }, CountIncreased { newCount:
-///    U256::from(2) }]`
+/// The assertion passes whether events arrive in separate batches or together:
+/// * **Separate batches**: `[Event1]`, then `[Event2]`
+/// * **Single batch**: `[Event1, Event2]`
 ///
 /// # Panics
 ///
-/// * If the stream emits a different event than the next expected one
-/// * If the stream is closed before all of the expected events are emitted
-/// * If the stream emits more events than expected
-/// * If the stream times out before all of the expected events are emitted
+/// - **Timeout**: The stream doesn't produce the next expected event within the timeout period
+///   (default 5 seconds, configurable via `timeout = N` parameter).
+/// - **Wrong event**: The stream emits a different event than the next expected one in the
+///   sequence.
+/// - **Extra events**: The stream emits more events than expected after the sequence completes.
+/// - **Stream closed early**: The stream ends before all expected events are emitted.
+/// - **Wrong message type**: The stream yields a non-`Data` message (e.g., `Error` or `Status`)
+///   when an event is expected.
+/// - **Empty sequence**: The macro is called with an empty event collection (use `assert_empty!`
+///   instead).
+///
+/// On panic, the error message includes the remaining expected events for debugging.
 #[macro_export]
 macro_rules! assert_event_sequence {
     // owned slices just pass to the borrowed slices variant
