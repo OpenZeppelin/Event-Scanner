@@ -82,6 +82,9 @@ macro_rules! assert_event_sequence {
     };
     ($stream: expr, $events: expr, timeout = $secs: expr) => {
         let expected_options = $events.iter().map(alloy::sol_types::SolEvent::encode_log_data).collect::<Vec<_>>();
+        if expected_options.is_empty() {
+            panic!("error: assert_event_sequence! called with an empty collection. Use assert_empty! macro instead to check for no pending messages.")
+        }
         $crate::test_utils::macros::assert_event_sequence(&mut $stream, expected_options.iter(), $secs).await
     };
 }
@@ -163,4 +166,36 @@ macro_rules! assert_empty {
         assert!(inner.is_empty(), "Stream should have no pending messages");
         tokio_stream::wrappers::ReceiverStream::new(inner)
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy::sol;
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    sol! {
+        #[derive(Debug)]
+        event Transfer(address indexed from, address indexed to, uint256 value);
+    }
+
+    #[tokio::test]
+    #[should_panic = "error: assert_event_sequence! called with an empty collection. Use assert_empty! macro instead to check for no pending messages."]
+    async fn assert_event_sequence_macro_with_empty_vec() {
+        let (_tx, rx) = mpsc::channel(10);
+        let mut stream = ReceiverStream::new(rx);
+
+        let empty_vec: Vec<Transfer> = Vec::new();
+        assert_event_sequence!(stream, empty_vec);
+    }
+
+    #[tokio::test]
+    #[should_panic = "error: assert_event_sequence! called with an empty collection. Use assert_empty! macro instead to check for no pending messages."]
+    async fn assert_event_sequence_macro_with_empty_slice() {
+        let (_tx, rx) = mpsc::channel(10);
+        let mut stream = ReceiverStream::new(rx);
+
+        let empty_vec: &[Transfer] = &[];
+        assert_event_sequence!(stream, empty_vec);
+    }
 }
