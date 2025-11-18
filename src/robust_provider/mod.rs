@@ -1,7 +1,7 @@
 //! Robust, retrying wrapper around Alloy providers.
 //!
 //! This module exposes [`RobustProvider`], a small wrapper around Alloy's
-//! [`RootProvider`] that adds:
+//! `RootProvider` that adds:
 //! * bounded per-call timeouts,
 //! * exponential backoff retries,
 //! * transparent failover between a primary and one or more fallback providers,
@@ -33,7 +33,7 @@
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-//! let http = ProviderBuilder::new().connect_http("http://localhost:8545");
+//! let http = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
 //!
 //! let robust = RobustProviderBuilder::new(ws)
 //!     .fallback(http)
