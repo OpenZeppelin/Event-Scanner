@@ -133,6 +133,34 @@ macro_rules! assert_event_sequence {
     };
 }
 
+/// Same as [`assert_event_sequence!`], but invokes [`assert_empty!`] at the end.
+#[macro_export]
+macro_rules! assert_event_sequence_final {
+    // owned slices
+    ($stream: expr, [$($event:expr),+ $(,)?]) => {{
+        assert_event_sequence_final!($stream, &[$($event),+])
+    }};
+    ($stream: expr, [$($event:expr),+ $(,)?], timeout = $secs: expr) => {{
+        assert_event_sequence_final!($stream, &[$($event),+], timeout = $secs)
+    }};
+    // borrowed slices
+    ($stream: expr, &[$($event:expr),+ $(,)?]) => {{
+        assert_event_sequence_final!($stream, &[$($event),+], timeout = 5)
+    }};
+    ($stream: expr, &[$($event:expr),+ $(,)?], timeout = $secs: expr) => {{
+        $crate::assert_event_sequence!($stream, &[$($event),+], timeout = $secs);
+        $crate::assert_empty!($stream)
+    }};
+    // variables and non-slice expressions
+    ($stream: expr, $events: expr) => {{
+        assert_event_sequence_final!($stream, $events, timeout = 5)
+    }};
+    ($stream: expr, $events: expr, timeout = $secs: expr) => {{
+        $crate::assert_event_sequence!($stream, $events, timeout = $secs);
+        $crate::assert_empty!($stream)
+    }};
+}
+
 #[allow(clippy::missing_panics_doc)]
 pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
     stream: &mut S,
