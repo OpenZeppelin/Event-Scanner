@@ -23,6 +23,31 @@ macro_rules! assert_next {
     };
 }
 
+#[macro_export]
+macro_rules! assert_closed {
+    ($stream: expr) => {
+        assert_closed!($stream, timeout = 5)
+    };
+    ($stream: expr, timeout = $secs: expr) => {
+        let message = tokio::time::timeout(
+            std::time::Duration::from_secs($secs),
+            tokio_stream::StreamExt::next(&mut $stream),
+        )
+        .await
+        .expect("timed out");
+        assert!(message.is_none())
+    };
+}
+
+#[macro_export]
+macro_rules! assert_empty {
+    ($stream: expr) => {{
+        let inner = $stream.into_inner();
+        assert!(inner.is_empty(), "Stream should have no pending messages");
+        tokio_stream::wrappers::ReceiverStream::new(inner)
+    }};
+}
+
 /// Asserts that a stream emits a specific sequence of events in order.
 ///
 /// This macro consumes messages from a stream and verifies that the provided events are emitted
@@ -160,31 +185,6 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
             }
         }
     }
-}
-
-#[macro_export]
-macro_rules! assert_closed {
-    ($stream: expr) => {
-        assert_closed!($stream, timeout = 5)
-    };
-    ($stream: expr, timeout = $secs: expr) => {
-        let message = tokio::time::timeout(
-            std::time::Duration::from_secs($secs),
-            tokio_stream::StreamExt::next(&mut $stream),
-        )
-        .await
-        .expect("timed out");
-        assert!(message.is_none())
-    };
-}
-
-#[macro_export]
-macro_rules! assert_empty {
-    ($stream: expr) => {{
-        let inner = $stream.into_inner();
-        assert!(inner.is_empty(), "Stream should have no pending messages");
-        tokio_stream::wrappers::ReceiverStream::new(inner)
-    }};
 }
 
 /// Asserts that a stream of block ranges completely covers an expected block range.
