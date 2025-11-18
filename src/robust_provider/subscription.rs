@@ -23,9 +23,6 @@ pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
 /// Maximum number of consecutive lags before switching providers
 const MAX_LAG_COUNT: usize = 3;
 
-/// Max amount of buffered blocks stream can hold
-pub const MAX_BUFFERED_BLOCKS: usize = 50000;
-
 /// A robust subscription wrapper that automatically handles provider failover
 /// and periodic reconnection attempts to the primary provider.
 #[derive(Debug)]
