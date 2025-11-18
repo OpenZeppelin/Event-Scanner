@@ -114,7 +114,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         stream,
         &[
             TestCounter::CountIncreased { newCount: U256::from(3) },
-            TestCounter::CountIncreased { newCount: U256::from(4) }
+            TestCounter::CountIncreased { newCount: U256::from(4) },
         ]
     );
     let stream = assert_empty!(stream);

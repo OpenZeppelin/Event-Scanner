@@ -72,16 +72,7 @@ macro_rules! assert_event_sequence {
         assert_event_sequence!($stream, &[$($event),+], timeout = 5)
     };
     ($stream: expr, &[$($event:expr),+ $(,)?], timeout = $secs: expr) => {
-        let expected_options = &[
-            $(
-                {
-                    let event = &$event;
-                    let encoded_data = alloy::sol_types::SolEvent::encode_log_data(event);
-                    let debug_string = format!("{:#?}", event);
-                    (encoded_data, debug_string)
-                }
-            ),+
-        ];
+        let expected_options = &[$(alloy::sol_types::SolEvent::encode_log_data(&$event)),+];
 
        $crate::test_utils::macros::assert_event_sequence(&mut $stream, expected_options, $secs).await
     };
@@ -90,7 +81,7 @@ macro_rules! assert_event_sequence {
         assert_event_sequence!($stream, $events, timeout = 5)
     };
     ($stream: expr, $events: expr, timeout = $secs: expr) => {
-        let expected_options = $events.iter().map(|e| (alloy::sol_types::SolEvent::encode_log_data(e), format!("{e:#?}"))).collect::<Vec<_>>();
+        let expected_options = $events.iter().map(alloy::sol_types::SolEvent::encode_log_data).collect::<Vec<_>>();
         $crate::test_utils::macros::assert_event_sequence(&mut $stream, expected_options.iter(), $secs).await
     };
 }
@@ -98,7 +89,7 @@ macro_rules! assert_event_sequence {
 #[allow(clippy::missing_panics_doc)]
 pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
     stream: &mut S,
-    expected_options: impl IntoIterator<Item = &(LogData, String)>,
+    expected_options: impl IntoIterator<Item = &LogData>,
     timeout_secs: u64,
 ) {
     let mut remaining = expected_options.into_iter();
@@ -124,19 +115,17 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
                 let mut batch = batch.iter();
                 let event = batch.next().expect("Streamed batch should not be empty");
                 assert_eq!(
-                    &expected.0,
+                    expected,
                     event.data(),
-                    "Unexpected event: {event:#?}\nExpected: {}\nRemaining: {:#?}",
-                    expected.1,
+                    "\nRemaining: {:#?}\n",
                     remaining.collect::<Vec<_>>()
                 );
                 while let Some(event) = batch.next() {
-                    let expected = remaining.next().unwrap_or_else(|| panic!("Received more events than expected, current: {event:#?}\nStreamed batch: {batch:#?}"));
+                    let expected = remaining.next().unwrap_or_else(|| panic!("Received more events than expected.\nNext event: {:#?}\nStreamed remaining: {batch:#?}", event.data()));
                     assert_eq!(
-                        &expected.0,
+                        expected,
                         event.data(),
-                        "Unexpected event: {event:#?}\nExpected: {}\nRemaining: {:#?}",
-                        expected.1,
+                        "\nRemaining: {:#?}\n",
                         remaining.collect::<Vec<_>>()
                     );
                 }
