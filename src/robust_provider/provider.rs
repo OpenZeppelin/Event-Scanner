@@ -301,9 +301,13 @@ impl<N: Network> RobustProvider<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robust_provider::{
-        RobustProviderBuilder, builder::DEFAULT_SUBSCRIPTION_TIMEOUT,
-        subscription::DEFAULT_RECONNECT_INTERVAL,
+    use crate::{
+        assert_empty,
+        robust_provider::{
+            RobustProviderBuilder,
+            builder::DEFAULT_SUBSCRIPTION_TIMEOUT,
+            subscription::{DEFAULT_RECONNECT_INTERVAL, RobustSubscriptionStream},
+        },
     };
     use alloy::providers::{ProviderBuilder, WsConnect};
     use alloy_node_bindings::Anvil;
@@ -320,6 +324,14 @@ mod tests {
             min_delay: Duration::from_millis(min_delay),
             reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
         }
+    }
+
+    fn assert_empty<N: Network>(
+        stream: RobustSubscriptionStream<N>,
+    ) -> RobustSubscriptionStream<N> {
+        let inner = stream.into_inner();
+        let inner = assert_empty!(inner);
+        RobustSubscriptionStream::new(inner)
     }
 
     #[tokio::test]
