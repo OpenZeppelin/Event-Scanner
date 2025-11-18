@@ -36,11 +36,10 @@ macro_rules! assert_next {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
+/// # use alloy::sol;
 /// sol! {
-///     event CountIncreased {
-///         uint256 newCount;
-///     }
+///     event CountIncreased(uint256 newCount);
 /// }
 ///
 /// #[tokio::test]
