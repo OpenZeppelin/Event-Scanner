@@ -507,7 +507,7 @@ impl<N: Network> Service<N> {
             let expected_hash: BlockHash = expected_hash.into();
 
             if block_hash != expected_hash &&
-                !sender.try_stream(Message::Status(ScannerStatus::ReorgDetected)).await
+                !sender.try_stream(Message::Notification(Notification::ReorgDetected)).await
             {
                 return Err(ScannerError::ServiceShutdown);
             }
