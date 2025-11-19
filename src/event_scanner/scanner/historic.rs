@@ -2,7 +2,6 @@ use alloy::{
     consensus::BlockHeader,
     eips::BlockId,
     network::{BlockResponse, Network},
-    primitives::BlockNumber,
 };
 
 use super::common::{ConsumerMode, handle_stream};
@@ -45,24 +44,19 @@ impl EventScannerBuilder<Historic> {
         let provider = scanner.block_range_scanner.provider();
         let latest_block = provider.get_block_number().await?;
 
-        let from_num: BlockNumber;
-        let to_num: BlockNumber;
-
-        // let from_num = scanner.config.from_block.into
-
-        match scanner.config.from_block {
-            BlockId::Number(from_block) => from_num = from_block.as_number().unwrap_or(0),
+        let from_num = match scanner.config.from_block {
+            BlockId::Number(from_block) => from_block.as_number().unwrap_or(0),
             BlockId::Hash(from_hash) => {
-                from_num = provider.get_block_by_hash(from_hash.into()).await?.header().number();
+                provider.get_block_by_hash(from_hash.into()).await?.header().number()
             }
-        }
+        };
 
-        match scanner.config.to_block {
-            BlockId::Number(to_block) => to_num = to_block.as_number().unwrap_or(0),
+        let to_num = match scanner.config.to_block {
+            BlockId::Number(to_block) => to_block.as_number().unwrap_or(0),
             BlockId::Hash(to_hash) => {
-                to_num = provider.get_block_by_hash(to_hash.into()).await?.header().number();
+                provider.get_block_by_hash(to_hash.into()).await?.header().number()
             }
-        }
+        };
 
         if from_num > latest_block {
             Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;

@@ -325,28 +325,20 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
 
         let (start_block, end_block) = tokio::try_join!(
-            self.provider.get_block_by_number(start_height),
-            self.provider.get_block_by_number(end_height)
+            self.provider.get_block_by_id(start_height),
+            self.provider.get_block_by_id(end_height)
         )?;
 
-        let start_block_num = start_block.header().number();
-        let end_block_num = end_block.header().number();
-
-        let (start_block_num, end_block_num) = match start_block_num.cmp(&end_block_num) {
-            Ordering::Greater => (end_block_num, start_block_num),
-            _ => (start_block_num, end_block_num),
+        let (start_block, end_block_num) = match start_block.cmp(&end_block) {
+            Ordering::Greater => (end_block, start_block),
+            _ => (start_block, end_block),
         };
 
-        info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
+        info!(start_block = start_block, end_block = end_block_num, "Syncing historical data");
 
         tokio::spawn(async move {
-            Self::stream_historical_blocks(
-                start_block_num,
-                end_block_num,
-                max_block_range,
-                &sender,
-            )
-            .await;
+            Self::stream_historical_blocks(start_block, end_block_num, max_block_range, &sender)
+                .await;
         });
 
         Ok(())
