@@ -74,7 +74,7 @@ use crate::{
 };
 use alloy::{
     consensus::BlockHeader,
-    eips::BlockId,
+    eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockHash, BlockNumber},
     pubsub::Subscription,
@@ -354,7 +354,13 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
 
         let get_start_block = async || -> Result<BlockNumber, ScannerError> {
-            let block = provider.get_block_by_id(start_height).await?;
+            let block = match start_height {
+                BlockId::Number(BlockNumberOrTag::Number(num)) => num,
+                BlockId::Number(tag) => provider.get_block_by_number(tag).await?.header().number(),
+                BlockId::Hash(hash) => {
+                    provider.get_block_by_hash(hash.into()).await?.header().number()
+                }
+            };
             Ok(block)
         };
 
@@ -489,9 +495,6 @@ impl<N: Network> Service<N> {
         provider: &RobustProvider<N>,
     ) {
         let mut batch_count = 0;
-
-        // // for checking whether reorg occurred
-        // let mut tip_hash = provfrom.header().hash();
 
         // we're iterating in reverse
         let mut batch_from = from;
