@@ -74,9 +74,9 @@ use crate::{
 };
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockId,
     network::{BlockResponse, Network, primitives::HeaderResponse},
-    primitives::{B256, BlockNumber},
+    primitives::{B256, BlockHash, BlockNumber},
     pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
@@ -202,14 +202,14 @@ pub enum Command {
     },
     StreamFrom {
         sender: mpsc::Sender<Message>,
-        start_height: BlockNumberOrTag,
+        start_height: BlockId,
         block_confirmations: u64,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     Rewind {
         sender: mpsc::Sender<Message>,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        start_height: BlockId,
+        end_height: BlockId,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
 }
@@ -346,7 +346,7 @@ impl<N: Network> Service<N> {
 
     async fn handle_sync(
         &mut self,
-        start_height: BlockNumberOrTag,
+        start_height: BlockId,
         block_confirmations: u64,
         sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
@@ -354,10 +354,7 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
 
         let get_start_block = async || -> Result<BlockNumber, ScannerError> {
-            let block = match start_height {
-                BlockNumberOrTag::Number(num) => num,
-                block_tag => provider.get_block_by_number(block_tag).await?.header().number(),
-            };
+            let block = provider.get_block_by_id(start_height).await?;
             Ok(block)
         };
 
@@ -449,26 +446,28 @@ impl<N: Network> Service<N> {
 
     async fn handle_rewind(
         &mut self,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        start_height: BlockId,
+        end_height: BlockId,
         sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
 
         let (start_block, end_block) = try_join!(
-            self.provider.get_block_by_number(start_height),
-            self.provider.get_block_by_number(end_height),
+            self.provider.get_block_by_id(start_height),
+            self.provider.get_block_by_id(end_height),
         )?;
 
         // normalize block range
-        let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
+        let (from, to) = match start_block.cmp(&end_block) {
             Ordering::Greater => (start_block, end_block),
             _ => (end_block, start_block),
         };
 
+        let tip_hash = provider.get_block_by_number(from.into()).await?.header().hash();
+
         tokio::spawn(async move {
-            Self::stream_rewind(from, to, max_block_range, &sender, &provider).await;
+            Self::stream_rewind(from, to, tip_hash, max_block_range, &sender, &provider).await;
         });
 
         Ok(())
@@ -482,19 +481,17 @@ impl<N: Network> Service<N> {
     ///
     /// Returns an error if the stream fails
     async fn stream_rewind(
-        from: N::BlockResponse,
-        to: N::BlockResponse,
+        from: BlockNumber,
+        to: BlockNumber,
+        mut tip_hash: BlockHash,
         max_block_range: u64,
         sender: &mpsc::Sender<Message>,
         provider: &RobustProvider<N>,
     ) {
         let mut batch_count = 0;
 
-        // for checking whether reorg occurred
-        let mut tip_hash = from.header().hash();
-
-        let from = from.header().number();
-        let to = to.header().number();
+        // // for checking whether reorg occurred
+        // let mut tip_hash = provfrom.header().hash();
 
         // we're iterating in reverse
         let mut batch_from = from;
@@ -787,7 +784,7 @@ impl BlockRangeScannerClient {
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_from(
         &self,
-        start_height: impl Into<BlockNumberOrTag>,
+        start_height: impl Into<BlockId>,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
@@ -819,8 +816,8 @@ impl BlockRangeScannerClient {
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn rewind(
         &self,
-        start_height: impl Into<BlockNumberOrTag>,
-        end_height: impl Into<BlockNumberOrTag>,
+        start_height: impl Into<BlockId>,
+        end_height: impl Into<BlockId>,
     ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
@@ -844,7 +841,10 @@ impl BlockRangeScannerClient {
 mod tests {
     use super::*;
     use crate::{assert_closed, assert_next};
-    use alloy::{eips::BlockId, network::Ethereum};
+    use alloy::{
+        eips::{BlockId, BlockNumberOrTag},
+        network::Ethereum,
+    };
     use tokio::sync::mpsc;
 
     #[test]
