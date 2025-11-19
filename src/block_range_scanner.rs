@@ -475,11 +475,11 @@ impl<N: Network> Service<N> {
             try_join!(self.provider.get_block(start_height), self.provider.get_block(end_height),)?;
 
         // normalize block range
-        let (from, start_id, to) = match start_block.header().hash().cmp(&end_block.header().hash())
-        {
-            Ordering::Greater => (end_block, end_height, start_block),
-            _ => (start_block, start_height, end_block),
-        };
+        let (from, start_id, to) =
+            match start_block.header().number().cmp(&end_block.header().number()) {
+                Ordering::Greater => (start_block, start_height, end_block),
+                _ => (end_block, end_height, start_block),
+            };
 
         // One off reorg check before streaming if start is a hash
         self.verify_start_block_hash(from.header().number(), start_id, &sender).await?;
