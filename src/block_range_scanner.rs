@@ -324,22 +324,31 @@ impl<N: Network> Service<N> {
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
 
-        let (start_block_num, end_block_num) = tokio::try_join!(
-            self.provider.get_block_by_id(start_height),
-            self.provider.get_block_by_id(end_height)
+        let (start_block, end_block) = tokio::try_join!(
+            self.provider.get_block(start_height),
+            self.provider.get_block(end_height)
         )?;
 
-        let (start_block, start_id, end_block) = match start_block_num.cmp(&end_block_num) {
+        let start_block_num = start_block.header().number();
+        let end_block_num = end_block.header().number();
+
+        let (start_block_num, start_id, end_block_num) = match start_block_num.cmp(&end_block_num) {
             Ordering::Greater => (end_block_num, end_height, start_block_num),
             _ => (start_block_num, start_height, end_block_num),
         };
 
-        self.verify_start_block_hash(start_block, start_id, &sender).await?;
+        self.verify_start_block_hash(start_block_num, start_id, &sender).await?;
 
-        info!(start_block = start_block, end_block = end_block, "Syncing historical data");
+        info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
         tokio::spawn(async move {
-            Self::stream_historical_blocks(start_block, end_block, max_block_range, &sender).await;
+            Self::stream_historical_blocks(
+                start_block_num,
+                end_block_num,
+                max_block_range,
+                &sender,
+            )
+            .await;
         });
 
         Ok(())
@@ -462,24 +471,21 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
 
-        let (start_block, end_block) = try_join!(
-            self.provider.get_block_by_id(start_height),
-            self.provider.get_block_by_id(end_height),
-        )?;
+        let (start_block, end_block) =
+            try_join!(self.provider.get_block(start_height), self.provider.get_block(end_height),)?;
 
         // normalize block range
-        let (from, start_id, to) = match start_block.cmp(&end_block) {
+        let (from, start_id, to) = match start_block.header().hash().cmp(&end_block.header().hash())
+        {
             Ordering::Greater => (end_block, end_height, start_block),
             _ => (start_block, start_height, end_block),
         };
 
         // One off reorg check before streaming if start is a hash
-        self.verify_start_block_hash(from, start_id, &sender).await?;
-
-        let tip_hash = provider.get_block_by_number(from.into()).await?.header().hash();
+        self.verify_start_block_hash(from.header().number(), start_id, &sender).await?;
 
         tokio::spawn(async move {
-            Self::stream_rewind(from, to, tip_hash, max_block_range, &sender, &provider).await;
+            Self::stream_rewind(from, to, max_block_range, &sender, &provider).await;
         });
 
         Ok(())
@@ -518,14 +524,19 @@ impl<N: Network> Service<N> {
     ///
     /// Returns an error if the stream fails
     async fn stream_rewind(
-        from: BlockNumber,
-        to: BlockNumber,
-        mut tip_hash: BlockHash,
+        from: N::BlockResponse,
+        to: N::BlockResponse,
         max_block_range: u64,
         sender: &mpsc::Sender<Message>,
         provider: &RobustProvider<N>,
     ) {
         let mut batch_count = 0;
+
+        // for checking whether reorg occurred
+        let mut tip_hash = from.header().hash();
+
+        let from = from.header().number();
+        let to = to.header().number();
 
         // we're iterating in reverse
         let mut batch_from = from;
