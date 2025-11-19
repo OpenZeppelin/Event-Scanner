@@ -133,9 +133,9 @@ pub fn spawn_log_consumers<N: Network>(
                             break;
                         }
                     }
-                    Ok(BlockRangeMessage::Status(status)) => {
-                        info!(status = ?status, "Received status message");
-                        if !sender.try_stream(status).await {
+                    Ok(BlockRangeMessage::Notification(notification)) => {
+                        info!(notification = ?notification, "Received notification");
+                        if !sender.try_stream(notification).await {
                             break;
                         }
                     }

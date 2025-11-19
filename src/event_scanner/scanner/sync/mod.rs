@@ -16,7 +16,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// 1. **Latest events phase**: Collects up to `count` most recent events by scanning backwards
     ///    from the current chain tip. Events are delivered in chronological order.
-    /// 2. **Automatic transition**: Emits [`ScannerStatus::SwitchingToLive`][switch_to_live] to
+    /// 2. **Automatic transition**: Emits [`Notification::SwitchingToLive`][switch_to_live] to
     ///    signal the mode change
     /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
     ///    on-chain
@@ -48,9 +48,9 @@ impl EventScannerBuilder<Synchronize> {
     ///         Message::Data(logs) => {
     ///             println!("Received {} events", logs.len());
     ///         }
-    ///         Message::Status(status) => {
-    ///             println!("Status update: {:?}", status);
-    ///             // You'll see ScannerStatus::SwitchingToLive when transitioning
+    ///         Message::Notification(notification) => {
+    ///             println!("Notification received: {:?}", notification);
+    ///             // You'll see Notification::SwitchingToLive when transitioning
     ///         }
     ///         Message::Error(e) => {
     ///             eprintln!("Error: {}", e);
@@ -91,17 +91,17 @@ impl EventScannerBuilder<Synchronize> {
     /// # Detailed reorg behavior
     ///
     /// - **Latest events phase**: Restart the scanner. On detecting a reorg, emits
-    ///   [`ScannerStatus::ReorgDetected`][reorg], resets the rewind start to the new tip, and
+    ///   [`Notification::ReorgDetected`][reorg], resets the rewind start to the new tip, and
     ///   continues until collectors accumulate `count` logs. Final delivery to listeners preserves
     ///   chronological order.
     /// - **Live streaming phase**: Starts from `latest_block + 1` and respects the configured block
-    ///   confirmations. On reorg, emits [`ScannerStatus::ReorgDetected`][reorg], adjusts the next
+    ///   confirmations. On reorg, emits [`Notification::ReorgDetected`][reorg], adjusts the next
     ///   confirmed window (possibly re-emitting confirmed portions), and continues streaming.
     ///
     /// [subscribe]: crate::EventScanner::subscribe
     /// [start]: crate::event_scanner::EventScanner::start
-    /// [reorg]: crate::types::ScannerStatus::ReorgDetected
-    /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
+    /// [reorg]: crate::types::Notification::ReorgDetected
+    /// [switch_to_live]: crate::types::Notification::SwitchingToLive
     #[must_use]
     pub fn from_latest(self, count: usize) -> EventScannerBuilder<SyncFromLatestEvents> {
         EventScannerBuilder::<SyncFromLatestEvents>::new(count)
@@ -114,7 +114,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// 1. **Historical sync phase**: Streams events from `from_block` up to the current confirmed
     ///    tip
-    /// 2. **Automatic transition**: Emits [`ScannerStatus::SwitchingToLive`][switch_to_live] to
+    /// 2. **Automatic transition**: Emits [`Notification::SwitchingToLive`][switch_to_live] to
     ///    signal the mode change
     /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
     ///    on-chain
@@ -146,9 +146,9 @@ impl EventScannerBuilder<Synchronize> {
     ///         Message::Data(logs) => {
     ///             println!("Received {} events", logs.len());
     ///         }
-    ///         Message::Status(status) => {
-    ///             println!("Status update: {:?}", status);
-    ///             // You'll see ScannerStatus::SwitchingToLive when transitioning
+    ///         Message::Notification(notification) => {
+    ///             println!("Notification received: {:?}", notification);
+    ///             // You'll see Notification::SwitchingToLive when transitioning
     ///         }
     ///         Message::Error(e) => {
     ///             eprintln!("Error: {}", e);
@@ -202,13 +202,13 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// - **Historical sync phase**: Streams events in chronological order without reorg detection
     /// - **Live streaming phase**: Respects the configured block confirmations. On reorg, emits
-    ///   [`ScannerStatus::ReorgDetected`][reorg], adjusts the next confirmed window (possibly
+    ///   [`Notification::ReorgDetected`][reorg], adjusts the next confirmed window (possibly
     ///   re-emitting confirmed portions), and continues streaming.
     ///
     /// [subscribe]: crate::EventScanner::subscribe
     /// [start]: crate::event_scanner::EventScanner::start
-    /// [reorg]: crate::types::ScannerStatus::ReorgDetected
-    /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
+    /// [reorg]: crate::types::Notification::ReorgDetected
+    /// [switch_to_live]: crate::types::Notification::SwitchingToLive
     #[must_use]
     pub fn from_block(
         self,
