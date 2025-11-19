@@ -1,6 +1,7 @@
 use std::ops::RangeInclusive;
 
 use crate::{
+    ScannerError,
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener},
     robust_provider::{Error as RobustProviderError, RobustProvider},
@@ -45,13 +46,17 @@ pub enum ConsumerMode {
 /// # Note
 ///
 /// Assumes it is running in a separate tokio task, so as to be non-blocking.
-pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unpin>(
+pub async fn handle_stream<
+    N: Network,
+    S: Stream<Item = Result<BlockRangeMessage, ScannerError>> + Unpin,
+>(
     mut stream: S,
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     mode: ConsumerMode,
 ) {
-    let (range_tx, _) = broadcast::channel::<BlockRangeMessage>(MAX_BUFFERED_MESSAGES);
+    let (range_tx, _) =
+        broadcast::channel::<Result<BlockRangeMessage, ScannerError>>(MAX_BUFFERED_MESSAGES);
 
     let consumers = spawn_log_consumers(provider, listeners, &range_tx, mode);
 
@@ -73,7 +78,7 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockRangeMessage> + Unp
 pub fn spawn_log_consumers<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
-    range_tx: &Sender<BlockRangeMessage>,
+    range_tx: &Sender<Result<BlockRangeMessage, ScannerError>>,
     mode: ConsumerMode,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
@@ -92,51 +97,53 @@ pub fn spawn_log_consumers<N: Network>(
 
             loop {
                 match range_rx.recv().await {
-                    Ok(BlockRangeMessage::Data(range)) => {
-                        match get_logs(range, &filter, &base_filter, &provider).await {
-                            Ok(logs) => {
-                                if logs.is_empty() {
-                                    continue;
-                                }
+                    Ok(message) => {
+                        match message {
+                            Ok(BlockRangeMessage::Data(range)) => {
+                                match get_logs(range, &filter, &base_filter, &provider).await {
+                                    Ok(logs) => {
+                                        if logs.is_empty() {
+                                            continue;
+                                        }
 
-                                match mode {
-                                    ConsumerMode::Stream => {
-                                        if !sender.try_stream(logs).await {
-                                            break;
+                                        match mode {
+                                            ConsumerMode::Stream => {
+                                                if !sender.try_stream(logs).await {
+                                                    break;
+                                                }
+                                            }
+                                            ConsumerMode::CollectLatest { count } => {
+                                                let take = count.saturating_sub(collected.len());
+                                                // if we have enough logs, break
+                                                if take == 0 {
+                                                    break;
+                                                }
+                                                // take latest within this range
+                                                collected.extend(logs.into_iter().rev().take(take));
+                                                // if we have enough logs, break
+                                                if collected.len() == count {
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
-                                    ConsumerMode::CollectLatest { count } => {
-                                        let take = count.saturating_sub(collected.len());
-                                        // if we have enough logs, break
-                                        if take == 0 {
-                                            break;
-                                        }
-                                        // take latest within this range
-                                        collected.extend(logs.into_iter().rev().take(take));
-                                        // if we have enough logs, break
-                                        if collected.len() == count {
+                                    Err(e) => {
+                                        if !sender.try_stream(e).await {
                                             break;
                                         }
                                     }
                                 }
                             }
-                            Err(e) => {
-                                if !sender.try_stream(e).await {
+                            Ok(BlockRangeMessage::Notification(notification)) => {
+                                info!(notification = ?notification, "Received notification");
+                                if !sender.try_stream(notification).await {
                                     break;
                                 }
                             }
-                        }
-                    }
-                    Ok(BlockRangeMessage::Error(e)) => {
-                        error!(error = ?e, "Received error message");
-                        if !sender.try_stream(e).await {
-                            break;
-                        }
-                    }
-                    Ok(BlockRangeMessage::Notification(notification)) => {
-                        info!(notification = ?notification, "Received notification");
-                        if !sender.try_stream(notification).await {
-                            break;
+                            Err(e) => {
+                                error!(error = ?e, "Received error message");
+                                sender.try_stream(e).await
+                            }
                         }
                     }
                     Err(RecvError::Closed) => {

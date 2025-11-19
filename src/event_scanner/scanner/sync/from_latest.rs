@@ -104,9 +104,9 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             info!("Switching to live stream");
 
             // Use a one-off channel for the notification.
-            let (tx, rx) = mpsc::channel::<BlockRangeMessage>(1);
+            let (tx, rx) = mpsc::channel::<Result<BlockRangeMessage, ScannerError>>(1);
             let stream = ReceiverStream::new(rx);
-            tx.send(BlockRangeMessage::Notification(Notification::SwitchingToLive))
+            tx.send(Ok(BlockRangeMessage::Notification(Notification::SwitchingToLive)))
                 .await
                 .expect("receiver exists");
 
