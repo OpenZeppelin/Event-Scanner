@@ -252,7 +252,7 @@ Always handle all message types in your stream processing loop to ensure robust 
 
 - `examples/live_scanning` – minimal live-mode scanner using `EventScannerBuilder::live()`
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScannerBuilder::historic()`
-- `examples/sync_from_block_scanning` – demonstrates replaying from genesis (block 0) before continuing to stream the latest blocks using `EventScannerBuilder::sync().from_block(block_tag_or_number)`
+- `examples/sync_from_block_scanning` – demonstrates replaying from genesis (block 0) before continuing to stream the latest blocks using `EventScannerBuilder::sync().from_block(block_id)`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScannerBuilder::latest()`
 - `examples/sync_from_latest_scanning` – demonstrates scanning the latest events before switching to live mode using `EventScannerBuilder::sync().from_latest(count)`.
 

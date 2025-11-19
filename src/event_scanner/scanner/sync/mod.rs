@@ -192,7 +192,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Arguments
     ///
-    /// * `block` - Starting block number or tag (e.g., `Earliest`, `Latest`, or a specific number)
+    /// * `block` - Starting block id (number, tag, or hash; e.g., `Earliest`, `Latest`, a specific number, or a block hash)
     ///
     /// # Important notes
     ///

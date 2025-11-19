@@ -744,8 +744,8 @@ impl BlockRangeScannerClient {
     ///
     /// # Arguments
     ///
-    /// * `start_height` - The starting block number or tag.
-    /// * `end_height` - The ending block number or tag.
+    /// * `start_height` - The starting block id (number, tag, or hash).
+    /// * `end_height` - The ending block id (number, tag, or hash).
     ///
     /// # Errors
     ///
@@ -776,7 +776,7 @@ impl BlockRangeScannerClient {
     ///
     /// # Arguments
     ///
-    /// * `start_height` - The starting block number or tag.
+    /// * `start_height` - The starting block id (number, tag, or hash).
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
     ///
     /// # Errors
@@ -808,8 +808,8 @@ impl BlockRangeScannerClient {
     ///
     /// # Arguments
     ///
-    /// * `start_height` - The starting block number or tag (defaults to Latest if None).
-    /// * `end_height` - The ending block number or tag (defaults to Earliest if None).
+    /// * `start_height` - The starting block id (number, tag, or hash; defaults to Latest if None).
+    /// * `end_height` - The ending block id (number, tag, or hash; defaults to Earliest if None).
     ///
     /// # Errors
     ///
