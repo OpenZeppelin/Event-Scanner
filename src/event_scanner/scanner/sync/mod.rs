@@ -1,4 +1,4 @@
-use alloy::eips::BlockNumberOrTag;
+use alloy::eips::BlockId;
 
 pub(crate) mod from_block;
 pub(crate) mod from_latest;
@@ -210,10 +210,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [reorg]: crate::types::ScannerStatus::ReorgDetected
     /// [switch_to_live]: crate::types::ScannerStatus::SwitchingToLive
     #[must_use]
-    pub fn from_block(
-        self,
-        block: impl Into<BlockNumberOrTag>,
-    ) -> EventScannerBuilder<SyncFromBlock> {
+    pub fn from_block(self, block: impl Into<BlockId>) -> EventScannerBuilder<SyncFromBlock> {
         EventScannerBuilder::<SyncFromBlock>::new(block.into())
     }
 }
