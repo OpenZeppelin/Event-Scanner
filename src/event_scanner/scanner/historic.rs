@@ -116,10 +116,8 @@ mod tests {
         let builder =
             EventScannerBuilder::historic().to_block(200).max_block_range(50).from_block(100);
 
-        let expected_from: BlockId = BlockNumberOrTag::Number(100).into();
-        assert_eq!(builder.config.from_block, expected_from);
-        let expected_to: BlockId = BlockNumberOrTag::Number(200).into();
-        assert_eq!(builder.config.to_block, expected_to);
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(100).into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Number(200).into());
         assert_eq!(builder.block_range_scanner.max_block_range, 50);
     }
 
@@ -129,10 +127,8 @@ mod tests {
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest);
 
-        let expected_from: BlockId = BlockNumberOrTag::Earliest.into();
-        assert_eq!(builder.config.from_block, expected_from);
-        let expected_to: BlockId = BlockNumberOrTag::Latest.into();
-        assert_eq!(builder.config.to_block, expected_to);
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Latest.into());
     }
 
     #[test]
@@ -147,10 +143,8 @@ mod tests {
             .to_block(200);
 
         assert_eq!(builder.block_range_scanner.max_block_range, 105);
-        let expected_from: BlockId = BlockNumberOrTag::Number(2).into();
-        assert_eq!(builder.config.from_block, expected_from);
-        let expected_to: BlockId = BlockNumberOrTag::Number(200).into();
-        assert_eq!(builder.config.to_block, expected_to);
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(2).into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Number(200).into());
     }
 
     #[tokio::test]
