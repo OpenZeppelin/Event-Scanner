@@ -1,5 +1,5 @@
 use alloy::primitives::U256;
-use event_scanner::{assert_empty, assert_next};
+use event_scanner::assert_event_sequence_final;
 
 use crate::common::{LiveScannerSetup, TestCounter::CountIncreased, setup_live_scanner};
 
@@ -23,10 +23,9 @@ async fn high_event_volume_no_loss() -> anyhow::Result<()> {
         }
     });
 
-    for new_count in 1..=100 {
-        assert_next!(stream, &[CountIncreased { newCount: U256::from(new_count) }]);
-    }
-    assert_empty!(stream);
+    let expected =
+        (1..=100).map(|n| CountIncreased { newCount: U256::from(n) }).collect::<Vec<_>>();
+    assert_event_sequence_final!(stream, expected);
 
     Ok(())
 }
