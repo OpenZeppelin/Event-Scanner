@@ -204,7 +204,6 @@ impl<N: Network> RobustSubscription<N> {
     }
 
     /// Convert the subscription into a stream.
-    /// Note: This stream will only receive blocks when polled.
     #[must_use]
     pub fn into_stream(self) -> RobustSubscriptionStream<N> {
         RobustSubscriptionStream::from(self)

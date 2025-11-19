@@ -280,22 +280,23 @@ range of provider types (URLs, `RootProvider`, layered providers, etc.) through 
 
 A typical setup looks like:
 
-```rust,no_run
-use std::time::Duration;
+```rust
 use alloy::providers::ProviderBuilder;
 use event_scanner::robust_provider::RobustProviderBuilder;
+use std::time::Duration;
 
 async fn example() -> anyhow::Result<()> {
-let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-let http = ProviderBuilder::new().connect_http("http://localhost:8545");
+    let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    let http = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
 
-let robust = RobustProviderBuilder::new(ws)
-    .fallback(http)
-    .call_timeout(Duration::from_secs(30))
-    .subscription_timeout(Duration::from_secs(120))
-    .build()
-    .await?;
-Ok(()) }
+    let provider = RobustProviderBuilder::new(ws)
+        .fallback(http)
+        .call_timeout(Duration::from_secs(30))
+        .subscription_timeout(Duration::from_secs(120))
+        .build()
+        .await?;
+    Ok(())
+}
 ```
 
 You can then pass this `robust` provider into `EventScannerBuilder::connect` just like

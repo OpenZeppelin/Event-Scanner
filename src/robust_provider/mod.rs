@@ -14,9 +14,9 @@
 //! # How it works
 //!
 //! All RPC calls performed through [`RobustProvider`] are wrapped in a total
-//! timeout (`call_timeout`) and retried with exponential backoff up to
-//! `max_retries`. If the primary provider keeps failing, the call is retried
-//! against the configured fallback providers in the order they were added. For subscriptions,
+//! timeout and retried with exponential backoff up to `max_retries`. If the
+//! primary provider keeps failing, the call is retried against the configured
+//! fallback providers in the order they were added. For subscriptions,
 //! [`RobustSubscription`] also tracks lag, switches to fallbacks on repeated
 //! failure, and periodically attempts to reconnect to the primary provider.
 //!
