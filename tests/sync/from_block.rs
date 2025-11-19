@@ -4,7 +4,7 @@ use alloy::{
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{ScannerStatus, assert_empty, assert_event_sequence_final, assert_next};
+use event_scanner::{Notification, assert_empty, assert_event_sequence_final, assert_next};
 
 use crate::common::{SyncScannerSetup, TestCounter, setup_sync_scanner};
 
