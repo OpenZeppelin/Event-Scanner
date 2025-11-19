@@ -4,7 +4,7 @@ use alloy::{
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{ScannerNotification, assert_empty, assert_next};
+use event_scanner::{Notification, assert_empty, assert_next};
 
 use crate::common::{SyncScannerSetup, TestCounter, setup_sync_scanner};
 
@@ -37,7 +37,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     );
 
     // chain tip reached
-    assert_next!(stream, ScannerNotification::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
 
     // live events
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
@@ -102,7 +102,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         ]
     );
     // switching to "live" phase
-    assert_next!(stream, ScannerNotification::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
     // assert confirmed live events are streamed separately
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);

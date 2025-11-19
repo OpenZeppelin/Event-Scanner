@@ -70,7 +70,7 @@ use crate::{
     ScannerMessage,
     error::ScannerError,
     robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
-    types::{ScannerNotification, TryStream},
+    types::{Notification, TryStream},
 };
 use alloy::{
     consensus::BlockHeader,
@@ -436,7 +436,7 @@ impl<N: Network> Service<N> {
 
             info!("Chain tip reached, switching to live");
 
-            if !sender.try_stream(ScannerNotification::SwitchingToLive).await {
+            if !sender.try_stream(Notification::SwitchingToLive).await {
                 return;
             }
 
@@ -541,7 +541,7 @@ impl<N: Network> Service<N> {
             if reorged {
                 info!(block_number = %from, hash = %tip_hash, "Reorg detected");
 
-                if !sender.try_stream(ScannerNotification::ReorgDetected).await {
+                if !sender.try_stream(Notification::ReorgDetected).await {
                     break;
                 }
 
@@ -624,7 +624,7 @@ impl<N: Network> Service<N> {
 
             if incoming_block_num < range_start {
                 warn!("Reorg detected: sending forked range");
-                if !sender.try_stream(ScannerNotification::ReorgDetected).await {
+                if !sender.try_stream(Notification::ReorgDetected).await {
                     return;
                 }
 

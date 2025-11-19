@@ -7,23 +7,23 @@ use tracing::{info, warn};
 pub enum ScannerMessage<T: Clone, E: Error + Clone> {
     Data(T),
     Error(E),
-    Notification(ScannerNotification),
+    Notification(Notification),
 }
 
 #[derive(Copy, Debug, Clone, PartialEq)]
-pub enum ScannerNotification {
+pub enum Notification {
     SwitchingToLive,
     ReorgDetected,
 }
 
-impl<T: Clone, E: Error + Clone> From<ScannerNotification> for ScannerMessage<T, E> {
-    fn from(value: ScannerNotification) -> Self {
+impl<T: Clone, E: Error + Clone> From<Notification> for ScannerMessage<T, E> {
+    fn from(value: Notification) -> Self {
         ScannerMessage::Notification(value)
     }
 }
 
-impl<T: Clone, E: Error + Clone> PartialEq<ScannerNotification> for ScannerMessage<T, E> {
-    fn eq(&self, other: &ScannerNotification) -> bool {
+impl<T: Clone, E: Error + Clone> PartialEq<Notification> for ScannerMessage<T, E> {
+    fn eq(&self, other: &Notification) -> bool {
         if let ScannerMessage::Notification(notification) = self {
             notification == other
         } else {
