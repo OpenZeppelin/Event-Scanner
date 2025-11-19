@@ -1,8 +1,9 @@
 use std::{fmt::Debug, time::Duration};
 
 use alloy::{
-    eips::BlockNumberOrTag,
+    eips::{BlockId, BlockNumberOrTag},
     network::{Ethereum, Network},
+    primitives::BlockNumber,
     providers::{Provider, RootProvider},
     pubsub::Subscription,
     rpc::types::{Filter, Log},
@@ -60,6 +61,25 @@ impl<N: Network> RobustProvider<N> {
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(number.into()))
+    }
+
+    /// Fetch a block by Id with retry and timeout.
+    ///
+    /// # Errors
+    ///
+    /// See [retry errors](#retry-errors).
+    pub async fn get_block_by_id(&self, id: BlockId) -> Result<BlockNumber, Error> {
+        info!("eth_getBlockByNumber called");
+        let result = self
+            .retry_with_total_timeout(
+                |provider| async move { provider.get_block_number_by_id(id).await },
+                false,
+            )
+            .await;
+        if let Err(e) = &result {
+            error!(error = %e, "eth_getByBlockNumber failed");
+        }
+        result?.ok_or_else(|| Error::BlockNotFound(id))
     }
 
     /// Fetch the latest block number with retry and timeout.
