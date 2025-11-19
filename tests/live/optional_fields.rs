@@ -1,52 +1,43 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
-
-use crate::common::{TestCounter, setup_live_scanner};
-use alloy::sol_types::SolEvent;
-use event_scanner::{EventFilter, Message};
-use tokio::time::timeout;
-use tokio_stream::StreamExt;
+use crate::common::{TestCounter, deploy_counter, setup_live_scanner};
+use alloy::primitives::U256;
+use event_scanner::{EventFilter, assert_empty, assert_event_sequence_final, assert_next};
 
 #[tokio::test]
 async fn track_all_events_from_contract() -> anyhow::Result<()> {
-    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
-    let contract = setup.contract.clone();
+    let setup = setup_live_scanner(None, None, 0).await?;
+    let contract = setup.contract;
     let contract_address = *contract.address();
 
     let mut scanner = setup.scanner;
 
     // Create filter that tracks ALL events from a specific contract (no event signature specified)
     let filter = EventFilter::new().contract_address(contract_address);
-    let expected_event_count = 5;
 
-    let mut stream = scanner.subscribe(filter).take(expected_event_count);
+    let mut stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
     // Generate both increase and decrease events
-    for _ in 0..expected_event_count {
+    for _ in 0..5 {
         contract.increase().send().await?.watch().await?;
     }
 
     // Also generate some decrease events to ensure we're tracking all events
     contract.decrease().send().await?.watch().await?;
+    contract.decrease().send().await?.watch().await?;
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let event_count_clone = Arc::clone(&event_count);
-    let event_counting = async move {
-        while let Some(Message::Data(logs)) = stream.next().await {
-            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-        }
-    };
-
-    _ = timeout(Duration::from_secs(2), event_counting).await;
-
-    assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
+    assert_event_sequence_final!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+            TestCounter::CountIncreased { newCount: U256::from(4) },
+            TestCounter::CountIncreased { newCount: U256::from(5) },
+            TestCounter::CountDecreased { newCount: U256::from(4) },
+            TestCounter::CountDecreased { newCount: U256::from(3) }
+        ]
+    );
 
     Ok(())
 }
@@ -54,95 +45,90 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
 #[tokio::test]
 async fn track_all_events_in_block_range() -> anyhow::Result<()> {
     let setup = setup_live_scanner(Some(0.1), None, 0).await?;
-    let contract = setup.contract.clone();
+    let contract = setup.contract;
+    let mut scanner = setup.scanner;
 
     // Create filter that tracks ALL events in block range (no contract address or event signature
     // specified)
     let filter = EventFilter::new();
-    let expected_event_count = 3;
 
-    let mut scanner = setup.scanner;
-
-    let mut stream = scanner.subscribe(filter).take(expected_event_count);
+    let mut stream = scanner.subscribe(filter);
 
     scanner.start().await?;
 
     // Generate events from our contract
-    for _ in 0..expected_event_count {
+    for _ in 0..3 {
         contract.increase().send().await?.watch().await?;
     }
 
-    let event_count = Arc::new(AtomicUsize::new(0));
-    let event_count_clone = Arc::clone(&event_count);
-    let event_counting = async move {
-        while let Some(Message::Data(logs)) = stream.next().await {
-            event_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-        }
-    };
-
-    _ = timeout(Duration::from_secs(2), event_counting).await;
-
-    assert_eq!(event_count.load(Ordering::SeqCst), expected_event_count);
+    assert_event_sequence_final!(
+        stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+        ]
+    );
 
     Ok(())
 }
 
 #[tokio::test]
 async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
-    let setup = setup_live_scanner(Some(0.1), None, 0).await?;
-    let contract = setup.contract.clone();
-    let contract_address = *contract.address();
-
-    // Filter for specific event from specific contract
-    let specific_filter = EventFilter::new()
-        .contract_address(contract_address)
-        .event(TestCounter::CountIncreased::SIGNATURE);
-    let expected_specific_count = 2;
+    let setup = setup_live_scanner(None, None, 0).await?;
+    let contract_1 = setup.contract;
+    let contract_2 = deploy_counter(setup.provider.primary().clone()).await?;
+    let mut scanner = setup.scanner;
 
     // Filter for all events from all contracts
     let all_events_filter = EventFilter::new();
-    let expected_all_count = 3;
-
-    let mut scanner = setup.scanner;
-
-    let mut specific_stream = scanner.subscribe(specific_filter).take(expected_specific_count);
-    let mut all_stream = scanner.subscribe(all_events_filter).take(expected_all_count);
+    let mut all_stream = scanner.subscribe(all_events_filter);
+    let contract_1_stream = setup.stream;
 
     scanner.start().await?;
 
     // First increase the counter to have some balance
-    for _ in 0..expected_all_count {
-        contract.increase().send().await?.watch().await?;
-    }
+    contract_2.increase().send().await?.watch().await?;
+    contract_2.increase().send().await?.watch().await?;
+    contract_2.increase().send().await?.watch().await?;
 
-    // Generate specific events (CountIncreased)
-    for _ in 0..expected_specific_count {
-        contract.increase().send().await?.watch().await?;
-    }
+    let mut all_stream = assert_event_sequence_final!(
+        all_stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) }
+        ]
+    );
+
+    let mut contract_1_stream = assert_empty!(contract_1_stream);
+
+    // Generate events from contract 1 (CountIncreased)
+    contract_1.increase().send().await?.watch().await?;
+    contract_1.increase().send().await?.watch().await?;
+
+    let mut all_stream = assert_event_sequence_final!(
+        all_stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) }
+        ]
+    );
+    let contract_1_stream = assert_event_sequence_final!(
+        contract_1_stream,
+        &[
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) }
+        ]
+    );
 
     // Generate additional events that should be caught by the all-events filter
-    for _ in 0..expected_all_count {
-        contract.decrease().send().await?.watch().await?;
-    }
+    contract_2.decrease().send().await?.watch().await?;
 
-    let specific_event_count = Arc::new(AtomicUsize::new(0));
-    let all_events_count = Arc::new(AtomicUsize::new(0));
-    let specific_count_clone = Arc::clone(&specific_event_count);
-    let all_count_clone = Arc::clone(&all_events_count);
+    assert_next!(all_stream, &[TestCounter::CountDecreased { newCount: U256::from(2) }]);
 
-    let event_counting = async move {
-        while let Some(Message::Data(logs)) = all_stream.next().await {
-            all_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-        }
-        while let Some(Message::Data(logs)) = specific_stream.next().await {
-            specific_count_clone.fetch_add(logs.len(), Ordering::SeqCst);
-        }
-    };
-
-    _ = timeout(Duration::from_secs(3), event_counting).await;
-
-    assert_eq!(specific_event_count.load(Ordering::SeqCst), expected_specific_count);
-    assert_eq!(all_events_count.load(Ordering::SeqCst), expected_all_count);
+    assert_empty!(all_stream);
+    assert_empty!(contract_1_stream);
 
     Ok(())
 }
