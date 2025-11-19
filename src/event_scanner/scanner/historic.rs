@@ -1,4 +1,9 @@
-use alloy::{eips::BlockNumberOrTag, network::Network};
+use alloy::{
+    consensus::BlockHeader,
+    eips::BlockId,
+    network::{BlockResponse, Network},
+    primitives::BlockNumber,
+};
 
 use super::common::{ConsumerMode, handle_stream};
 use crate::{
@@ -9,13 +14,13 @@ use crate::{
 
 impl EventScannerBuilder<Historic> {
     #[must_use]
-    pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
+    pub fn from_block(mut self, block: impl Into<BlockId>) -> Self {
         self.config.from_block = block.into();
         self
     }
 
     #[must_use]
-    pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
+    pub fn to_block(mut self, block: impl Into<BlockId>) -> Self {
         self.config.to_block = block.into();
         self
     }
@@ -40,8 +45,24 @@ impl EventScannerBuilder<Historic> {
         let provider = scanner.block_range_scanner.provider();
         let latest_block = provider.get_block_number().await?;
 
-        let from_num = scanner.config.from_block.as_number().unwrap_or(0);
-        let to_num = scanner.config.to_block.as_number().unwrap_or(0);
+        let from_num: BlockNumber;
+        let to_num: BlockNumber;
+
+        // let from_num = scanner.config.from_block.into
+
+        match scanner.config.from_block {
+            BlockId::Number(from_block) => from_num = from_block.as_number().unwrap_or(0),
+            BlockId::Hash(from_hash) => {
+                from_num = provider.get_block_by_hash(from_hash.into()).await?.header().number();
+            }
+        }
+
+        match scanner.config.to_block {
+            BlockId::Number(to_block) => to_num = to_block.as_number().unwrap_or(0),
+            BlockId::Hash(to_hash) => {
+                to_num = provider.get_block_by_hash(to_hash.into()).await?.header().number();
+            }
+        }
 
         if from_num > latest_block {
             Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
@@ -88,6 +109,7 @@ impl<N: Network> EventScanner<Historic, N> {
 mod tests {
     use super::*;
     use alloy::{
+        eips::BlockNumberOrTag,
         network::Ethereum,
         providers::{Provider, ProviderBuilder, RootProvider, mock::Asserter},
         rpc::client::RpcClient,
@@ -99,8 +121,10 @@ mod tests {
         let builder =
             EventScannerBuilder::historic().to_block(200).max_block_range(50).from_block(100);
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(100)));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(200)));
+        let expected_from: BlockId = BlockNumberOrTag::Number(100).into();
+        assert_eq!(builder.config.from_block, expected_from);
+        let expected_to: BlockId = BlockNumberOrTag::Number(200).into();
+        assert_eq!(builder.config.to_block, expected_to);
         assert_eq!(builder.block_range_scanner.max_block_range, 50);
     }
 
@@ -110,8 +134,10 @@ mod tests {
             .from_block(BlockNumberOrTag::Earliest)
             .to_block(BlockNumberOrTag::Latest);
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
+        let expected_from: BlockId = BlockNumberOrTag::Earliest.into();
+        assert_eq!(builder.config.from_block, expected_from);
+        let expected_to: BlockId = BlockNumberOrTag::Latest.into();
+        assert_eq!(builder.config.to_block, expected_to);
     }
 
     #[test]
@@ -126,8 +152,10 @@ mod tests {
             .to_block(200);
 
         assert_eq!(builder.block_range_scanner.max_block_range, 105);
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(2)));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(200)));
+        let expected_from: BlockId = BlockNumberOrTag::Number(2).into();
+        assert_eq!(builder.config.from_block, expected_from);
+        let expected_to: BlockId = BlockNumberOrTag::Number(200).into();
+        assert_eq!(builder.config.to_block, expected_to);
     }
 
     #[tokio::test]

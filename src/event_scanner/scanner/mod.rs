@@ -1,5 +1,5 @@
 use alloy::{
-    eips::BlockNumberOrTag,
+    eips::{BlockId, BlockNumberOrTag},
     network::{Ethereum, Network},
 };
 use tokio::sync::mpsc;
@@ -24,8 +24,8 @@ mod sync;
 #[derive(Default)]
 pub struct Unspecified;
 pub struct Historic {
-    pub(crate) from_block: BlockNumberOrTag,
-    pub(crate) to_block: BlockNumberOrTag,
+    pub(crate) from_block: BlockId,
+    pub(crate) to_block: BlockId,
 }
 pub struct Live {
     pub(crate) block_confirmations: u64,
@@ -49,7 +49,10 @@ pub struct SyncFromBlock {
 
 impl Default for Historic {
     fn default() -> Self {
-        Self { from_block: BlockNumberOrTag::Earliest, to_block: BlockNumberOrTag::Latest }
+        Self {
+            from_block: BlockNumberOrTag::Earliest.into(),
+            to_block: BlockNumberOrTag::Latest.into(),
+        }
     }
 }
 
@@ -425,8 +428,11 @@ mod tests {
     fn test_historic_scanner_config_defaults() {
         let builder = EventScannerBuilder::<Historic>::default();
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
+        let expected_from_block: BlockId = BlockNumberOrTag::Earliest.into();
+        let expected_to_block: BlockId = BlockNumberOrTag::Latest.into();
+
+        assert_eq!(builder.config.from_block, expected_from_block);
+        assert_eq!(builder.config.to_block, expected_to_block);
     }
 
     #[test]

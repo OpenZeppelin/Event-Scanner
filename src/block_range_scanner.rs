@@ -74,7 +74,7 @@ use crate::{
 };
 use alloy::{
     consensus::BlockHeader,
-    eips::BlockNumberOrTag,
+    eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
     pubsub::Subscription,
@@ -196,8 +196,8 @@ pub enum Command {
     },
     StreamHistorical {
         sender: mpsc::Sender<Message>,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        start_height: BlockId,
+        end_height: BlockId,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     StreamFrom {
@@ -318,8 +318,8 @@ impl<N: Network> Service<N> {
 
     async fn handle_historical(
         &mut self,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        start_height: BlockId,
+        end_height: BlockId,
         sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
@@ -763,8 +763,8 @@ impl BlockRangeScannerClient {
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_historical(
         &self,
-        start_height: impl Into<BlockNumberOrTag>,
-        end_height: impl Into<BlockNumberOrTag>,
+        start_height: impl Into<BlockId>,
+        end_height: impl Into<BlockId>,
     ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
