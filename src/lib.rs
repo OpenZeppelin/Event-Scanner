@@ -9,7 +9,7 @@ mod event_scanner;
 mod types;
 
 pub use error::ScannerError;
-pub use types::{ScannerMessage, ScannerStatus};
+pub use types::{Notification, ScannerMessage};
 
 pub use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,

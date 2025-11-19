@@ -9,7 +9,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::info;
 
 use crate::{
-    EventScannerBuilder, ScannerError, ScannerStatus,
+    EventScannerBuilder, Notification, ScannerError,
     block_range_scanner::Message as BlockRangeMessage,
     event_scanner::{
         EventScanner,
@@ -106,7 +106,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             // Use a one-off channel for the notification.
             let (tx, rx) = mpsc::channel::<BlockRangeMessage>(1);
             let stream = ReceiverStream::new(rx);
-            tx.send(BlockRangeMessage::Status(ScannerStatus::SwitchingToLive))
+            tx.send(BlockRangeMessage::Notification(Notification::SwitchingToLive))
                 .await
                 .expect("receiver exists");
 

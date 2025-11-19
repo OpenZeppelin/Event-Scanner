@@ -1,7 +1,7 @@
 use alloy::{primitives::U256, providers::ext::AnvilApi};
 
 use crate::common::{TestCounter, setup_sync_from_latest_scanner};
-use event_scanner::{ScannerStatus, assert_empty, assert_event_sequence_final, assert_next};
+use event_scanner::{Notification, assert_empty, assert_event_sequence_final, assert_next};
 
 #[tokio::test]
 async fn happy_path_no_duplicates() -> anyhow::Result<()> {
@@ -31,7 +31,7 @@ async fn happy_path_no_duplicates() -> anyhow::Result<()> {
         ]
     );
     // Transition to live
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
 
     // Live phase: emit three more, should arrive in order without duplicating latest
     contract.increase().send().await?.watch().await?;
@@ -69,7 +69,7 @@ async fn fewer_historical_then_continues_live() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(2) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
     // Live: two more arrive
@@ -111,7 +111,7 @@ async fn exact_historical_count_then_live() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(4) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
     // Live continues
@@ -134,7 +134,7 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
     // Latest is empty
     let expected: &[TestCounter::CountIncreased] = &[];
     assert_next!(stream, expected);
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
     // Live events arrive
@@ -181,7 +181,7 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
     // Immediately produce a new live event in a new block
@@ -216,7 +216,7 @@ async fn waiting_on_live_logs_arriving() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
     assert_empty!(stream);
 
     Ok(())

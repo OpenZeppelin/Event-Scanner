@@ -5,7 +5,7 @@ use alloy::{
 };
 use alloy_node_bindings::Anvil;
 use event_scanner::{
-    ScannerError, ScannerStatus, assert_closed, assert_empty, assert_next, assert_range_coverage,
+    Notification, ScannerError, assert_closed, assert_empty, assert_next, assert_range_coverage,
     block_range_scanner::BlockRangeScanner,
 };
 
@@ -131,7 +131,7 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     // mint additional blocks
     provider.anvil_mine(Some(3), None).await?;
 
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected);
     assert_range_coverage!(stream, 0..=10);
     assert_empty!(stream);
 
@@ -163,7 +163,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
     assert_next!(stream, 30..=59);
     assert_next!(stream, 60..=89);
     assert_next!(stream, 90..=110);
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected);
     assert_next!(stream, 105..=110);
     assert_closed!(stream);
 
@@ -197,7 +197,7 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
     assert_next!(stream, 30..=59);
     assert_next!(stream, 60..=89);
     assert_next!(stream, 90..=120);
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected);
     assert_next!(stream, 120..=120);
     assert_closed!(stream);
 

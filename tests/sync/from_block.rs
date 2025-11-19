@@ -4,7 +4,7 @@ use alloy::{
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
-use event_scanner::{ScannerStatus, assert_empty, assert_event_sequence_final, assert_next};
+use event_scanner::{Notification, assert_empty, assert_event_sequence_final, assert_next};
 
 use crate::common::{SyncScannerSetup, TestCounter, setup_sync_scanner};
 
@@ -37,7 +37,7 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
 
     // chain tip reached
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
 
     // live events
     assert_event_sequence_final!(
@@ -107,7 +107,7 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     }
 
     // switching to "live" phase
-    assert_next!(stream, ScannerStatus::SwitchingToLive);
+    assert_next!(stream, Notification::SwitchingToLive);
     // assert confirmed live events are streamed separately
     let stream = assert_event_sequence_final!(
         stream,

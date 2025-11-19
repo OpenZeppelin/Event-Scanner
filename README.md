@@ -94,8 +94,8 @@ async fn run_scanner(
             Message::Data(logs) => {
                 println!("Received {} logs: {logs:?}", logs.len());
             }
-            Message::Status(status) => {
-                println!("Status update: {status:?}");
+            Message::Notification(notification) => {
+                println!("Notification received: {notification:?}");
             }
             Message::Error(err) => {
                 eprintln!("Error: {err}");
@@ -226,7 +226,7 @@ let multi_sigs = EventFilter::new()
 The scanner delivers three types of messages through the event stream:
 
 - **`Message::Data(Vec<Log>)`** – Contains a batch of matching event logs. Each log includes the raw event data, transaction hash, block number, and other metadata.
-- **`Message::Status(ScannerStatus)`** – Status notifications from the scanner:
+- **`Message::Notification(Notification)`** – Notifications from the scanner:
 - **`Message::Error(ScannerError)`** – Error notifications if the scanner encounters issues (e.g., RPC failures, connection problems)
 
 Always handle all message types in your stream processing loop to ensure robust error handling and proper reorg detection.

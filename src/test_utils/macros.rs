@@ -257,8 +257,8 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
 /// * **Gap or overlap**: A streamed range doesn't start exactly at the next expected block number,
 ///   indicating a gap or overlap in coverage.
 /// * **Out of bounds**: A streamed range extends beyond the end of the expected range.
-/// * **Wrong message type**: The stream yields a non-`Data` message (e.g., `Error` or `Status`)
-///   when a block range is expected.
+/// * **Wrong message type**: The stream yields a non-`Data` message (e.g., `Error` or
+///   `Notification`) when a block range is expected.
 /// * **Stream closed early**: The stream ends before the entire expected range is covered.
 ///
 /// On panic, the error message includes the expected remaining range and all previously

@@ -7,7 +7,7 @@ use alloy::{
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
 use event_scanner::{
-    ScannerStatus, assert_empty, assert_event_sequence, assert_event_sequence_final, assert_next,
+    Notification, assert_empty, assert_event_sequence, assert_event_sequence_final, assert_next,
 };
 
 #[tokio::test]
@@ -43,7 +43,7 @@ async fn rescans_events_within_same_block() -> anyhow::Result<()> {
         ]
     );
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected);
     // assert the reorged events are emitted
     assert_next!(
         stream,
@@ -91,7 +91,7 @@ async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
         ]
     );
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected);
     // assert the reorged events are emitted
     assert_event_sequence_final!(
         stream,
@@ -135,7 +135,7 @@ async fn depth_one() -> anyhow::Result<()> {
     provider.primary().anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected);
     assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
     assert_empty!(stream);
 
@@ -172,7 +172,7 @@ async fn depth_two() -> anyhow::Result<()> {
     provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
     // assert expected messages post-reorg
-    assert_next!(stream, ScannerStatus::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected);
     assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
     assert_empty!(stream);
 
