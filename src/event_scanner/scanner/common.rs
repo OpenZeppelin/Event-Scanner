@@ -129,7 +129,7 @@ pub fn spawn_log_consumers<N: Network>(
                 }
 
                 info!("Sending collected logs to consumer");
-                _ = sender.try_stream(Message::Data(collected)).await;
+                _ = sender.try_stream(collected).await;
             }
         });
 
@@ -225,7 +225,7 @@ async fn handle_block_range<N: Network>(
 
             match mode {
                 ConsumerMode::Stream => {
-                    if !sender.try_stream(Message::Data(logs)).await {
+                    if !sender.try_stream(logs).await {
                         return false;
                     }
                 }

@@ -69,8 +69,9 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerError, ScannerMessage,
     robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
-    types::{Notification, TryStream},
+    types::{IntoScannerMessageResult, Notification, TryStream},
 };
+
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
@@ -101,6 +102,12 @@ impl From<RangeInclusive<BlockNumber>> for Message {
 impl PartialEq<RangeInclusive<BlockNumber>> for Message {
     fn eq(&self, other: &RangeInclusive<BlockNumber>) -> bool {
         if let Message::Data(range) = self { range.eq(other) } else { false }
+    }
+}
+
+impl IntoScannerMessageResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumber> {
+    fn into_scanner_message_result(self) -> Result<Message, ScannerError> {
+        Ok(Message::Data(self))
     }
 }
 
@@ -491,7 +498,7 @@ impl<N: Network> Service<N> {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(Message::Data(batch_to..=batch_from)).await {
+            if !sender.try_stream(batch_to..=batch_from).await {
                 break;
             }
 
@@ -565,7 +572,7 @@ impl<N: Network> Service<N> {
             let batch_end_block_number =
                 next_start_block.saturating_add(max_block_range - 1).min(end);
 
-            if !sender.try_stream(Message::Data(next_start_block..=batch_end_block_number)).await {
+            if !sender.try_stream(next_start_block..=batch_end_block_number).await {
                 break;
             }
 
@@ -623,7 +630,7 @@ impl<N: Network> Service<N> {
 
                 info!(range_start = range_start, range_end = range_end, "Sending live block range");
 
-                if !sender.try_stream(Message::Data(range_start..=range_end)).await {
+                if !sender.try_stream(range_start..=range_end).await {
                     return;
                 }
 
@@ -647,7 +654,7 @@ impl<N: Network> Service<N> {
                 Ok(Message::Data(range)) => {
                     let (start, end) = (*range.start(), *range.end());
                     if start >= cutoff {
-                        if !sender.try_stream(Message::Data(range)).await {
+                        if !sender.try_stream(range).await {
                             break;
                         }
                         processed += end - start;
@@ -655,7 +662,7 @@ impl<N: Network> Service<N> {
                         discarded += cutoff - start;
 
                         let start = cutoff;
-                        if !sender.try_stream(Message::Data(start..=end)).await {
+                        if !sender.try_stream(start..=end).await {
                             break;
                         }
                         processed += end - start;

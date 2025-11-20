@@ -1,12 +1,21 @@
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
-use crate::ScannerMessage;
+use crate::{
+    ScannerError, ScannerMessage,
+    types::IntoScannerMessageResult,
+};
 
 pub type Message = ScannerMessage<Vec<Log>>;
 
 impl From<Vec<Log>> for Message {
     fn from(logs: Vec<Log>) -> Self {
         Message::Data(logs)
+    }
+}
+
+impl IntoScannerMessageResult<Vec<Log>> for Vec<Log> {
+    fn into_scanner_message_result(self) -> Result<Message, ScannerError> {
+        Ok(Message::Data(self))
     }
 }
 

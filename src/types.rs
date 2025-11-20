@@ -33,31 +33,41 @@ impl<T: Clone> PartialEq<Notification> for ScannerMessage<T> {
     }
 }
 
-impl<T: Clone> From<ScannerMessage<T>> for Result<ScannerMessage<T>, ScannerError> {
-    fn from(value: ScannerMessage<T>) -> Self {
-        Ok(value)
+pub trait IntoScannerMessageResult<T: Clone> {
+    fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError>;
+}
+
+impl<T: Clone> IntoScannerMessageResult<T> for Result<ScannerMessage<T>, ScannerError> {
+    fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
+        self
     }
 }
 
-impl<T: Clone> From<ScannerError> for Result<ScannerMessage<T>, ScannerError> {
-    fn from(value: ScannerError) -> Self {
-        Err(value)
+impl<T: Clone> IntoScannerMessageResult<T> for ScannerMessage<T> {
+    fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
+        Ok(self)
     }
 }
 
-impl<T: Clone> From<Notification> for Result<ScannerMessage<T>, ScannerError> {
-    fn from(value: Notification) -> Self {
-        Ok(value.into())
+impl<T: Clone> IntoScannerMessageResult<T> for ScannerError {
+    fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
+        Err(self)
+    }
+}
+
+impl<T: Clone> IntoScannerMessageResult<T> for Notification {
+    fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
+        Ok(ScannerMessage::Notification(self))
     }
 }
 
 pub(crate) trait TryStream<T: Clone> {
-    async fn try_stream<M: Into<Result<ScannerMessage<T>, ScannerError>>>(&self, msg: M) -> bool;
+    async fn try_stream<M: IntoScannerMessageResult<T>>(&self, msg: M) -> bool;
 }
 
 impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<Result<ScannerMessage<T>, ScannerError>> {
-    async fn try_stream<M: Into<Result<ScannerMessage<T>, ScannerError>>>(&self, msg: M) -> bool {
-        let item = msg.into();
+    async fn try_stream<M: IntoScannerMessageResult<T>>(&self, msg: M) -> bool {
+        let item = msg.into_scanner_message_result();
         match &item {
             Ok(msg) => info!(item = ?msg, "Sending message"),
             Err(err) => info!(error = ?err, "Sending error"),
