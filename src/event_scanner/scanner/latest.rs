@@ -100,7 +100,7 @@ mod tests {
         eips::BlockNumberOrTag,
         network::Ethereum,
         primitives::keccak256,
-        providers::{Provider, ProviderBuilder, RootProvider, mock::Asserter},
+        providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi, mock::Asserter},
         rpc::client::RpcClient,
     };
     use alloy_node_bindings::Anvil;
@@ -179,13 +179,16 @@ mod tests {
         let anvil = Anvil::new().try_spawn().unwrap();
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
-        let latest_block = provider.get_block_number().await.unwrap();
-        let latest_block_hash =
-            provider.get_block_by_number(latest_block.into()).await.unwrap().unwrap().header.hash;
+        provider.anvil_mine(Some(5), None).await.unwrap();
+
+        let block_1_hash =
+            provider.get_block_by_number(1.into()).await.unwrap().unwrap().header.hash;
+        let block_5_hash =
+            provider.get_block_by_number(5.into()).await.unwrap().unwrap().header.hash;
 
         let result = EventScannerBuilder::latest(1)
-            .from_block(latest_block_hash)
-            .to_block(latest_block_hash)
+            .from_block(block_1_hash)
+            .to_block(block_5_hash)
             .connect(provider.clone())
             .await;
 
@@ -255,21 +258,24 @@ mod tests {
         let anvil = Anvil::new().try_spawn().unwrap();
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
-        let latest_block = provider.get_block_number().await.unwrap();
-        let latest_block_hash =
-            provider.get_block_by_number(latest_block.into()).await.unwrap().unwrap().header.hash;
+        provider.anvil_mine(Some(5), None).await.unwrap();
+
+        let block_1_hash =
+            provider.get_block_by_number(1.into()).await.unwrap().unwrap().header.hash;
+        let block_5_hash =
+            provider.get_block_by_number(5.into()).await.unwrap().unwrap().header.hash;
 
         let result = EventScannerBuilder::latest(1)
-            .from_block(latest_block_hash)
-            .to_block(latest_block)
+            .from_block(block_1_hash)
+            .to_block(5)
             .connect(provider.clone())
             .await;
 
         assert!(result.is_ok());
 
         let result = EventScannerBuilder::latest(1)
-            .from_block(latest_block)
-            .to_block(latest_block_hash)
+            .from_block(1)
+            .to_block(block_5_hash)
             .connect(provider)
             .await;
 

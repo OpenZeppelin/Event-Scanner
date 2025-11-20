@@ -75,7 +75,7 @@ mod tests {
         eips::{BlockId, BlockNumberOrTag},
         network::Ethereum,
         primitives::keccak256,
-        providers::{Provider, ProviderBuilder, RootProvider, mock::Asserter},
+        providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi, mock::Asserter},
         rpc::client::RpcClient,
     };
     use alloy_node_bindings::Anvil;
@@ -146,14 +146,13 @@ mod tests {
         let anvil = Anvil::new().try_spawn().unwrap();
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
-        let latest_block = provider.get_block_number().await.unwrap();
-        let latest_block_hash =
-            provider.get_block_by_number(latest_block.into()).await.unwrap().unwrap().header.hash;
+        provider.anvil_mine(Some(5), None).await.unwrap();
 
-        let result = EventScannerBuilder::sync()
-            .from_block(latest_block_hash)
-            .connect(provider.clone())
-            .await;
+        let block_5_hash =
+            provider.get_block_by_number(5.into()).await.unwrap().unwrap().header.hash;
+
+        let result =
+            EventScannerBuilder::sync().from_block(block_5_hash).connect(provider.clone()).await;
 
         assert!(result.is_ok());
     }
