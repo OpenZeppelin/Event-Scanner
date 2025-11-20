@@ -76,7 +76,7 @@ use alloy::{
     consensus::BlockHeader,
     eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
-    primitives::{B256, BlockHash, BlockNumber},
+    primitives::{B256, BlockNumber},
     pubsub::Subscription,
     transports::{RpcError, TransportErrorKind},
 };
@@ -330,12 +330,10 @@ impl<N: Network> Service<N> {
         let start_block_num = start_block.header().number();
         let end_block_num = end_block.header().number();
 
-        let (start_block_num, start_id, end_block_num) = match start_block_num.cmp(&end_block_num) {
-            Ordering::Greater => (end_block_num, end_id, start_block_num),
-            _ => (start_block_num, start_id, end_block_num),
+        let (start_block_num, end_block_num) = match start_block_num.cmp(&end_block_num) {
+            Ordering::Greater => (end_block_num, start_block_num),
+            _ => (start_block_num, end_block_num),
         };
-
-        self.verify_start_block_hash(start_block_num, start_id, &sender).await?;
 
         info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
@@ -427,8 +425,6 @@ impl<N: Network> Service<N> {
             .await;
         });
 
-        self.verify_start_block_hash(start_block, start_id, &sender).await?;
-
         tokio::spawn(async move {
             // Step 4: Perform historical synchronization
             // This processes blocks from start_block to end_block (cutoff)
@@ -470,43 +466,14 @@ impl<N: Network> Service<N> {
             try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id),)?;
 
         // normalize block range
-        let (from, start_id, to) =
-            match start_block.header().number().cmp(&end_block.header().number()) {
-                Ordering::Greater => (start_block, start_id, end_block),
-                _ => (end_block, end_id, start_block),
-            };
-
-        // One off reorg check before streaming if start is a hash
-        self.verify_start_block_hash(from.header().number(), start_id, &sender).await?;
+        let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
+            Ordering::Greater => (start_block, end_block),
+            _ => (end_block, start_block),
+        };
 
         tokio::spawn(async move {
             Self::stream_rewind(from, to, max_block_range, &sender, &provider).await;
         });
-
-        Ok(())
-    }
-
-    async fn verify_start_block_hash(
-        &self,
-        start_block: BlockNumber,
-        start_id: BlockId,
-        sender: &mpsc::Sender<Message>,
-    ) -> Result<(), ScannerError> {
-        if let BlockId::Hash(expected_hash) = start_id {
-            let block_hash = self
-                .provider
-                .get_block_by_number(BlockNumberOrTag::Number(start_block))
-                .await?
-                .header()
-                .hash();
-            let expected_hash: BlockHash = expected_hash.into();
-
-            if block_hash != expected_hash &&
-                !sender.try_stream(Message::Notification(Notification::ReorgDetected)).await
-            {
-                return Err(ScannerError::ServiceShutdown);
-            }
-        }
 
         Ok(())
     }
