@@ -35,10 +35,13 @@
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
-//!             Message::Data(range) => {
+//!             Ok(Message::Data(range)) => {
 //!                 // process range
 //!             }
-//!             Message::Error(e) => {
+//!             Ok(Message::Notification(notification)) => {
+//!                 info!("Received notification: {:?}", notification);
+//!             }
+//!             Err(e) => {
 //!                 error!("Received error from subscription: {e}");
 //!                 match e {
 //!                     ScannerError::ServiceShutdown => break,
@@ -46,9 +49,6 @@
 //!                         error!("Non-fatal error, continuing: {e}");
 //!                     }
 //!                 }
-//!             }
-//!             Message::Notification(notification) => {
-//!                 info!("Received notification: {:?}", notification);
 //!             }
 //!         }
 //!     }
