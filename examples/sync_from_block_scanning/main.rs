@@ -98,11 +98,11 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            Err(e) => {
-                error!("Received error: {}", e);
-            }
             Ok(Message::Notification(info)) => {
                 info!("Received notification: {:?}", info);
+            }
+            Err(e) => {
+                error!("Received error: {}", e);
             }
         }
 
