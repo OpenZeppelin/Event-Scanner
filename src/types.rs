@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 use crate::ScannerError;
 
-#[derive(Copy, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum ScannerMessage<T: Clone> {
     Data(T),
     Notification(Notification),
@@ -37,6 +37,10 @@ pub(crate) trait TryStream<M> {
     async fn try_stream(&self, item: M) -> bool;
 }
 
+pub(crate) trait TryStreamError<E> {
+    async fn try_stream_err(&self, error: E) -> bool;
+}
+
 impl<T: Clone + Debug, M> TryStream<M> for mpsc::Sender<ScannerMessage<T>>
 where
     M: Into<ScannerMessage<T>>,
@@ -52,14 +56,46 @@ where
     }
 }
 
-impl<E> TryStream<E> for mpsc::Sender<ScannerError>
+impl<T: Clone + Debug, M> TryStream<M> for mpsc::Sender<Result<ScannerMessage<T>, ScannerError>>
+where
+    M: Into<ScannerMessage<T>>,
+{
+    async fn try_stream(&self, item: M) -> bool {
+        let item = item.into();
+        let item = Ok(item);
+        info!(item = ?item, "Sending message");
+        if let Err(err) = self.send(item).await {
+            warn!(error = %err, "Downstream channel closed, stopping stream");
+            return false;
+        }
+        true
+    }
+}
+
+impl<E> TryStreamError<E> for mpsc::Sender<ScannerError>
 where
     E: Error + Clone + Into<ScannerError>,
 {
-    async fn try_stream(&self, item: E) -> bool {
+    async fn try_stream_err(&self, item: E) -> bool {
         let item = item.into();
         info!(item = ?item, "Sending error");
         if let Err(err) = self.send(item).await {
+            warn!(error = %err, "Downstream channel closed, stopping stream");
+            return false;
+        }
+        true
+    }
+}
+
+impl<T: Clone + Debug, E> TryStreamError<E>
+    for mpsc::Sender<Result<ScannerMessage<T>, ScannerError>>
+where
+    E: Error + Clone + Into<ScannerError>,
+{
+    async fn try_stream_err(&self, item: E) -> bool {
+        let item = item.into();
+        info!(item = ?item, "Sending error");
+        if let Err(err) = self.send(Err(item)).await {
             warn!(error = %err, "Downstream channel closed, stopping stream");
             return false;
         }

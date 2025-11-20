@@ -69,7 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerError, ScannerMessage,
     robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
-    types::{Notification, TryStream},
+    types::{Notification, TryStream, TryStreamError},
 };
 use alloy::{
     consensus::BlockHeader,
@@ -513,7 +513,7 @@ impl<N: Network> Service<N> {
                 }
                 Err(e) => {
                     error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = sender.try_stream(e);
+                    _ = sender.try_stream_err(e);
                     return;
                 }
             };
@@ -535,7 +535,7 @@ impl<N: Network> Service<N> {
                     }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream(e.into());
+                        _ = sender.try_stream_err(e);
                         return;
                     }
                 };
@@ -669,7 +669,7 @@ impl<N: Network> Service<N> {
                     }
                 }
                 Err(e) => {
-                    if !sender.try_stream(e).await {
+                    if !sender.try_stream_err(e).await {
                         break;
                     }
                 }
@@ -859,9 +859,9 @@ mod tests {
     async fn buffered_messages_after_cutoff_are_all_passed() {
         let cutoff = 50;
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(51..=55)).await.unwrap();
-        buffer_tx.send(Message::Data(56..=60)).await.unwrap();
-        buffer_tx.send(Message::Data(61..=70)).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(51..=55))).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(56..=60))).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(61..=70))).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, out_rx) = mpsc::channel(8);
@@ -880,9 +880,9 @@ mod tests {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(40..=50)).await.unwrap();
-        buffer_tx.send(Message::Data(51..=60)).await.unwrap();
-        buffer_tx.send(Message::Data(61..=70)).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(40..=50))).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(51..=60))).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(61..=70))).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, out_rx) = mpsc::channel(8);
@@ -898,9 +898,9 @@ mod tests {
         let cutoff = 75;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(60..=70)).await.unwrap();
-        buffer_tx.send(Message::Data(71..=80)).await.unwrap();
-        buffer_tx.send(Message::Data(81..=86)).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(60..=70))).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(71..=80))).await.unwrap();
+        buffer_tx.send(Ok(Message::Data(81..=86))).await.unwrap();
         drop(buffer_tx);
 
         let (out_tx, out_rx) = mpsc::channel(8);
@@ -918,11 +918,11 @@ mod tests {
         let cutoff = 100;
 
         let (buffer_tx, buffer_rx) = mpsc::channel(8);
-        buffer_tx.send(Message::Data(98..=98)).await.unwrap(); // Just before: discard
-        buffer_tx.send(Message::Data(99..=100)).await.unwrap(); // Includes cutoff: trim to 100..=100
-        buffer_tx.send(Message::Data(100..=100)).await.unwrap(); // Exactly at: forward
-        buffer_tx.send(Message::Data(100..=101)).await.unwrap(); // Starts at cutoff: forward
-        buffer_tx.send(Message::Data(102..=102)).await.unwrap(); // After cutoff: forward
+        buffer_tx.send(Ok(Message::Data(98..=98))).await.unwrap(); // Just before: discard
+        buffer_tx.send(Ok(Message::Data(99..=100))).await.unwrap(); // Includes cutoff: trim to 100..=100
+        buffer_tx.send(Ok(Message::Data(100..=100))).await.unwrap(); // Exactly at: forward
+        buffer_tx.send(Ok(Message::Data(100..=101))).await.unwrap(); // Starts at cutoff: forward
+        buffer_tx.send(Ok(Message::Data(102..=102))).await.unwrap(); // After cutoff: forward
         drop(buffer_tx);
 
         let (out_tx, out_rx) = mpsc::channel(8);
@@ -941,7 +941,7 @@ mod tests {
     async fn try_send_forwards_errors_to_subscribers() {
         let (tx, mut rx) = mpsc::channel::<ScannerError>(1);
 
-        _ = tx.try_stream(ScannerError::BlockNotFound(4.into())).await;
+        _ = tx.try_stream_err(ScannerError::BlockNotFound(4.into())).await;
 
         assert!(matches!(
             rx.recv().await,

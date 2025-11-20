@@ -5,8 +5,26 @@ use crate::Message;
 
 #[macro_export]
 macro_rules! assert_next {
+    // Convenience form with default timeout
+    ($stream: expr, Err($expected_err:pat)) => {
+        $crate::assert_next!($stream, Err($expected_err), timeout = 5)
+    };
     ($stream: expr, $expected: expr) => {
-        assert_next!($stream, $expected, timeout = 5)
+        $crate::assert_next!($stream, $expected, timeout = 5)
+    };
+    // Result::Err expectation – assert the next item is an Err matching the pattern
+    ($stream: expr, Err($expected_err:pat), timeout = $secs: expr) => {
+        let message = tokio::time::timeout(
+            std::time::Duration::from_secs($secs),
+            tokio_stream::StreamExt::next(&mut $stream),
+        )
+        .await
+        .expect("timed out");
+        if let Some(msg) = message {
+            assert!(matches!(msg, Err($expected_err)));
+        } else {
+            panic!("Expected Err(..), but channel was closed");
+        }
     };
     ($stream: expr, $expected: expr, timeout = $secs: expr) => {
         let message = tokio::time::timeout(
@@ -15,10 +33,20 @@ macro_rules! assert_next {
         )
         .await
         .expect("timed out");
-        if let Some(msg) = message {
-            assert_eq!(msg, $expected)
-        } else {
-            panic!("Expected {:?}, but channel was closed", $expected)
+        let expected = $expected;
+        match message {
+            // Some(Ok($crate::ScannerMessage::Data(data))) => {
+            //     assert_eq!(data, expected, "Expected Data({:?}), got Data({:?})", expected,
+            // data); }
+            Some(Ok(msg)) => {
+                assert_eq!(msg, expected, "Expected {:?}, got {:?}", expected, msg);
+            }
+            Some(Err(e)) => {
+                panic!("Expected Ok({:?}), got Err({:?})", expected, e);
+            }
+            None => {
+                panic!("Expected Ok({:?}), but channel was closed", expected);
+            }
         }
     };
 }
