@@ -7,7 +7,7 @@ use alloy::{
 use alloy_node_bindings::AnvilInstance;
 use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, Historic, LatestEvents, Live, Message,
-    SyncFromBlock, SyncFromLatestEvents, robust_provider::RobustProvider,
+    ScannerError, SyncFromBlock, SyncFromLatestEvents, robust_provider::RobustProvider,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -24,7 +24,7 @@ where
     pub provider: RobustProvider<Ethereum>,
     pub contract: TestCounter::TestCounterInstance<P>,
     pub scanner: S,
-    pub stream: ReceiverStream<Message>,
+    pub stream: ReceiverStream<Result<Message, ScannerError>>,
     #[allow(dead_code)]
     pub anvil: AnvilInstance,
 }
