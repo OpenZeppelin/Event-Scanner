@@ -15,14 +15,14 @@ impl EventScannerBuilder<LatestEvents> {
     }
 
     #[must_use]
-    pub fn from_block(mut self, block: impl Into<BlockId>) -> Self {
-        self.config.from_block = block.into();
+    pub fn from_block(mut self, block_id: impl Into<BlockId>) -> Self {
+        self.config.from_block = block_id.into();
         self
     }
 
     #[must_use]
-    pub fn to_block(mut self, block: impl Into<BlockId>) -> Self {
-        self.config.to_block = block.into();
+    pub fn to_block(mut self, block_id: impl Into<BlockId>) -> Self {
+        self.config.to_block = block_id.into();
         self
     }
 

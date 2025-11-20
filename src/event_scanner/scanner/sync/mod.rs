@@ -192,8 +192,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Arguments
     ///
-    /// * `block` - Starting block id (number, tag, or hash; e.g., `Earliest`, `Latest`, a specific
-    ///   number, or a block hash)
+    /// * `block_id` - Starting block id
     ///
     /// # Important notes
     ///
@@ -211,7 +210,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [reorg]: crate::types::Notification::ReorgDetected
     /// [switch_to_live]: crate::types::Notification::SwitchingToLive
     #[must_use]
-    pub fn from_block(self, block: impl Into<BlockId>) -> EventScannerBuilder<SyncFromBlock> {
-        EventScannerBuilder::<SyncFromBlock>::new(block.into())
+    pub fn from_block(self, block_id: impl Into<BlockId>) -> EventScannerBuilder<SyncFromBlock> {
+        EventScannerBuilder::<SyncFromBlock>::new(block_id.into())
     }
 }
