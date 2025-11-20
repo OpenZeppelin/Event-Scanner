@@ -1,5 +1,5 @@
 use alloy::{
-    eips::BlockNumberOrTag,
+    eips::{BlockId, BlockNumberOrTag},
     network::Ethereum,
     providers::{Provider, RootProvider},
     sol_types::SolEvent,
@@ -76,7 +76,7 @@ pub async fn setup_live_scanner(
 pub async fn setup_sync_scanner(
     block_interval: Option<f64>,
     filter: Option<EventFilter>,
-    from: impl Into<BlockNumberOrTag>,
+    from: impl Into<BlockId>,
     confirmations: u64,
 ) -> anyhow::Result<SyncScannerSetup<impl Provider<Ethereum> + Clone>> {
     let (anvil, provider, contract, filter) = setup_common(block_interval, filter).await?;

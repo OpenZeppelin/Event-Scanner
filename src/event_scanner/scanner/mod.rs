@@ -1,5 +1,5 @@
 use alloy::{
-    eips::BlockNumberOrTag,
+    eips::{BlockId, BlockNumberOrTag},
     network::{Ethereum, Network},
 };
 use tokio::sync::mpsc;
@@ -24,16 +24,16 @@ mod sync;
 #[derive(Default)]
 pub struct Unspecified;
 pub struct Historic {
-    pub(crate) from_block: BlockNumberOrTag,
-    pub(crate) to_block: BlockNumberOrTag,
+    pub(crate) from_block: BlockId,
+    pub(crate) to_block: BlockId,
 }
 pub struct Live {
     pub(crate) block_confirmations: u64,
 }
 pub struct LatestEvents {
     pub(crate) count: usize,
-    pub(crate) from_block: BlockNumberOrTag,
-    pub(crate) to_block: BlockNumberOrTag,
+    pub(crate) from_block: BlockId,
+    pub(crate) to_block: BlockId,
     pub(crate) block_confirmations: u64,
 }
 #[derive(Default)]
@@ -43,13 +43,16 @@ pub struct SyncFromLatestEvents {
     pub(crate) block_confirmations: u64,
 }
 pub struct SyncFromBlock {
-    pub(crate) from_block: BlockNumberOrTag,
+    pub(crate) from_block: BlockId,
     pub(crate) block_confirmations: u64,
 }
 
 impl Default for Historic {
     fn default() -> Self {
-        Self { from_block: BlockNumberOrTag::Earliest, to_block: BlockNumberOrTag::Latest }
+        Self {
+            from_block: BlockNumberOrTag::Earliest.into(),
+            to_block: BlockNumberOrTag::Latest.into(),
+        }
     }
 }
 
@@ -332,8 +335,8 @@ impl EventScannerBuilder<LatestEvents> {
         Self {
             config: LatestEvents {
                 count,
-                from_block: BlockNumberOrTag::Latest,
-                to_block: BlockNumberOrTag::Earliest,
+                from_block: BlockNumberOrTag::Latest.into(),
+                to_block: BlockNumberOrTag::Earliest.into(),
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
             },
             block_range_scanner: BlockRangeScanner::default(),
@@ -356,9 +359,12 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
 
 impl EventScannerBuilder<SyncFromBlock> {
     #[must_use]
-    pub fn new(from_block: BlockNumberOrTag) -> Self {
+    pub fn new(from_block: impl Into<BlockId>) -> Self {
         Self {
-            config: SyncFromBlock { from_block, block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS },
+            config: SyncFromBlock {
+                from_block: from_block.into(),
+                block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            },
             block_range_scanner: BlockRangeScanner::default(),
         }
     }
@@ -429,8 +435,8 @@ mod tests {
     fn test_historic_scanner_config_defaults() {
         let builder = EventScannerBuilder::<Historic>::default();
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Latest.into());
     }
 
     #[test]
@@ -445,8 +451,9 @@ mod tests {
         let builder = EventScannerBuilder::<LatestEvents>::new(10);
 
         assert_eq!(builder.config.count, 10);
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Latest));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Earliest));
+
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Latest.into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
@@ -454,7 +461,7 @@ mod tests {
     fn sync_scanner_config_defaults() {
         let builder = EventScannerBuilder::<SyncFromBlock>::new(BlockNumberOrTag::Earliest);
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 

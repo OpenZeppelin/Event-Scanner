@@ -74,7 +74,7 @@ use crate::{
 
 use alloy::{
     consensus::BlockHeader,
-    eips::BlockNumberOrTag,
+    eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
     pubsub::Subscription,
@@ -182,21 +182,21 @@ pub enum Command {
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     StreamHistorical {
-        sender: mpsc::Sender<Result<Message, ScannerError>>,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        sender: mpsc::Sender<Message>,
+        start_id: BlockId,
+        end_id: BlockId,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     StreamFrom {
-        sender: mpsc::Sender<Result<Message, ScannerError>>,
-        start_height: BlockNumberOrTag,
+        sender: mpsc::Sender<Message>,
+        start_id: BlockId,
         block_confirmations: u64,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     Rewind {
-        sender: mpsc::Sender<Result<Message, ScannerError>>,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
+        sender: mpsc::Sender<Message>,
+        start_id: BlockId,
+        end_id: BlockId,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
 }
@@ -253,19 +253,19 @@ impl<N: Network> Service<N> {
                 let result = self.handle_live(block_confirmations, sender).await;
                 let _ = response.send(result);
             }
-            Command::StreamHistorical { sender, start_height, end_height, response } => {
-                info!(start_height = ?start_height, end_height = ?end_height, "Starting historical stream");
-                let result = self.handle_historical(start_height, end_height, sender).await;
+            Command::StreamHistorical { sender, start_id, end_id, response } => {
+                info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
+                let result = self.handle_historical(start_id, end_id, sender).await;
                 let _ = response.send(result);
             }
-            Command::StreamFrom { sender, start_height, block_confirmations, response } => {
-                info!(start_height = ?start_height, "Starting streaming from");
-                let result = self.handle_sync(start_height, block_confirmations, sender).await;
+            Command::StreamFrom { sender, start_id, block_confirmations, response } => {
+                info!(start_id = ?start_id, "Starting streaming from");
+                let result = self.handle_sync(start_id, block_confirmations, sender).await;
                 let _ = response.send(result);
             }
-            Command::Rewind { sender, start_height, end_height, response } => {
-                info!(start_height = ?start_height, end_height = ?end_height, "Starting rewind");
-                let result = self.handle_rewind(start_height, end_height, sender).await;
+            Command::Rewind { sender, start_id, end_id, response } => {
+                info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
+                let result = self.handle_rewind(start_id, end_id, sender).await;
                 let _ = response.send(result);
             }
         }
@@ -305,16 +305,14 @@ impl<N: Network> Service<N> {
 
     async fn handle_historical(
         &mut self,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
-        sender: mpsc::Sender<Result<Message, ScannerError>>,
+        start_id: BlockId,
+        end_id: BlockId,
+        sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
 
-        let (start_block, end_block) = tokio::try_join!(
-            self.provider.get_block_by_number(start_height),
-            self.provider.get_block_by_number(end_height)
-        )?;
+        let (start_block, end_block) =
+            tokio::try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
 
         let start_block_num = start_block.header().number();
         let end_block_num = end_block.header().number();
@@ -341,7 +339,7 @@ impl<N: Network> Service<N> {
 
     async fn handle_sync(
         &mut self,
-        start_height: BlockNumberOrTag,
+        start_id: BlockId,
         block_confirmations: u64,
         sender: mpsc::Sender<Result<Message, ScannerError>>,
     ) -> Result<(), ScannerError> {
@@ -349,9 +347,9 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
 
         let get_start_block = async || -> Result<BlockNumber, ScannerError> {
-            let block = match start_height {
-                BlockNumberOrTag::Number(num) => num,
-                block_tag => provider.get_block_by_number(block_tag).await?.header().number(),
+            let block = match start_id {
+                BlockId::Number(BlockNumberOrTag::Number(num)) => num,
+                _ => provider.get_block(start_id).await?.header().number(),
             };
             Ok(block)
         };
@@ -444,17 +442,15 @@ impl<N: Network> Service<N> {
 
     async fn handle_rewind(
         &mut self,
-        start_height: BlockNumberOrTag,
-        end_height: BlockNumberOrTag,
-        sender: mpsc::Sender<Result<Message, ScannerError>>,
+        start_id: BlockId,
+        end_id: BlockId,
+        sender: mpsc::Sender<Message>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
 
-        let (start_block, end_block) = try_join!(
-            self.provider.get_block_by_number(start_height),
-            self.provider.get_block_by_number(end_height),
-        )?;
+        let (start_block, end_block) =
+            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id),)?;
 
         // normalize block range
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
@@ -742,28 +738,28 @@ impl BlockRangeScannerClient {
         Ok(ReceiverStream::new(blocks_receiver))
     }
 
-    /// Streams a batch of historical blocks from `start_height` to `end_height`.
+    /// Streams a batch of historical blocks from `start_id` to `end_id`.
     ///
     /// # Arguments
     ///
-    /// * `start_height` - The starting block number or tag.
-    /// * `end_height` - The ending block number or tag.
+    /// * `start_id` - The starting block id
+    /// * `end_id` - The ending block id
     ///
     /// # Errors
     ///
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_historical(
         &self,
-        start_height: impl Into<BlockNumberOrTag>,
-        end_height: impl Into<BlockNumberOrTag>,
-    ) -> Result<ReceiverStream<Result<Message, ScannerError>>, ScannerError> {
+        start_id: impl Into<BlockId>,
+        end_id: impl Into<BlockId>,
+    ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamHistorical {
             sender: blocks_sender,
-            start_height: start_height.into(),
-            end_height: end_height.into(),
+            start_id: start_id.into(),
+            end_id: end_id.into(),
             response: response_tx,
         };
 
@@ -774,11 +770,11 @@ impl BlockRangeScannerClient {
         Ok(ReceiverStream::new(blocks_receiver))
     }
 
-    /// Streams blocks starting from `start_height` and transitions to live mode.
+    /// Streams blocks starting from `start_id` and transitions to live mode.
     ///
     /// # Arguments
     ///
-    /// * `start_height` - The starting block number or tag.
+    /// * `start_id` - The starting block id.
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
     ///
     /// # Errors
@@ -786,7 +782,7 @@ impl BlockRangeScannerClient {
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn stream_from(
         &self,
-        start_height: impl Into<BlockNumberOrTag>,
+        start_id: impl Into<BlockId>,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<Result<Message, ScannerError>>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
@@ -794,7 +790,7 @@ impl BlockRangeScannerClient {
 
         let command = Command::StreamFrom {
             sender: blocks_sender,
-            start_height: start_height.into(),
+            start_id: start_id.into(),
             block_confirmations,
             response: response_tx,
         };
@@ -806,28 +802,28 @@ impl BlockRangeScannerClient {
         Ok(ReceiverStream::new(blocks_receiver))
     }
 
-    /// Streams blocks in reverse order from `start_height` to `end_height`.
+    /// Streams blocks in reverse order from `start_id` to `end_id`.
     ///
     /// # Arguments
     ///
-    /// * `start_height` - The starting block number or tag (defaults to Latest if None).
-    /// * `end_height` - The ending block number or tag (defaults to Earliest if None).
+    /// * `start_id` - The starting block id (defaults to Latest if None).
+    /// * `end_id` - The ending block id (defaults to Earliest if None).
     ///
     /// # Errors
     ///
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     pub async fn rewind(
         &self,
-        start_height: impl Into<BlockNumberOrTag>,
-        end_height: impl Into<BlockNumberOrTag>,
-    ) -> Result<ReceiverStream<Result<Message, ScannerError>>, ScannerError> {
+        start_id: impl Into<BlockId>,
+        end_id: impl Into<BlockId>,
+    ) -> Result<ReceiverStream<Message>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Rewind {
             sender: blocks_sender,
-            start_height: start_height.into(),
-            end_height: end_height.into(),
+            start_id: start_id.into(),
+            end_id: end_id.into(),
             response: response_tx,
         };
 
@@ -843,7 +839,10 @@ impl BlockRangeScannerClient {
 mod tests {
     use super::*;
     use crate::{assert_closed, assert_next};
-    use alloy::{eips::BlockId, network::Ethereum};
+    use alloy::{
+        eips::{BlockId, BlockNumberOrTag},
+        network::Ethereum,
+    };
     use tokio::sync::mpsc;
 
     #[test]

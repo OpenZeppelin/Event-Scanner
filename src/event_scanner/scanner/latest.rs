@@ -1,4 +1,4 @@
-use alloy::{eips::BlockNumberOrTag, network::Network};
+use alloy::{eips::BlockId, network::Network};
 
 use super::common::{ConsumerMode, handle_stream};
 use crate::{
@@ -15,14 +15,14 @@ impl EventScannerBuilder<LatestEvents> {
     }
 
     #[must_use]
-    pub fn from_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
-        self.config.from_block = block.into();
+    pub fn from_block(mut self, block_id: impl Into<BlockId>) -> Self {
+        self.config.from_block = block_id.into();
         self
     }
 
     #[must_use]
-    pub fn to_block(mut self, block: impl Into<BlockNumberOrTag>) -> Self {
-        self.config.to_block = block.into();
+    pub fn to_block(mut self, block_id: impl Into<BlockId>) -> Self {
+        self.config.to_block = block_id.into();
         self
     }
 
@@ -41,7 +41,20 @@ impl EventScannerBuilder<LatestEvents> {
         if self.config.count == 0 {
             return Err(ScannerError::InvalidEventCount);
         }
-        self.build(provider).await
+
+        let scanner = self.build(provider).await?;
+
+        let provider = scanner.block_range_scanner.provider();
+
+        if let BlockId::Hash(from_hash) = scanner.config.from_block {
+            provider.get_block_by_hash(from_hash.into()).await?;
+        }
+
+        if let BlockId::Hash(to_hash) = scanner.config.to_block {
+            provider.get_block_by_hash(to_hash.into()).await?;
+        }
+
+        Ok(scanner)
     }
 }
 
@@ -82,13 +95,15 @@ impl<N: Network> EventScanner<LatestEvents, N> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy::{
+        eips::BlockNumberOrTag,
         network::Ethereum,
-        providers::{RootProvider, mock::Asserter},
+        primitives::keccak256,
+        providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi, mock::Asserter},
         rpc::client::RpcClient,
     };
-
-    use super::*;
+    use alloy_node_bindings::Anvil;
 
     #[test]
     fn test_latest_scanner_builder_pattern() {
@@ -101,8 +116,8 @@ mod tests {
         assert_eq!(builder.block_range_scanner.max_block_range, 25);
         assert_eq!(builder.config.block_confirmations, 5);
         assert_eq!(builder.config.count, 3);
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(50)));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(150)));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(50).into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Number(150).into());
     }
 
     #[test]
@@ -112,8 +127,8 @@ mod tests {
             .to_block(BlockNumberOrTag::Latest)
             .block_confirmations(20);
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Latest));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Latest.into());
         assert_eq!(builder.config.count, 10);
         assert_eq!(builder.config.block_confirmations, 20);
     }
@@ -131,8 +146,8 @@ mod tests {
             .max_block_range(60);
 
         assert_eq!(builder.config.count, 3);
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(20)));
-        assert!(matches!(builder.config.to_block, BlockNumberOrTag::Number(200)));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(20).into());
+        assert_eq!(builder.config.to_block, BlockNumberOrTag::Number(200).into());
         assert_eq!(builder.config.block_confirmations, 7);
         assert_eq!(builder.block_range_scanner.max_block_range, 60);
     }
@@ -157,5 +172,113 @@ mod tests {
             Err(ScannerError::InvalidMaxBlockRange) => {}
             _ => panic!("Expected InvalidMaxBlockRange error"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_latest_scanner_with_valid_block_hash() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        provider.anvil_mine(Some(5), None).await.unwrap();
+
+        let block_1_hash =
+            provider.get_block_by_number(1.into()).await.unwrap().unwrap().header.hash;
+        let block_5_hash =
+            provider.get_block_by_number(5.into()).await.unwrap().unwrap().header.hash;
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(block_1_hash)
+            .to_block(block_5_hash)
+            .connect(provider.clone())
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_latest_scanner_with_invalid_to_hash() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let random_hash = keccak256("Invalid Hash");
+        let result = EventScannerBuilder::latest(1).to_block(random_hash).connect(provider).await;
+
+        match result {
+            Err(ScannerError::BlockNotFound(id)) => {
+                assert_eq!(id, BlockId::Hash(random_hash.into()));
+            }
+            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
+            Ok(_) => panic!("Expected error, but got Ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_latest_scanner_with_invalid_from_hash() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let random_hash = keccak256("Invalid Hash");
+        let result = EventScannerBuilder::latest(1).from_block(random_hash).connect(provider).await;
+
+        match result {
+            Err(ScannerError::BlockNotFound(id)) => {
+                assert_eq!(id, BlockId::Hash(random_hash.into()));
+            }
+            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
+            Ok(_) => panic!("Expected error, but got Ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_latest_scanner_with_invalid_from_and_to_hash() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let random_from_hash = keccak256("Invalid From Hash");
+        let random_to_hash = keccak256("Invalid To Hash");
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(random_from_hash)
+            .to_block(random_to_hash)
+            .connect(provider)
+            .await;
+
+        // We expect it to fail on the first checked block (from_block)
+        match result {
+            Err(ScannerError::BlockNotFound(id)) => {
+                assert_eq!(id, BlockId::Hash(random_from_hash.into()));
+            }
+            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
+            Ok(_) => panic!("Expected error, but got Ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_latest_scanner_with_mixed_block_types() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        provider.anvil_mine(Some(5), None).await.unwrap();
+
+        let block_1_hash =
+            provider.get_block_by_number(1.into()).await.unwrap().unwrap().header.hash;
+        let block_5_hash =
+            provider.get_block_by_number(5.into()).await.unwrap().unwrap().header.hash;
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(block_1_hash)
+            .to_block(5)
+            .connect(provider.clone())
+            .await;
+
+        assert!(result.is_ok());
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(1)
+            .to_block(block_5_hash)
+            .connect(provider)
+            .await;
+
+        assert!(result.is_ok());
     }
 }

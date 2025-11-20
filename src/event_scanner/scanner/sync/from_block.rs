@@ -1,4 +1,4 @@
-use alloy::network::Network;
+use alloy::{eips::BlockId, network::Network};
 
 use crate::{
     EventScannerBuilder, ScannerError,
@@ -27,7 +27,15 @@ impl EventScannerBuilder<SyncFromBlock> {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<SyncFromBlock, N>, ScannerError> {
-        self.build(provider).await
+        let scanner = self.build(provider).await?;
+
+        let provider = scanner.block_range_scanner.provider();
+
+        if let BlockId::Hash(from_hash) = scanner.config.from_block {
+            provider.get_block_by_hash(from_hash.into()).await?;
+        }
+
+        Ok(scanner)
     }
 }
 
@@ -64,11 +72,13 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
 #[cfg(test)]
 mod tests {
     use alloy::{
-        eips::BlockNumberOrTag,
+        eips::{BlockId, BlockNumberOrTag},
         network::Ethereum,
-        providers::{RootProvider, mock::Asserter},
+        primitives::keccak256,
+        providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi, mock::Asserter},
         rpc::client::RpcClient,
     };
+    use alloy_node_bindings::Anvil;
 
     use super::*;
 
@@ -79,7 +89,7 @@ mod tests {
 
         assert_eq!(builder.block_range_scanner.max_block_range, 25);
         assert_eq!(builder.config.block_confirmations, 5);
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(50)));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(50).into());
     }
 
     #[test]
@@ -89,7 +99,7 @@ mod tests {
             .block_confirmations(20)
             .max_block_range(100);
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Earliest));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.block_confirmations, 20);
         assert_eq!(builder.block_range_scanner.max_block_range, 100);
     }
@@ -99,7 +109,7 @@ mod tests {
         let builder =
             EventScannerBuilder::sync().from_block(0).block_confirmations(0).max_block_range(75);
 
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(0)));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(0).into());
         assert_eq!(builder.config.block_confirmations, 0);
         assert_eq!(builder.block_range_scanner.max_block_range, 75);
     }
@@ -115,7 +125,7 @@ mod tests {
             .block_confirmations(7);
 
         assert_eq!(builder.block_range_scanner.max_block_range, 105);
-        assert!(matches!(builder.config.from_block, BlockNumberOrTag::Number(2)));
+        assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(2).into());
         assert_eq!(builder.config.block_confirmations, 7);
     }
 
@@ -128,6 +138,39 @@ mod tests {
         match result {
             Err(ScannerError::InvalidMaxBlockRange) => {}
             _ => panic!("Expected InvalidMaxBlockRange error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sync_from_block_scanner_with_valid_from_hash() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        provider.anvil_mine(Some(5), None).await.unwrap();
+
+        let block_5_hash =
+            provider.get_block_by_number(5.into()).await.unwrap().unwrap().header.hash;
+
+        let result =
+            EventScannerBuilder::sync().from_block(block_5_hash).connect(provider.clone()).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_sync_from_block_scanner_with_invalid_from_hash() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let random_hash = keccak256("Invalid Hash");
+        let result = EventScannerBuilder::sync().from_block(random_hash).connect(provider).await;
+
+        match result {
+            Err(ScannerError::BlockNotFound(id)) => {
+                assert_eq!(id, BlockId::Hash(random_hash.into()));
+            }
+            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
+            Ok(_) => panic!("Expected error, but got Ok"),
         }
     }
 }
