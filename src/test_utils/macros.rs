@@ -1,7 +1,7 @@
 use alloy::primitives::LogData;
 use tokio_stream::Stream;
 
-use crate::Message;
+use crate::{Message, ScannerError};
 
 #[macro_export]
 macro_rules! assert_next {
@@ -35,16 +35,13 @@ macro_rules! assert_next {
         .expect("timed out");
         let expected = $expected;
         match message {
-            // Some(Ok($crate::ScannerMessage::Data(data))) => {
-            //     assert_eq!(data, expected, "Expected Data({:?}), got Data({:?})", expected,
-            // data); }
-            Some(Ok(msg)) => {
+            std::option::Option::Some(std::result::Result::Ok(msg)) => {
                 assert_eq!(msg, expected, "Expected {:?}, got {:?}", expected, msg);
             }
-            Some(Err(e)) => {
+            std::option::Option::Some(std::result::Result::Err(e)) => {
                 panic!("Expected Ok({:?}), got Err({:?})", expected, e);
             }
-            None => {
+            std::option::Option::None => {
                 panic!("Expected Ok({:?}), but channel was closed", expected);
             }
         }
@@ -190,7 +187,7 @@ macro_rules! assert_event_sequence_final {
 }
 
 #[allow(clippy::missing_panics_doc)]
-pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
+pub async fn assert_event_sequence<S: Stream<Item = Result<Message, ScannerError>> + Unpin>(
     stream: &mut S,
     expected_options: impl IntoIterator<Item = &LogData>,
     timeout_secs: u64,
@@ -214,7 +211,7 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
             .expect("timed out waiting for next batch");
 
         match message {
-            Some(Message::Data(batch)) => {
+            Some(Ok(Message::Data(batch))) => {
                 let mut batch = batch.iter();
                 let event = batch.next().expect("Streamed batch should not be empty");
                 assert_eq!(
@@ -233,8 +230,11 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
                     );
                 }
             }
-            Some(other) => {
+            Some(Ok(other)) => {
                 panic!("Expected Message::Data, got: {other:#?}");
+            }
+            Some(Err(e)) => {
+                panic!("Expected Ok(Message::Data), got Err: {e:#?}");
             }
             None => {
                 panic!("Stream closed while still expecting: {:#?}", remaining.collect::<Vec<_>>());
@@ -332,7 +332,7 @@ macro_rules! assert_range_coverage {
                     .expect("Timed out waiting for the next block range");
 
             match message {
-                Some( $crate::block_range_scanner::Message::Data(range)) => {
+                std::option::Option::Some(std::result::Result::Ok($crate::block_range_scanner::Message::Data(range))) => {
                     let (streamed_start, streamed_end) = bounds(&range);
                     streamed_ranges.push(range.clone());
                     assert!(
@@ -344,10 +344,13 @@ macro_rules! assert_range_coverage {
                     );
                     start = streamed_end + 1;
                 }
-                Some(other) => {
+                std::option::Option::Some(std::result::Result::Ok(other)) => {
                     panic!("Expected a block range, got: {other:#?}");
                 }
-                None => {
+                std::option::Option::Some(std::result::Result::Err(e)) => {
+                    panic!("Expected Ok(Message::Data), got Err: {e:#?}");
+                }
+                std::option::Option::None => {
                     panic!("Stream closed without covering range: {:#?}", start..=end);
                 }
             }
