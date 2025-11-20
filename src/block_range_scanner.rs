@@ -182,19 +182,19 @@ pub enum Command {
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     StreamHistorical {
-        sender: mpsc::Sender<Message>,
+        sender: mpsc::Sender<Result<Message, ScannerError>>,
         start_id: BlockId,
         end_id: BlockId,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     StreamFrom {
-        sender: mpsc::Sender<Message>,
+        sender: mpsc::Sender<Result<Message, ScannerError>>,
         start_id: BlockId,
         block_confirmations: u64,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
     Rewind {
-        sender: mpsc::Sender<Message>,
+        sender: mpsc::Sender<Result<Message, ScannerError>>,
         start_id: BlockId,
         end_id: BlockId,
         response: oneshot::Sender<Result<(), ScannerError>>,
@@ -307,7 +307,7 @@ impl<N: Network> Service<N> {
         &mut self,
         start_id: BlockId,
         end_id: BlockId,
-        sender: mpsc::Sender<Message>,
+        sender: mpsc::Sender<Result<Message, ScannerError>>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
 
@@ -444,7 +444,7 @@ impl<N: Network> Service<N> {
         &mut self,
         start_id: BlockId,
         end_id: BlockId,
-        sender: mpsc::Sender<Message>,
+        sender: mpsc::Sender<Result<Message, ScannerError>>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
@@ -752,7 +752,7 @@ impl BlockRangeScannerClient {
         &self,
         start_id: impl Into<BlockId>,
         end_id: impl Into<BlockId>,
-    ) -> Result<ReceiverStream<Message>, ScannerError> {
+    ) -> Result<ReceiverStream<Result<Message, ScannerError>>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -816,7 +816,7 @@ impl BlockRangeScannerClient {
         &self,
         start_id: impl Into<BlockId>,
         end_id: impl Into<BlockId>,
-    ) -> Result<ReceiverStream<Message>, ScannerError> {
+    ) -> Result<ReceiverStream<Result<Message, ScannerError>>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
         let (response_tx, response_rx) = oneshot::channel();
 
