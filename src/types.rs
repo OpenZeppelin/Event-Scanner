@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Debug};
+use std::fmt::Debug;
 
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -33,69 +33,36 @@ impl<T: Clone> PartialEq<Notification> for ScannerMessage<T> {
     }
 }
 
-pub(crate) trait TryStream<M> {
-    async fn try_stream(&self, item: M) -> bool;
-}
-
-pub(crate) trait TryStreamError<E> {
-    async fn try_stream_err(&self, error: E) -> bool;
-}
-
-impl<T: Clone + Debug, M> TryStream<M> for mpsc::Sender<ScannerMessage<T>>
-where
-    M: Into<ScannerMessage<T>>,
-{
-    async fn try_stream(&self, item: M) -> bool {
-        let item = item.into();
-        info!(item = ?item, "Sending message");
-        if let Err(err) = self.send(item).await {
-            warn!(error = %err, "Downstream channel closed, stopping stream");
-            return false;
-        }
-        true
+impl<T: Clone> From<ScannerMessage<T>> for Result<ScannerMessage<T>, ScannerError> {
+    fn from(value: ScannerMessage<T>) -> Self {
+        Ok(value)
     }
 }
 
-impl<T: Clone + Debug, M> TryStream<M> for mpsc::Sender<Result<ScannerMessage<T>, ScannerError>>
-where
-    M: Into<ScannerMessage<T>>,
-{
-    async fn try_stream(&self, item: M) -> bool {
-        let item = item.into();
-        let item = Ok(item);
-        info!(item = ?item, "Sending message");
-        if let Err(err) = self.send(item).await {
-            warn!(error = %err, "Downstream channel closed, stopping stream");
-            return false;
-        }
-        true
+impl<T: Clone> From<ScannerError> for Result<ScannerMessage<T>, ScannerError> {
+    fn from(value: ScannerError) -> Self {
+        Err(value)
     }
 }
 
-impl<E> TryStreamError<E> for mpsc::Sender<ScannerError>
-where
-    E: Error + Clone + Into<ScannerError>,
-{
-    async fn try_stream_err(&self, item: E) -> bool {
-        let item = item.into();
-        info!(item = ?item, "Sending error");
-        if let Err(err) = self.send(item).await {
-            warn!(error = %err, "Downstream channel closed, stopping stream");
-            return false;
-        }
-        true
+impl<T: Clone> From<Notification> for Result<ScannerMessage<T>, ScannerError> {
+    fn from(value: Notification) -> Self {
+        Ok(value.into())
     }
 }
 
-impl<T: Clone + Debug, E> TryStreamError<E>
-    for mpsc::Sender<Result<ScannerMessage<T>, ScannerError>>
-where
-    E: Error + Clone + Into<ScannerError>,
-{
-    async fn try_stream_err(&self, item: E) -> bool {
-        let item = item.into();
-        info!(item = ?item, "Sending error");
-        if let Err(err) = self.send(Err(item)).await {
+pub(crate) trait TryStream<T: Clone> {
+    async fn try_stream<M: Into<Result<ScannerMessage<T>, ScannerError>>>(&self, msg: M) -> bool;
+}
+
+impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<Result<ScannerMessage<T>, ScannerError>> {
+    async fn try_stream<M: Into<Result<ScannerMessage<T>, ScannerError>>>(&self, msg: M) -> bool {
+        let item = msg.into();
+        match &item {
+            Ok(msg) => info!(item = ?msg, "Sending message"),
+            Err(err) => info!(error = ?err, "Sending error"),
+        }
+        if let Err(err) = self.send(item).await {
             warn!(error = %err, "Downstream channel closed, stopping stream");
             return false;
         }

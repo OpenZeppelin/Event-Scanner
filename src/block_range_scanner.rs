@@ -69,7 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerError, ScannerMessage,
     robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
-    types::{Notification, TryStream, TryStreamError},
+    types::{Notification, TryStream},
 };
 use alloy::{
     consensus::BlockHeader,
@@ -93,8 +93,8 @@ pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
 pub type Message = ScannerMessage<RangeInclusive<BlockNumber>>;
 
 impl From<RangeInclusive<BlockNumber>> for Message {
-    fn from(logs: RangeInclusive<BlockNumber>) -> Self {
-        Message::Data(logs)
+    fn from(range: RangeInclusive<BlockNumber>) -> Self {
+        Message::Data(range)
     }
 }
 
@@ -491,7 +491,7 @@ impl<N: Network> Service<N> {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
 
             // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(batch_to..=batch_from).await {
+            if !sender.try_stream(Message::Data(batch_to..=batch_from)).await {
                 break;
             }
 
@@ -513,7 +513,7 @@ impl<N: Network> Service<N> {
                 }
                 Err(e) => {
                     error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = sender.try_stream_err(e).await;
+                    _ = sender.try_stream(e).await;
                     return;
                 }
             };
@@ -535,7 +535,7 @@ impl<N: Network> Service<N> {
                     }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream_err(e).await;
+                        _ = sender.try_stream(ScannerError::from(e)).await;
                         return;
                     }
                 };
@@ -565,7 +565,7 @@ impl<N: Network> Service<N> {
             let batch_end_block_number =
                 next_start_block.saturating_add(max_block_range - 1).min(end);
 
-            if !sender.try_stream(next_start_block..=batch_end_block_number).await {
+            if !sender.try_stream(Message::Data(next_start_block..=batch_end_block_number)).await {
                 break;
             }
 
@@ -623,7 +623,7 @@ impl<N: Network> Service<N> {
 
                 info!(range_start = range_start, range_end = range_end, "Sending live block range");
 
-                if !sender.try_stream(range_start..=range_end).await {
+                if !sender.try_stream(Message::Data(range_start..=range_end)).await {
                     return;
                 }
 
@@ -647,7 +647,7 @@ impl<N: Network> Service<N> {
                 Ok(Message::Data(range)) => {
                     let (start, end) = (*range.start(), *range.end());
                     if start >= cutoff {
-                        if !sender.try_stream(range).await {
+                        if !sender.try_stream(Message::Data(range)).await {
                             break;
                         }
                         processed += end - start;
@@ -655,7 +655,7 @@ impl<N: Network> Service<N> {
                         discarded += cutoff - start;
 
                         let start = cutoff;
-                        if !sender.try_stream(start..=end).await {
+                        if !sender.try_stream(Message::Data(start..=end)).await {
                             break;
                         }
                         processed += end - start;
@@ -669,7 +669,7 @@ impl<N: Network> Service<N> {
                     }
                 }
                 Err(e) => {
-                    if !sender.try_stream_err(e).await {
+                    if !sender.try_stream(e).await {
                         break;
                     }
                 }
@@ -939,13 +939,13 @@ mod tests {
 
     #[tokio::test]
     async fn try_send_forwards_errors_to_subscribers() {
-        let (tx, mut rx) = mpsc::channel::<ScannerError>(1);
+        let (tx, mut rx) = mpsc::channel::<Result<Message, ScannerError>>(1);
 
-        _ = tx.try_stream_err(ScannerError::BlockNotFound(4.into())).await;
+        _ = tx.try_stream(ScannerError::BlockNotFound(4.into())).await;
 
         assert!(matches!(
             rx.recv().await,
-            Some(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4))))
+            Some(Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))))
         ));
     }
 }

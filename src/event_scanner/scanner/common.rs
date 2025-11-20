@@ -5,7 +5,7 @@ use crate::{
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener},
     robust_provider::{Error as RobustProviderError, RobustProvider},
-    types::{TryStream, TryStreamError},
+    types::TryStream,
 };
 use alloy::{
     network::Network,
@@ -129,7 +129,7 @@ pub fn spawn_log_consumers<N: Network>(
                 }
 
                 info!("Sending collected logs to consumer");
-                _ = sender.try_stream(collected).await;
+                _ = sender.try_stream(Message::Data(collected)).await;
             }
         });
 
@@ -199,7 +199,7 @@ async fn handle_block_range_message<N: Network>(
         }
         Err(e) => {
             error!(error = ?e, "Received error message");
-            if !sender.try_stream_err(e).await {
+            if !sender.try_stream(e).await {
                 return false;
             }
         }
@@ -225,7 +225,7 @@ async fn handle_block_range<N: Network>(
 
             match mode {
                 ConsumerMode::Stream => {
-                    if !sender.try_stream(logs).await {
+                    if !sender.try_stream(Message::Data(logs)).await {
                         return false;
                     }
                 }
@@ -246,7 +246,7 @@ async fn handle_block_range<N: Network>(
         }
         Err(e) => {
             error!(error = ?e, "Received error message");
-            if !sender.try_stream_err(e).await {
+            if !sender.try_stream(ScannerError::from(e)).await {
                 return false;
             }
         }
