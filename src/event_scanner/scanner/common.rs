@@ -5,7 +5,7 @@ use crate::{
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener},
     robust_provider::{Error as RobustProviderError, RobustProvider},
-    types::TryStream,
+    types::{TryStream, TryStreamError},
 };
 use alloy::{
     network::Network,
@@ -128,7 +128,8 @@ pub fn spawn_log_consumers<N: Network>(
                                         }
                                     }
                                     Err(e) => {
-                                        if !sender.try_stream(e).await {
+                                        error!(error = ?e, "Received error message");
+                                        if !sender.try_stream_err(e).await {
                                             break;
                                         }
                                     }
@@ -142,7 +143,9 @@ pub fn spawn_log_consumers<N: Network>(
                             }
                             Err(e) => {
                                 error!(error = ?e, "Received error message");
-                                sender.try_stream(e).await
+                                if !sender.try_stream_err(e).await {
+                                    break;
+                                }
                             }
                         }
                     }
