@@ -405,8 +405,12 @@ impl<M> EventScannerBuilder<M> {
 
 impl<M, N: Network> EventScanner<M, N> {
     #[must_use]
-    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<Message> {
-        let (sender, receiver) = mpsc::channel::<Message>(MAX_BUFFERED_MESSAGES);
+    pub fn subscribe(
+        &mut self,
+        filter: EventFilter,
+    ) -> ReceiverStream<Result<Message, ScannerError>> {
+        let (sender, receiver) =
+            mpsc::channel::<Result<Message, ScannerError>>(MAX_BUFFERED_MESSAGES);
         self.listeners.push(EventListener { filter, sender });
         ReceiverStream::new(receiver)
     }
