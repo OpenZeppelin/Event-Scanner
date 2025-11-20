@@ -93,7 +93,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// scanner.start().await?;
     ///
-    /// while let Some(Message::Data(logs)) = stream.next().await {
+    /// while let Some(Ok(Message::Data(logs))) = stream.next().await {
     ///     println!("Received {} logs", logs.len());
     /// }
     /// # Ok(())
@@ -164,13 +164,13 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
-    ///         Message::Data(logs) => {
+    ///         Ok(Message::Data(logs)) => {
     ///             println!("Received {} new events", logs.len());
     ///         }
-    ///         Message::Notification(notification) => {
+    ///         Ok(Message::Notification(notification)) => {
     ///             println!("Notification received: {:?}", notification);
     ///         }
-    ///         Message::Error(e) => {
+    ///         Err(e) => {
     ///             eprintln!("Error: {}", e);
     ///         }
     ///     }
@@ -248,7 +248,7 @@ impl EventScannerBuilder<Unspecified> {
     /// scanner.start().await?;
     ///
     /// // Expect a single message with up to 10 logs, then the stream ends
-    /// while let Some(Message::Data(logs)) = stream.next().await {
+    /// while let Some(Ok(Message::Data(logs))) = stream.next().await {
     ///     println!("Latest logs: {}", logs.len());
     /// }
     /// # Ok(())
