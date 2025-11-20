@@ -364,10 +364,7 @@ impl<N: Network> Service<N> {
         let get_start_block = async || -> Result<BlockNumber, ScannerError> {
             let block = match start_id {
                 BlockId::Number(BlockNumberOrTag::Number(num)) => num,
-                BlockId::Number(tag) => provider.get_block_by_number(tag).await?.header().number(),
-                BlockId::Hash(hash) => {
-                    provider.get_block_by_hash(hash.into()).await?.header().number()
-                }
+                _ => provider.get_block(start_id).await?.header().number(),
             };
             Ok(block)
         };
