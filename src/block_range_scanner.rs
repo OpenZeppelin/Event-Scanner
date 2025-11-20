@@ -542,7 +542,7 @@ impl<N: Network> Service<N> {
                     }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream(ScannerError::from(e)).await;
+                        _ = sender.try_stream(e).await;
                         return;
                     }
                 };

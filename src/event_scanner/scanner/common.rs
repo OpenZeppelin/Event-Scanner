@@ -246,7 +246,7 @@ async fn handle_block_range<N: Network>(
         }
         Err(e) => {
             error!(error = ?e, "Received error message");
-            if !sender.try_stream(ScannerError::from(e)).await {
+            if !sender.try_stream(e).await {
                 return false;
             }
         }

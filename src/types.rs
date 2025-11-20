@@ -49,9 +49,9 @@ impl<T: Clone> IntoScannerMessageResult<T> for ScannerMessage<T> {
     }
 }
 
-impl<T: Clone> IntoScannerMessageResult<T> for ScannerError {
+impl<T: Clone, E: Into<ScannerError>> IntoScannerMessageResult<T> for E {
     fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
-        Err(self)
+        Err(self.into())
     }
 }
 
