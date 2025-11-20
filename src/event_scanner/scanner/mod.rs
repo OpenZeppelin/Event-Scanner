@@ -359,9 +359,12 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
 
 impl EventScannerBuilder<SyncFromBlock> {
     #[must_use]
-    pub fn new(from_block: BlockId) -> Self {
+    pub fn new(from_block: impl Into<BlockId>) -> Self {
         Self {
-            config: SyncFromBlock { from_block, block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS },
+            config: SyncFromBlock {
+                from_block: from_block.into(),
+                block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            },
             block_range_scanner: BlockRangeScanner::default(),
         }
     }
@@ -452,7 +455,7 @@ mod tests {
 
     #[test]
     fn sync_scanner_config_defaults() {
-        let builder = EventScannerBuilder::<SyncFromBlock>::new(BlockNumberOrTag::Earliest.into());
+        let builder = EventScannerBuilder::<SyncFromBlock>::new(BlockNumberOrTag::Earliest);
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
