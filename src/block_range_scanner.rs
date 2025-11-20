@@ -513,7 +513,7 @@ impl<N: Network> Service<N> {
                 }
                 Err(e) => {
                     error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = sender.try_stream_err(e);
+                    _ = sender.try_stream_err(e).await;
                     return;
                 }
             };
@@ -535,7 +535,7 @@ impl<N: Network> Service<N> {
                     }
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream_err(e);
+                        _ = sender.try_stream_err(e).await;
                         return;
                     }
                 };
