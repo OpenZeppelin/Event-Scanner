@@ -1,9 +1,6 @@
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
-use crate::{
-    ScannerError, ScannerMessage,
-    types::IntoScannerMessageResult,
-};
+use crate::{ScannerError, ScannerMessage, types::IntoScannerMessageResult};
 
 pub type Message = ScannerMessage<Vec<Log>>;
 
