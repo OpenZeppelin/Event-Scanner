@@ -11,11 +11,22 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
     Notification(Notification),
 }
 
+/// Notifications emitted by the scanner to signal state changes or important events.
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub enum Notification {
+    /// Emitted when transitioning from the latest events phase to live streaming mode
+    /// in sync scanners.
     SwitchingToLive,
+
+    /// Emitted when a blockchain reorganization is detected during scanning.
     ReorgDetected,
+
+    /// Emitted during the latest events phase when no matching logs are found in the
+    /// scanned range.
     NoPastLogsFound,
+
+    /// Emitted during the latest events phase when logs are found, containing the block
+    /// hash of the first (oldest) log that will be delivered.
     FirstLogBlock(BlockHash),
 }
 
