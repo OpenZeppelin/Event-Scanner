@@ -45,14 +45,14 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
-    ///         Message::Data(logs) => {
+    ///         Ok(Message::Data(logs)) => {
     ///             println!("Received {} events", logs.len());
     ///         }
-    ///         Message::Notification(notification) => {
+    ///         Ok(Message::Notification(notification)) => {
     ///             println!("Notification received: {:?}", notification);
     ///             // You'll see Notification::SwitchingToLive when transitioning
     ///         }
-    ///         Message::Error(e) => {
+    ///         Err(e) => {
     ///             eprintln!("Error: {}", e);
     ///         }
     ///     }
@@ -155,14 +155,14 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
-    ///         Message::Data(logs) => {
+    ///         Ok(Message::Data(logs)) => {
     ///             println!("Received {} events", logs.len());
     ///         }
-    ///         Message::Notification(notification) => {
+    ///         Ok(Message::Notification(notification)) => {
     ///             println!("Notification received: {:?}", notification);
     ///             // You'll see Notification::SwitchingToLive when transitioning
     ///         }
-    ///         Message::Error(e) => {
+    ///         Err(e) => {
     ///             eprintln!("Error: {}", e);
     ///         }
     ///     }

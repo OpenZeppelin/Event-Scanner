@@ -9,8 +9,8 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::info;
 
 use crate::{
-    EventScannerBuilder, Notification, ScannerError,
-    block_range_scanner::Message as BlockRangeMessage,
+    EventScannerBuilder, Notification, ScannerError, ScannerMessage,
+    block_range_scanner::BlockScannerResult,
     event_scanner::{
         EventScanner,
         scanner::{
@@ -104,9 +104,9 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             info!("Switching to live stream");
 
             // Use a one-off channel for the notification.
-            let (tx, rx) = mpsc::channel::<BlockRangeMessage>(1);
+            let (tx, rx) = mpsc::channel::<BlockScannerResult>(1);
             let stream = ReceiverStream::new(rx);
-            tx.send(BlockRangeMessage::Notification(Notification::SwitchingToLive))
+            tx.send(Ok(ScannerMessage::Notification(Notification::SwitchingToLive)))
                 .await
                 .expect("receiver exists");
 

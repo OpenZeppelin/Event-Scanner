@@ -21,21 +21,16 @@ pedantic = "warn"
 all = "warn"
 
 [workspace.dependencies]
-alloy = { version = "1.0.30", features = ["full"] }
-alloy-node-bindings = "1.0.30"
-tokio = { version = "1.0", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+alloy = { version = "1.1.2", features = ["full"] }
+alloy-node-bindings = "1.1.2"
+tokio = { version = "1.48", features = ["full"] }
 anyhow = "1.0"
-thiserror = "2.0.16"
-async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2.0.17"
 tokio-stream = "0.1.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 test-log = { version = "0.2.18", features = ["trace"] }
-hex = "0.4"
-backon = "1.5.2"
+backon = "1.6.0"
 
 [package]
 name = "event-scanner"
@@ -59,12 +54,8 @@ all-features = true
 [dependencies]
 alloy.workspace = true
 tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-async-trait.workspace = true
-chrono.workspace = true
 alloy-node-bindings.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
