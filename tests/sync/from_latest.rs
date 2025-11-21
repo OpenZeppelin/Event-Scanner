@@ -148,7 +148,7 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
     scanner.start().await?;
 
     // Latest is empty
-    assert_next!(stream, Notification::NoLogsFound);
+    assert_next!(stream, Notification::NoPastLogsFound);
     assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 

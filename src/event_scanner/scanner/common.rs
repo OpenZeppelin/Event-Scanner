@@ -151,7 +151,7 @@ pub fn spawn_log_consumers<N: Network>(
             if let ConsumerMode::CollectLatest { .. } = mode {
                 if collected.is_empty() {
                     info!("No logs found in the processed block range");
-                    _ = sender.try_stream(Notification::NoLogsFound).await;
+                    _ = sender.try_stream(Notification::NoPastLogsFound).await;
                 } else {
                     info!("Sending collected logs to consumer");
                     collected.reverse(); // restore chronological order

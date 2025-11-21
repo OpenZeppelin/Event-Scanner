@@ -15,7 +15,7 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
 pub enum Notification {
     SwitchingToLive,
     ReorgDetected,
-    NoLogsFound,
+    NoPastLogsFound,
     FirstLogBlock(BlockHash),
 }
 

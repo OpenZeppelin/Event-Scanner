@@ -91,7 +91,7 @@ async fn no_events_returns_empty() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    assert_next!(stream, Notification::NoLogsFound);
+    assert_next!(stream, Notification::NoPastLogsFound);
     assert_closed!(stream);
 
     Ok(())
