@@ -6,12 +6,12 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    EventFilter, Message, ScannerError,
+    EventFilter, ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES,
     },
-    event_scanner::listener::EventListener,
+    event_scanner::{EventScannerResult, listener::EventListener},
     robust_provider::IntoRobustProvider,
 };
 
@@ -411,12 +411,8 @@ impl<M> EventScannerBuilder<M> {
 
 impl<M, N: Network> EventScanner<M, N> {
     #[must_use]
-    pub fn subscribe(
-        &mut self,
-        filter: EventFilter,
-    ) -> ReceiverStream<Result<Message, ScannerError>> {
-        let (sender, receiver) =
-            mpsc::channel::<Result<Message, ScannerError>>(MAX_BUFFERED_MESSAGES);
+    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<EventScannerResult> {
+        let (sender, receiver) = mpsc::channel::<EventScannerResult>(MAX_BUFFERED_MESSAGES);
         self.listeners.push(EventListener { filter, sender });
         ReceiverStream::new(receiver)
     }

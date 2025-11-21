@@ -33,7 +33,7 @@ impl<T: Clone> PartialEq<Notification> for ScannerMessage<T> {
     }
 }
 
-pub type ScannerResult<T: Clone> = Result<ScannerMessage<T>, ScannerError>;
+pub type ScannerResult<T> = Result<ScannerMessage<T>, ScannerError>;
 
 pub trait IntoScannerResult<T: Clone> {
     fn into_scanner_message_result(self) -> ScannerResult<T>;

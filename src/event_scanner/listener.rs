@@ -1,11 +1,8 @@
-use crate::{
-    ScannerError,
-    event_scanner::{filter::EventFilter, message::Message},
-};
+use crate::event_scanner::{EventScannerResult, filter::EventFilter};
 use tokio::sync::mpsc::Sender;
 
 #[derive(Clone)]
 pub(crate) struct EventListener {
     pub filter: EventFilter,
-    pub sender: Sender<Result<Message, ScannerError>>,
+    pub sender: Sender<EventScannerResult>,
 }

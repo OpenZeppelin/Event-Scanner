@@ -1,7 +1,7 @@
 use alloy::primitives::LogData;
 use tokio_stream::Stream;
 
-use crate::{Message, ScannerError};
+use crate::{Message, event_scanner::EventScannerResult};
 
 #[macro_export]
 macro_rules! assert_next {
@@ -187,7 +187,7 @@ macro_rules! assert_event_sequence_final {
 }
 
 #[allow(clippy::missing_panics_doc)]
-pub async fn assert_event_sequence<S: Stream<Item = Result<Message, ScannerError>> + Unpin>(
+pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>(
     stream: &mut S,
     expected_options: impl IntoIterator<Item = &LogData>,
     timeout_secs: u64,
@@ -332,7 +332,7 @@ macro_rules! assert_range_coverage {
                     .expect("Timed out waiting for the next block range");
 
             match message {
-                std::option::Option::Some(std::result::Result::Ok($crate::block_range_scanner::Message::Data(range))) => {
+                std::option::Option::Some(std::result::Result::Ok(event_scanner::ScannerMessage::Data(range))) => {
                     let (streamed_start, streamed_end) = bounds(&range);
                     streamed_ranges.push(range.clone());
                     assert!(

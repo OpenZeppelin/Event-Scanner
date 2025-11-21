@@ -1,9 +1,9 @@
 use std::ops::RangeInclusive;
 
 use crate::{
-    Message, ScannerError,
-    block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
-    event_scanner::{filter::EventFilter, listener::EventListener},
+    ScannerMessage,
+    block_range_scanner::{BlockScannerResult, MAX_BUFFERED_MESSAGES},
+    event_scanner::{EventScannerResult, filter::EventFilter, listener::EventListener},
     robust_provider::{Error as RobustProviderError, RobustProvider},
     types::TryStream,
 };
@@ -49,17 +49,13 @@ pub enum ConsumerMode {
 /// # Note
 ///
 /// Assumes it is running in a separate tokio task, so as to be non-blocking.
-pub async fn handle_stream<
-    N: Network,
-    S: Stream<Item = Result<BlockRangeMessage, ScannerError>> + Unpin,
->(
+pub async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResult> + Unpin>(
     mut stream: S,
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     mode: ConsumerMode,
 ) {
-    let (range_tx, _) =
-        broadcast::channel::<Result<BlockRangeMessage, ScannerError>>(MAX_BUFFERED_MESSAGES);
+    let (range_tx, _) = broadcast::channel::<BlockScannerResult>(MAX_BUFFERED_MESSAGES);
 
     let consumers = spawn_log_consumers(provider, listeners, &range_tx, mode);
 
@@ -81,7 +77,7 @@ pub async fn handle_stream<
 pub fn spawn_log_consumers<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
-    range_tx: &Sender<Result<BlockRangeMessage, ScannerError>>,
+    range_tx: &Sender<BlockScannerResult>,
     mode: ConsumerMode,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
@@ -175,23 +171,23 @@ async fn get_logs<N: Network>(
 
 #[must_use]
 async fn handle_block_range_message<N: Network>(
-    message: Result<BlockRangeMessage, ScannerError>,
+    message: BlockScannerResult,
     filter: &EventFilter,
     base_filter: &Filter,
     provider: &RobustProvider<N>,
-    sender: &mpsc::Sender<Result<Message, ScannerError>>,
+    sender: &mpsc::Sender<EventScannerResult>,
     mode: ConsumerMode,
     collected: &mut Vec<Log>,
 ) -> bool {
     match message {
-        Ok(BlockRangeMessage::Data(range)) => {
+        Ok(ScannerMessage::Data(range)) => {
             if !handle_block_range(range, filter, base_filter, provider, sender, mode, collected)
                 .await
             {
                 return false;
             }
         }
-        Ok(BlockRangeMessage::Notification(notification)) => {
+        Ok(ScannerMessage::Notification(notification)) => {
             info!(notification = ?notification, "Received notification");
             if !sender.try_stream(notification).await {
                 return false;
@@ -213,7 +209,7 @@ async fn handle_block_range<N: Network>(
     filter: &EventFilter,
     base_filter: &Filter,
     provider: &RobustProvider<N>,
-    sender: &mpsc::Sender<Result<Message, ScannerError>>,
+    sender: &mpsc::Sender<EventScannerResult>,
     mode: ConsumerMode,
     collected: &mut Vec<Log>,
 ) -> bool {
