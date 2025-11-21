@@ -51,16 +51,16 @@ impl EventScannerBuilder<Historic> {
             }
         };
 
+        if from_num > latest_block {
+            Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
+        }
+
         let to_num = match scanner.config.to_block {
             BlockId::Number(to_block) => to_block.as_number().unwrap_or(0),
             BlockId::Hash(to_hash) => {
                 provider.get_block_by_hash(to_hash.into()).await?.header().number()
             }
         };
-
-        if from_num > latest_block {
-            Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
-        }
 
         if to_num > latest_block {
             Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
