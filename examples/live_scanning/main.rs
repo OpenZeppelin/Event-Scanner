@@ -69,16 +69,16 @@ async fn main() -> anyhow::Result<()> {
 
     while let Some(message) = stream.next().await {
         match message {
-            Message::Data(logs) => {
+            Ok(Message::Data(logs)) => {
                 for log in logs {
                     info!("Callback successfully executed with event {:?}", log.inner.data);
                 }
             }
-            Message::Error(e) => {
-                error!("Received error: {}", e);
-            }
-            Message::Notification(info) => {
+            Ok(Message::Notification(info)) => {
                 info!("Received info: {:?}", info);
+            }
+            Err(e) => {
+                error!("Received error: {}", e);
             }
         }
     }

@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     while let Some(message) = stream.next().await {
         match message {
-            Message::Data(logs) => {
+            Ok(Message::Data(logs)) => {
                 for log in logs {
                     let Counter::CountIncreased { newCount } = log.log_decode().unwrap().inner.data;
                     if newCount <= 3 {
@@ -98,11 +98,11 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            Message::Error(e) => {
-                error!("Received error: {}", e);
-            }
-            Message::Notification(info) => {
+            Ok(Message::Notification(info)) => {
                 info!("Received notification: {:?}", info);
+            }
+            Err(e) => {
+                error!("Received error: {}", e);
             }
         }
 

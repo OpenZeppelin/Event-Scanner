@@ -1,12 +1,32 @@
 use alloy::primitives::LogData;
 use tokio_stream::Stream;
 
-use crate::Message;
+use crate::{ScannerMessage, event_scanner::EventScannerResult};
 
 #[macro_export]
 macro_rules! assert_next {
+    // 1. Explicit Error Matching (Value based) - uses the new PartialEq implementation
+    ($stream: expr, Err($expected_err:expr)) => {
+        $crate::assert_next!($stream, Err($expected_err), timeout = 5)
+    };
+    ($stream: expr, Err($expected_err:expr), timeout = $secs: expr) => {
+        let message = tokio::time::timeout(
+            std::time::Duration::from_secs($secs),
+            tokio_stream::StreamExt::next(&mut $stream),
+        )
+        .await
+        .expect("timed out");
+        if let Some(msg) = message {
+            let expected = &$expected_err;
+            assert_eq!(&msg, expected, "Expected error {:?}, got {:?}", expected, msg);
+        } else {
+            panic!("Expected error {:?}, but channel was closed", $expected_err);
+        }
+    };
+
+    // 2. Success Matching (Implicit unwrapping) - existing behavior
     ($stream: expr, $expected: expr) => {
-        assert_next!($stream, $expected, timeout = 5)
+        $crate::assert_next!($stream, $expected, timeout = 5)
     };
     ($stream: expr, $expected: expr, timeout = $secs: expr) => {
         let message = tokio::time::timeout(
@@ -15,10 +35,17 @@ macro_rules! assert_next {
         )
         .await
         .expect("timed out");
-        if let Some(msg) = message {
-            assert_eq!(msg, $expected)
-        } else {
-            panic!("Expected {:?}, but channel was closed", $expected)
+        let expected = $expected;
+        match message {
+            std::option::Option::Some(std::result::Result::Ok(msg)) => {
+                assert_eq!(msg, expected, "Expected {:?}, got {:?}", expected, msg);
+            }
+            std::option::Option::Some(std::result::Result::Err(e)) => {
+                panic!("Expected Ok({:?}), got Err({:?})", expected, e);
+            }
+            std::option::Option::None => {
+                panic!("Expected Ok({:?}), but channel was closed", expected);
+            }
         }
     };
 }
@@ -162,7 +189,7 @@ macro_rules! assert_event_sequence_final {
 }
 
 #[allow(clippy::missing_panics_doc)]
-pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
+pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>(
     stream: &mut S,
     expected_options: impl IntoIterator<Item = &LogData>,
     timeout_secs: u64,
@@ -186,7 +213,7 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
             .expect("timed out waiting for next batch");
 
         match message {
-            Some(Message::Data(batch)) => {
+            Some(Ok(ScannerMessage::Data(batch))) => {
                 let mut batch = batch.iter();
                 let event = batch.next().expect("Streamed batch should not be empty");
                 assert_eq!(
@@ -205,8 +232,11 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
                     );
                 }
             }
-            Some(other) => {
+            Some(Ok(other)) => {
                 panic!("Expected Message::Data, got: {other:#?}");
+            }
+            Some(Err(e)) => {
+                panic!("Expected Ok(Message::Data), got Err: {e:#?}");
             }
             None => {
                 panic!("Stream closed while still expecting: {:#?}", remaining.collect::<Vec<_>>());
@@ -222,7 +252,7 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
 /// range must start exactly where the previous one ended, and all ranges must fit within
 /// the expected bounds.
 ///
-/// The macro expects the stream to yield `Message::Data(range)` variants containing
+/// The macro expects the stream to yield `ScannerMessage::Data(range)` variants containing
 /// `RangeInclusive<u64>` values representing block ranges. It tracks coverage by ensuring
 /// each new range starts at the next expected block number and doesn't exceed the end of
 /// the expected range. Once the entire range is covered, the assertion succeeds.
@@ -230,7 +260,7 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
 /// # Example
 ///
 /// ```rust
-/// use event_scanner::{assert_range_coverage, block_range_scanner::Message};
+/// use event_scanner::{ScannerMessage, assert_range_coverage};
 /// use tokio::sync::mpsc;
 /// use tokio_stream::wrappers::ReceiverStream;
 ///
@@ -241,8 +271,8 @@ pub async fn assert_event_sequence<S: Stream<Item = Message> + Unpin>(
 ///
 ///     // Simulate a scanner that splits blocks 100-199 into chunks
 ///     tokio::spawn(async move {
-///         tx.send(Message::Data(100..=149)).await.unwrap();
-///         tx.send(Message::Data(150..=199)).await.unwrap();
+///         tx.send(ScannerMessage::Data(100..=149)).await.unwrap();
+///         tx.send(ScannerMessage::Data(150..=199)).await.unwrap();
 ///     });
 ///
 ///     // Assert that the stream covers blocks 100-199
@@ -304,7 +334,7 @@ macro_rules! assert_range_coverage {
                     .expect("Timed out waiting for the next block range");
 
             match message {
-                Some( $crate::block_range_scanner::Message::Data(range)) => {
+                std::option::Option::Some(std::result::Result::Ok(event_scanner::ScannerMessage::Data(range))) => {
                     let (streamed_start, streamed_end) = bounds(&range);
                     streamed_ranges.push(range.clone());
                     assert!(
@@ -316,10 +346,13 @@ macro_rules! assert_range_coverage {
                     );
                     start = streamed_end + 1;
                 }
-                Some(other) => {
+                std::option::Option::Some(std::result::Result::Ok(other)) => {
                     panic!("Expected a block range, got: {other:#?}");
                 }
-                None => {
+                std::option::Option::Some(std::result::Result::Err(e)) => {
+                    panic!("Expected Ok(Message::Data), got Err: {e:#?}");
+                }
+                std::option::Option::None => {
                     panic!("Stream closed without covering range: {:#?}", start..=end);
                 }
             }
