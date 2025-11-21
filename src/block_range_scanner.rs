@@ -666,13 +666,9 @@ impl<N: Network> Service<N> {
                         discarded += end - start;
                     }
                 }
-                Ok(Message::Notification(notif)) => {
-                    if !sender.try_stream(notif).await {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    if !sender.try_stream(e).await {
+                other => {
+                    // Could be error or notification
+                    if !sender.try_stream(other).await {
                         break;
                     }
                 }
