@@ -4,10 +4,19 @@ use alloy::primitives::BlockHash;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+/// Messages streamed by the scanner to subscribers.
+///
+/// Each message represents either data (logs), an error, or a notification about the scanner's
+/// state or behavior.
 #[derive(Copy, Debug, Clone)]
 pub enum ScannerMessage<T: Clone, E: Error + Clone> {
+    /// Data streamed to the subscriber.
     Data(T),
+
+    /// Error encountered during scanning.
     Error(E),
+
+    /// Notification about scanner state changes or important events.
     Notification(Notification),
 }
 
