@@ -24,7 +24,6 @@ all = "warn"
 alloy = { version = "1.1.2", features = ["full"] }
 alloy-node-bindings = "1.1.2"
 tokio = { version = "1.48", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
 anyhow = "1.0"
 thiserror = "2.0.17"
 tokio-stream = "0.1.17"
@@ -55,7 +54,6 @@ all-features = true
 [dependencies]
 alloy.workspace = true
 tokio.workspace = true
-serde.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 alloy-node-bindings.workspace = true

@@ -1723,7 +1723,6 @@ dependencies = [
  "alloy-node-bindings",
  "anyhow",
  "backon",
- "serde",
  "test-log",
  "thiserror",
  "tokio",
