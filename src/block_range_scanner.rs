@@ -213,7 +213,6 @@ pub enum Command {
 
 struct Service<N: Network> {
     provider: RobustProvider<N>,
-    reorg_handler: ReorgHandler<N>,
     max_block_range: u64,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
@@ -223,11 +222,9 @@ struct Service<N: Network> {
 impl<N: Network> Service<N> {
     pub fn new(provider: RobustProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
-        let reorg_handler = ReorgHandler::new(provider.clone());
 
         let service = Self {
             provider,
-            reorg_handler,
             max_block_range,
             error_count: 0,
             command_receiver: cmd_rx,
@@ -293,7 +290,6 @@ impl<N: Network> Service<N> {
         let max_block_range = self.max_block_range;
         let latest = self.provider.get_block_number().await?;
         let provider = self.provider.clone();
-        let mut reorg_handler = self.reorg_handler.clone();
 
         // the next block returned by the underlying subscription will always be `latest + 1`,
         // because `latest` was already mined and subscription by definition only streams after new
@@ -305,6 +301,8 @@ impl<N: Network> Service<N> {
         info!("WebSocket connected for live blocks");
 
         tokio::spawn(async move {
+            let mut reorg_handler = ReorgHandler::new(provider.clone());
+
             common::stream_live_blocks(
                 range_start,
                 subscription,
@@ -343,9 +341,9 @@ impl<N: Network> Service<N> {
 
         info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
-        let mut reorg_handler = self.reorg_handler.clone();
-
         tokio::spawn(async move {
+            let mut reorg_handler = ReorgHandler::new(provider.clone());
+
             common::stream_historical_blocks(
                 start_block_num,
                 start_block_num,
@@ -385,7 +383,6 @@ impl<N: Network> Service<N> {
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
         let provider = self.provider.clone();
-        let mut reorg_handler = self.reorg_handler.clone();
 
         let (start_block, end_block) =
             try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id),)?;
@@ -397,6 +394,8 @@ impl<N: Network> Service<N> {
         };
 
         tokio::spawn(async move {
+            let mut reorg_handler = ReorgHandler::new(provider.clone());
+
             Self::stream_rewind(from, to, max_block_range, &sender, &provider, &mut reorg_handler)
                 .await;
         });
@@ -461,7 +460,9 @@ impl<N: Network> Service<N> {
                 }
             };
 
-            // for now we only care if a reorg occurred, not which block it was
+            // For now we only care if a reorg occurred, not which block it was.
+            // Once we optimize 'latest' mode to update only the reorged logs, we will need the
+            // exact common ancestor.
             if reorged_opt.is_some() {
                 info!(block_number = %from, hash = %tip.header().hash(), "Reorg detected");
 
