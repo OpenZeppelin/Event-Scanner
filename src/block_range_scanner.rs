@@ -93,7 +93,7 @@ pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
 
 pub type BlockScannerResult = ScannerResult<RangeInclusive<BlockNumber>>;
 
-type Message = ScannerMessage<RangeInclusive<BlockNumber>>;
+pub type Message = ScannerMessage<RangeInclusive<BlockNumber>>;
 
 impl From<RangeInclusive<BlockNumber>> for Message {
     fn from(range: RangeInclusive<BlockNumber>) -> Self {
