@@ -14,6 +14,7 @@ pub enum ScannerMessage<T: Clone, E: Error + Clone> {
 pub enum Notification {
     SwitchingToLive,
     ReorgDetected,
+    NoLogsFound,
 }
 
 impl<T: Clone, E: Error + Clone> From<Notification> for ScannerMessage<T, E> {

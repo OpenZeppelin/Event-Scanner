@@ -1,6 +1,7 @@
 use std::ops::RangeInclusive;
 
 use crate::{
+    Notification,
     block_range_scanner::{MAX_BUFFERED_MESSAGES, Message as BlockRangeMessage},
     event_scanner::{filter::EventFilter, listener::EventListener},
     robust_provider::{Error as RobustProviderError, RobustProvider},
@@ -148,12 +149,14 @@ pub fn spawn_log_consumers<N: Network>(
             }
 
             if let ConsumerMode::CollectLatest { .. } = mode {
-                if !collected.is_empty() {
+                if collected.is_empty() {
+                    info!("No logs found in the processed block range");
+                    _ = sender.try_stream(Notification::NoLogsFound).await;
+                } else {
+                    info!("Sending collected logs to consumer");
                     collected.reverse(); // restore chronological order
+                    _ = sender.try_stream(collected).await;
                 }
-
-                info!("Sending collected logs to consumer");
-                _ = sender.try_stream(collected).await;
             }
         });
 

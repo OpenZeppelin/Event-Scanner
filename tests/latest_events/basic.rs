@@ -3,7 +3,7 @@ use alloy::{
 };
 
 use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
-use event_scanner::{EventFilter, EventScannerBuilder, assert_closed, assert_next};
+use event_scanner::{EventFilter, EventScannerBuilder, Notification, assert_closed, assert_next};
 
 #[tokio::test]
 async fn exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
@@ -72,9 +72,7 @@ async fn no_events_returns_empty() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    let expected: &[TestCounter::CountIncreased] = &[];
-
-    assert_next!(stream, expected);
+    assert_next!(stream, Notification::NoLogsFound);
     assert_closed!(stream);
 
     Ok(())
