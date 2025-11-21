@@ -149,23 +149,25 @@ pub fn spawn_log_consumers<N: Network>(
             }
 
             if let ConsumerMode::CollectLatest { .. } = mode {
-                if collected.is_empty() {
-                    info!("No logs found in the processed block range");
+                // collected logs are currently in reverse chronological order
+                let Some(first_block_hash) = collected.last().map(|log| log.block_hash) else {
+                    info!("No logs found");
                     _ = sender.try_stream(Notification::NoPastLogsFound).await;
-                } else {
-                    info!("Sending collected logs to consumer");
-                    collected.reverse(); // restore chronological order
+                    return;
+                };
 
-                    let first_block = collected
-                        .first()
-                        .expect("we ensured 'collected' has at least 1 element")
-                        .block_hash
-                        .expect("we only filter for non-pending logs");
+                info!(count = collected.len(), "Logs found");
+                collected.reverse(); // restore chronological order
 
-                    if sender.try_stream(Notification::FirstLogBlock(first_block)).await {
-                        _ = sender.try_stream(collected).await;
-                    }
+                // first log block hash can only be sent for non-pending logs
+                if let Some(first_block_hash) = first_block_hash &&
+                    !sender.try_stream(Notification::FirstLogBlock(first_block_hash)).await
+                {
+                    return;
                 }
+
+                info!("Sending collected logs to consumer");
+                _ = sender.try_stream(collected).await;
             }
         });
 
