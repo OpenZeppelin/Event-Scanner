@@ -7,10 +7,10 @@
 //!
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
-//!     ScannerError,
+//!     ScannerError, ScannerMessage,
 //!     block_range_scanner::{
 //!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
-//!         DEFAULT_MAX_BLOCK_RANGE, Message,
+//!         DEFAULT_MAX_BLOCK_RANGE,
 //!     },
 //!     robust_provider::RobustProviderBuilder,
 //! };
@@ -35,10 +35,10 @@
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
-//!             Ok(Message::Data(range)) => {
+//!             Ok(ScannerMessage::Data(range)) => {
 //!                 // process range
 //!             }
-//!             Ok(Message::Notification(notification)) => {
+//!             Ok(ScannerMessage::Notification(notification)) => {
 //!                 info!("Received notification: {:?}", notification);
 //!             }
 //!             Err(e) => {
