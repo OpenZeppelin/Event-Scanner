@@ -98,6 +98,25 @@ impl<N: Network> RobustProvider<N> {
         result
     }
 
+    /// Get the block number for a given block identifier.
+    ///
+    /// # Errors
+    ///
+    /// See [retry errors](#retry-errors).
+    pub async fn get_block_number_by_id(&self, id: BlockId) -> Result<u64, Error> {
+        info!("get_block_number_by_id called");
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_number_by_id(id).await },
+                false,
+            )
+            .await;
+        if let Err(e) = &result {
+            error!(error = %e, "get_block_number_by_id failed");
+        }
+        result?.ok_or_else(|| Error::BlockNotFound(id))
+    }
+
     /// Fetch the latest confirmed block number with retry and timeout.
     ///
     /// This method fetches the latest block number and subtracts the specified
