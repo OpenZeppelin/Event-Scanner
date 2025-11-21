@@ -69,7 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use crate::{
     ScannerError, ScannerMessage,
     robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
-    types::{IntoScannerMessageResult, Notification, TryStream},
+    types::{IntoScannerResult, Notification, TryStream},
 };
 
 use alloy::{
@@ -105,7 +105,7 @@ impl PartialEq<RangeInclusive<BlockNumber>> for Message {
     }
 }
 
-impl IntoScannerMessageResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumber> {
+impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumber> {
     fn into_scanner_message_result(self) -> Result<Message, ScannerError> {
         Ok(Message::Data(self))
     }

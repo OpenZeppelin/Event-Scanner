@@ -33,40 +33,40 @@ impl<T: Clone> PartialEq<Notification> for ScannerMessage<T> {
     }
 }
 
-pub trait IntoScannerMessageResult<T: Clone> {
+pub trait IntoScannerResult<T: Clone> {
     fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError>;
 }
 
-impl<T: Clone> IntoScannerMessageResult<T> for Result<ScannerMessage<T>, ScannerError> {
+impl<T: Clone> IntoScannerResult<T> for Result<ScannerMessage<T>, ScannerError> {
     fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
         self
     }
 }
 
-impl<T: Clone> IntoScannerMessageResult<T> for ScannerMessage<T> {
+impl<T: Clone> IntoScannerResult<T> for ScannerMessage<T> {
     fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
         Ok(self)
     }
 }
 
-impl<T: Clone, E: Into<ScannerError>> IntoScannerMessageResult<T> for E {
+impl<T: Clone, E: Into<ScannerError>> IntoScannerResult<T> for E {
     fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
         Err(self.into())
     }
 }
 
-impl<T: Clone> IntoScannerMessageResult<T> for Notification {
+impl<T: Clone> IntoScannerResult<T> for Notification {
     fn into_scanner_message_result(self) -> Result<ScannerMessage<T>, ScannerError> {
         Ok(ScannerMessage::Notification(self))
     }
 }
 
 pub(crate) trait TryStream<T: Clone> {
-    async fn try_stream<M: IntoScannerMessageResult<T>>(&self, msg: M) -> bool;
+    async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool;
 }
 
 impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<Result<ScannerMessage<T>, ScannerError>> {
-    async fn try_stream<M: IntoScannerMessageResult<T>>(&self, msg: M) -> bool {
+    async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool {
         let item = msg.into_scanner_message_result();
         match &item {
             Ok(msg) => info!(item = ?msg, "Sending message"),
