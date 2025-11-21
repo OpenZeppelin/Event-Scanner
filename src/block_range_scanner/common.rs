@@ -272,9 +272,9 @@ struct LiveStreamingState<N: Network> {
     previous_batch_end: Option<N::BlockResponse>,
 }
 
-/// Assumes that `stream_start <= next_start_block <= end`.
+/// Assumes that `min_block <= next_start_block <= end`.
 pub(crate) async fn stream_historical_blocks<N: Network>(
-    stream_start: BlockNumber,
+    min_block: BlockNumber,
     mut next_start_block: BlockNumber,
     end: BlockNumber,
     max_block_range: u64,
@@ -317,8 +317,8 @@ pub(crate) async fn stream_historical_blocks<N: Network>(
             if !sender.try_stream(Notification::ReorgDetected).await {
                 return None;
             }
-            if common_ancestor.header().number() < stream_start {
-                stream_start
+            if common_ancestor.header().number() < min_block {
+                min_block
             } else {
                 common_ancestor.header().number() + 1
             }
