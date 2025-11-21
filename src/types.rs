@@ -1,6 +1,5 @@
 use std::{error::Error, fmt::Debug};
 
-use alloy::primitives::BlockHash;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -33,10 +32,6 @@ pub enum Notification {
     /// Emitted during the latest events phase when no matching logs are found in the
     /// scanned range.
     NoPastLogsFound,
-
-    /// Emitted during the latest events phase when logs are found, containing the block
-    /// hash of the first (oldest) log that will be delivered.
-    FirstLogBlock(BlockHash),
 }
 
 impl<T: Clone, E: Error + Clone> From<Notification> for ScannerMessage<T, E> {

@@ -301,10 +301,8 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Notifications
     ///
-    /// The scanner emits the following notifications before delivering log data:
+    /// The scanner emits the following notification before delivering log data:
     ///
-    /// - **[`Notification::FirstLogBlock(BlockHash)`][first_log]**: Emitted when logs are found,
-    ///   containing the block hash of the first (oldest) log that will be delivered.
     /// - **[`Notification::NoPastLogsFound`][no_logs]**: Emitted when no matching logs are found in
     ///   the scanned range.
     ///
@@ -332,7 +330,6 @@ impl EventScannerBuilder<Unspecified> {
     /// [start]: EventScanner::start
     /// [sync_from_latest]: EventScannerBuilder::from_latest
     /// [reorg]: crate::Notification::ReorgDetected
-    /// [first_log]: crate::Notification::FirstLogBlock
     /// [no_logs]: crate::Notification::NoPastLogsFound
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
