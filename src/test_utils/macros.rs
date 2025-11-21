@@ -1,19 +1,15 @@
 use alloy::primitives::LogData;
 use tokio_stream::Stream;
 
-use crate::{Message, event_scanner::EventScannerResult};
+use crate::{ScannerMessage, event_scanner::EventScannerResult};
 
 #[macro_export]
 macro_rules! assert_next {
-    // Convenience form with default timeout
-    ($stream: expr, Err($expected_err:pat)) => {
+    // 1. Explicit Error Matching (Value based) - uses the new PartialEq implementation
+    ($stream: expr, Err($expected_err:expr)) => {
         $crate::assert_next!($stream, Err($expected_err), timeout = 5)
     };
-    ($stream: expr, $expected: expr) => {
-        $crate::assert_next!($stream, $expected, timeout = 5)
-    };
-    // Result::Err expectation – assert the next item is an Err matching the pattern
-    ($stream: expr, Err($expected_err:pat), timeout = $secs: expr) => {
+    ($stream: expr, Err($expected_err:expr), timeout = $secs: expr) => {
         let message = tokio::time::timeout(
             std::time::Duration::from_secs($secs),
             tokio_stream::StreamExt::next(&mut $stream),
@@ -21,10 +17,16 @@ macro_rules! assert_next {
         .await
         .expect("timed out");
         if let Some(msg) = message {
-            assert!(matches!(msg, Err($expected_err)));
+            let expected = &$expected_err;
+            assert_eq!(&msg, expected, "Expected error {:?}, got {:?}", expected, msg);
         } else {
-            panic!("Expected Err(..), but channel was closed");
+            panic!("Expected error {:?}, but channel was closed", $expected_err);
         }
+    };
+
+    // 2. Success Matching (Implicit unwrapping) - existing behavior
+    ($stream: expr, $expected: expr) => {
+        $crate::assert_next!($stream, $expected, timeout = 5)
     };
     ($stream: expr, $expected: expr, timeout = $secs: expr) => {
         let message = tokio::time::timeout(
@@ -211,7 +213,7 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
             .expect("timed out waiting for next batch");
 
         match message {
-            Some(Ok(Message::Data(batch))) => {
+            Some(Ok(ScannerMessage::Data(batch))) => {
                 let mut batch = batch.iter();
                 let event = batch.next().expect("Streamed batch should not be empty");
                 assert_eq!(
@@ -250,7 +252,7 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
 /// range must start exactly where the previous one ended, and all ranges must fit within
 /// the expected bounds.
 ///
-/// The macro expects the stream to yield `Message::Data(range)` variants containing
+/// The macro expects the stream to yield `ScannerMessage::Data(range)` variants containing
 /// `RangeInclusive<u64>` values representing block ranges. It tracks coverage by ensuring
 /// each new range starts at the next expected block number and doesn't exceed the end of
 /// the expected range. Once the entire range is covered, the assertion succeeds.
@@ -258,7 +260,7 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
 /// # Example
 ///
 /// ```rust
-/// use event_scanner::{assert_range_coverage, block_range_scanner::Message};
+/// use event_scanner::{ScannerMessage, assert_range_coverage};
 /// use tokio::sync::mpsc;
 /// use tokio_stream::wrappers::ReceiverStream;
 ///
@@ -269,8 +271,8 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
 ///
 ///     // Simulate a scanner that splits blocks 100-199 into chunks
 ///     tokio::spawn(async move {
-///         tx.send(Message::Data(100..=149)).await.unwrap();
-///         tx.send(Message::Data(150..=199)).await.unwrap();
+///         tx.send(ScannerMessage::Data(100..=149)).await.unwrap();
+///         tx.send(ScannerMessage::Data(150..=199)).await.unwrap();
 ///     });
 ///
 ///     // Assert that the stream covers blocks 100-199

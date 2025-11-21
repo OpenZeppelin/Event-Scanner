@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem::discriminant, sync::Arc};
 
 use alloy::{
     eips::BlockId,
@@ -6,7 +6,7 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::robust_provider::Error as RobustProviderError;
+use crate::{robust_provider::Error as RobustProviderError, types::ScannerResult};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -45,5 +45,13 @@ impl From<RobustProviderError> for ScannerError {
 impl From<RpcError<TransportErrorKind>> for ScannerError {
     fn from(error: RpcError<TransportErrorKind>) -> Self {
         ScannerError::RpcError(Arc::new(error))
+    }
+}
+impl<T: Clone> PartialEq<ScannerError> for ScannerResult<T> {
+    fn eq(&self, other: &ScannerError) -> bool {
+        match self {
+            Ok(_) => false,
+            Err(err) => discriminant(err) == discriminant(other),
+        }
     }
 }
