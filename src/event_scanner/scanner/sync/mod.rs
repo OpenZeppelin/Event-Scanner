@@ -79,6 +79,19 @@ impl EventScannerBuilder<Synchronize> {
     ///     block confirmations
     /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
     ///
+    /// # Notifications
+    ///
+    /// During the **latest events phase**, the scanner emits one of the following notifications
+    /// before delivering log data or transitioning to live mode:
+    ///
+    /// - **[`Notification::FirstLogBlock(BlockHash)`][first_log]**: Emitted when logs are found,
+    ///   containing the block hash of the first (oldest) log that will be delivered
+    /// - **[`Notification::NoLogsFound`][no_logs]**: Emitted when no matching logs are found in the
+    ///   scanned range
+    ///
+    /// After the latest events phase completes, [`Notification::SwitchingToLive`][switch_to_live]
+    /// is emitted before transitioning to the live streaming phase.
+    ///
     /// # Arguments
     ///
     /// * `count` - Maximum number of recent events to collect per listener before switching to live
@@ -102,6 +115,8 @@ impl EventScannerBuilder<Synchronize> {
     /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::Notification::ReorgDetected
     /// [switch_to_live]: crate::types::Notification::SwitchingToLive
+    /// [first_log]: crate::types::Notification::FirstLogBlock
+    /// [no_logs]: crate::types::Notification::NoLogsFound
     #[must_use]
     pub fn from_latest(self, count: usize) -> EventScannerBuilder<SyncFromLatestEvents> {
         EventScannerBuilder::<SyncFromLatestEvents>::new(count)
