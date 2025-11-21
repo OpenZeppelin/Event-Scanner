@@ -1,7 +1,20 @@
-use alloy::{primitives::U256, providers::ext::AnvilApi};
+use alloy::{
+    contract::{CallBuilder, CallDecoder},
+    primitives::{B256, U256},
+    providers::{Provider, ext::AnvilApi},
+};
 
 use crate::common::{TestCounter, setup_sync_from_latest_scanner};
 use event_scanner::{Notification, assert_empty, assert_event_sequence_final, assert_next};
+
+async fn send<T: CallDecoder>(tx: &CallBuilder<&impl Provider, T>) -> anyhow::Result<B256> {
+    tx.send()
+        .await?
+        .get_receipt()
+        .await?
+        .block_hash
+        .ok_or_else(|| panic!("we wait for the tx to get included in a block"))
+}
 
 #[tokio::test]
 async fn happy_path_no_duplicates() -> anyhow::Result<()> {
@@ -14,7 +27,7 @@ async fn happy_path_no_duplicates() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
@@ -22,6 +35,7 @@ async fn happy_path_no_duplicates() -> anyhow::Result<()> {
     scanner.start().await?;
 
     // Latest phase
+    assert_next!(stream, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream,
         &[
@@ -56,12 +70,13 @@ async fn fewer_historical_then_continues_live() -> anyhow::Result<()> {
     let mut stream = setup.stream;
 
     // Historical: only 2 available
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
     // Latest phase returns all available
+    assert_next!(stream, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream,
         &[
@@ -95,13 +110,14 @@ async fn exact_historical_count_then_live() -> anyhow::Result<()> {
     let mut stream = setup.stream;
 
     // Historical: produce exactly 4 events
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
+    assert_next!(stream, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream,
         &[
@@ -160,7 +176,7 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
     let mut stream = setup.stream;
 
     // Historical: emit 3, mine 1 empty block to form a clear boundary
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
 
     provider.primary().anvil_mine(Some(1), None).await?;
 
@@ -172,6 +188,7 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
     scanner.start().await?;
 
     // Latest phase
+    assert_next!(stream, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream,
         &[
@@ -200,13 +217,14 @@ async fn waiting_on_live_logs_arriving() -> anyhow::Result<()> {
     let mut stream = setup.stream;
 
     // Historical: emit 3
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
     // Latest phase
+    assert_next!(stream, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream,
         &[

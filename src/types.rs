@@ -1,5 +1,6 @@
 use std::{error::Error, fmt::Debug};
 
+use alloy::primitives::BlockHash;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -15,6 +16,7 @@ pub enum Notification {
     SwitchingToLive,
     ReorgDetected,
     NoLogsFound,
+    FirstLogBlock(BlockHash),
 }
 
 impl<T: Clone, E: Error + Clone> From<Notification> for ScannerMessage<T, E> {

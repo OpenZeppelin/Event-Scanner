@@ -155,7 +155,16 @@ pub fn spawn_log_consumers<N: Network>(
                 } else {
                     info!("Sending collected logs to consumer");
                     collected.reverse(); // restore chronological order
-                    _ = sender.try_stream(collected).await;
+
+                    let first_block = collected
+                        .first()
+                        .expect("we ensured 'collected' has at least 1 element")
+                        .block_hash
+                        .expect("we only filter for non-pending logs");
+
+                    if sender.try_stream(Notification::FirstLogBlock(first_block)).await {
+                        _ = sender.try_stream(collected).await;
+                    }
                 }
             }
         });

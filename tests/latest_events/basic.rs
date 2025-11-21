@@ -1,25 +1,43 @@
 use alloy::{
-    eips::BlockNumberOrTag, primitives::U256, providers::ext::AnvilApi, sol_types::SolEvent,
+    contract::{CallBuilder, CallDecoder},
+    eips::BlockNumberOrTag,
+    primitives::{B256, U256},
+    providers::{Provider, ext::AnvilApi},
+    sol_types::SolEvent,
 };
 
 use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
 use event_scanner::{EventFilter, EventScannerBuilder, Notification, assert_closed, assert_next};
 
+async fn send<T: CallDecoder>(tx: &CallBuilder<&impl Provider, T>) -> anyhow::Result<B256> {
+    tx.send()
+        .await?
+        .get_receipt()
+        .await?
+        .block_hash
+        .ok_or_else(|| panic!("we wait for the tx to get included in a block"))
+}
+
 #[tokio::test]
 async fn exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
-    let count = 5;
-    let setup = setup_latest_scanner(None, None, count, None, None).await?;
+    let setup = setup_latest_scanner(None, None, 5, None, None).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
     let mut stream = setup.stream;
 
-    for _ in 0..8 {
+    for _ in 0..3 {
         contract.increase().send().await?.watch().await?;
     }
 
-    // Ask for the latest 5
+    let first_log_block = send(&contract.increase()).await?;
+
+    for _ in 0..4 {
+        contract.increase().send().await?.watch().await?;
+    }
+
     scanner.start().await?;
 
+    assert_next!(stream, Notification::FirstLogBlock(first_log_block));
     assert_next!(
         stream,
         &[
@@ -44,12 +62,13 @@ async fn fewer_available_than_count_returns_all() -> anyhow::Result<()> {
     let mut stream = setup.stream;
 
     // Produce only 3 events
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
     scanner.start().await?;
 
+    assert_next!(stream, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream,
         &[
@@ -86,7 +105,7 @@ async fn respects_range_subset() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
 
     // manual empty block minting
@@ -103,6 +122,7 @@ async fn respects_range_subset() -> anyhow::Result<()> {
 
     scanner_with_range.start().await?;
 
+    assert_next!(stream_with_range, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream_with_range,
         &[
@@ -132,7 +152,7 @@ async fn multiple_listeners_to_same_event_receive_same_results() -> anyhow::Resu
     // Produce 7 events
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
@@ -140,7 +160,7 @@ async fn multiple_listeners_to_same_event_receive_same_results() -> anyhow::Resu
 
     scanner.start().await?;
 
-    let expected = &[
+    let expected_logs = &[
         TestCounter::CountIncreased { newCount: U256::from(3) },
         TestCounter::CountIncreased { newCount: U256::from(4) },
         TestCounter::CountIncreased { newCount: U256::from(5) },
@@ -148,10 +168,12 @@ async fn multiple_listeners_to_same_event_receive_same_results() -> anyhow::Resu
         TestCounter::CountIncreased { newCount: U256::from(7) },
     ];
 
-    assert_next!(stream1, expected);
+    assert_next!(stream1, Notification::FirstLogBlock(first_block_hash));
+    assert_next!(stream1, expected_logs);
     assert_closed!(stream1);
 
-    assert_next!(stream2, expected);
+    assert_next!(stream2, Notification::FirstLogBlock(first_block_hash));
+    assert_next!(stream2, expected_logs);
     assert_closed!(stream2);
 
     Ok(())
@@ -179,17 +201,18 @@ async fn different_filters_receive_different_results() -> anyhow::Result<()> {
     // Produce 5 increases, then 2 decreases
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash_incr = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    contract.decrease().send().await?.watch().await?;
+    let first_block_hash_decr = send(&contract.decrease()).await?;
     contract.decrease().send().await?.watch().await?;
 
     // Ask for latest 3 across the full range: each filtered listener should receive their own last
     // 3 events
     scanner.start().await?;
 
+    assert_next!(stream_inc, Notification::FirstLogBlock(first_block_hash_incr));
     assert_next!(
         stream_inc,
         &[
@@ -200,6 +223,7 @@ async fn different_filters_receive_different_results() -> anyhow::Result<()> {
     );
     assert_closed!(stream_inc);
 
+    assert_next!(stream_dec, Notification::FirstLogBlock(first_block_hash_decr));
     assert_next!(
         stream_dec,
         &[
@@ -227,13 +251,14 @@ async fn mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()>
     let mut stream_dec = scanner.subscribe(filter_dec);
 
     contract.increase().send().await?.watch().await?; // inc(1)
-    contract.increase().send().await?.watch().await?; // inc(2)
-    contract.decrease().send().await?.watch().await?; // dec(1)
+    let first_block_hash_incr = send(&contract.increase()).await?; // inc(2)
+    let first_block_hash_decr = send(&contract.decrease()).await?; // dec(1)
     contract.increase().send().await?.watch().await?; // inc(2)
     contract.decrease().send().await?.watch().await?; // dec(1)
 
     scanner.start().await?;
 
+    assert_next!(stream_inc, Notification::FirstLogBlock(first_block_hash_incr));
     assert_next!(
         stream_inc,
         &[
@@ -243,6 +268,7 @@ async fn mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()>
     );
     assert_closed!(stream_inc);
 
+    assert_next!(stream_dec, Notification::FirstLogBlock(first_block_hash_decr));
     assert_next!(
         stream_dec,
         &[
@@ -269,7 +295,7 @@ async fn ignores_non_tracked_contract() -> anyhow::Result<()> {
     let mut stream_a = setup.stream;
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
-    contract_a.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract_a.increase()).await?;
     contract_b.increase().send().await?.watch().await?; // ignored by filter
     contract_a.increase().send().await?.watch().await?;
     contract_b.increase().send().await?.watch().await?; // ignored by filter
@@ -277,6 +303,7 @@ async fn ignores_non_tracked_contract() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
+    assert_next!(stream_a, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream_a,
         &[
@@ -296,7 +323,7 @@ async fn large_gaps_and_empty_ranges() -> anyhow::Result<()> {
     let (_anvil, provider, contract, default_filter) = setup_common(None, None).await?;
 
     // Emit 2 events
-    contract.increase().send().await?.watch().await?;
+    let first_block_hash = send(&contract.increase()).await?;
     contract.increase().send().await?.watch().await?;
 
     // Mine 10 empty blocks
@@ -314,6 +341,7 @@ async fn large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 
     scanner_with_range.start().await?;
 
+    assert_next!(stream_with_range, Notification::FirstLogBlock(first_block_hash));
     assert_next!(
         stream_with_range,
         &[
@@ -345,6 +373,7 @@ async fn boundary_range_single_block() -> anyhow::Result<()> {
 
     scanner_with_range.start().await?;
 
+    assert_next!(stream_with_range, Notification::FirstLogBlock(receipt.block_hash.unwrap()));
     assert_next!(stream_with_range, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
     assert_closed!(stream_with_range);
 
