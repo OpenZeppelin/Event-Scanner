@@ -313,11 +313,10 @@ impl<N: Network> Service<N> {
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
 
-        let (start_block, end_block) =
-            tokio::try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
-
-        let start_block_num = start_block.header().number();
-        let end_block_num = end_block.header().number();
+        let (start_block_num, end_block_num) = tokio::try_join!(
+            self.provider.get_block_number_by_id(start_id),
+            self.provider.get_block_number_by_id(end_id)
+        )?;
 
         let (start_block_num, end_block_num) = match start_block_num.cmp(&end_block_num) {
             Ordering::Greater => (end_block_num, start_block_num),
@@ -441,7 +440,7 @@ impl<N: Network> Service<N> {
         let provider = self.provider.clone();
 
         let (start_block, end_block) =
-            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id),)?;
+            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
 
         // normalize block range
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
