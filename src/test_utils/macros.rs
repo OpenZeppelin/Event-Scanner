@@ -203,17 +203,14 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
 
         assert!(
             elapsed < timeout_duration,
-            "Timed out waiting for events.\nNext Expected:\n{:#?}\nRemaining:\n{:#?}",
-            expected,
+            "Timed out waiting for events. Still expecting: {:#?}",
             remaining.collect::<Vec<_>>()
         );
 
         let time_left = timeout_duration - elapsed;
         let message = tokio::time::timeout(time_left, tokio_stream::StreamExt::next(stream))
             .await
-            .unwrap_or_else(|_| {
-                panic!("timed out waiting for next stream batch, expected event: {expected:#?}")
-            });
+            .expect("timed out waiting for next batch");
 
         match message {
             Some(Ok(ScannerMessage::Data(batch))) => {
@@ -236,13 +233,16 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
                 }
             }
             Some(Ok(other)) => {
-                panic!("Expected Message::Data, got: {other:#?}");
+                panic!("Expected Message::Data,\nGot: {other:#?}");
             }
             Some(Err(e)) => {
-                panic!("Expected Ok(Message::Data), got Err: {e:#?}");
+                panic!("Expected Ok(Message::Data),\nGot Err: {e:#?}");
             }
             None => {
-                panic!("Stream closed while still expecting: {:#?}", remaining.collect::<Vec<_>>());
+                panic!(
+                    "Stream closed while still expecting:\n{:#?}",
+                    remaining.collect::<Vec<_>>()
+                );
             }
         }
     }
@@ -342,7 +342,7 @@ macro_rules! assert_range_coverage {
                     streamed_ranges.push(range.clone());
                     assert!(
                         start == streamed_start && streamed_end <= end,
-                        "Unexpected range bounds, expected max. range: {:#?}, got: {:#?}\nAlready streamed:\n{:#?}",
+                        "Unexpected range bounds, expected max. range: {:#?}, got: {:#?}\nPrevious streams:\n{:#?}",
                         start..=end,
                         range,
                         streamed_ranges,
