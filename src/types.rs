@@ -11,8 +11,6 @@ pub enum ScannerMessage<T: Clone> {
     Notification(Notification),
 }
 
-// TODO: implement Display for ScannerMessage
-
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub enum Notification {
     SwitchingToLive,
