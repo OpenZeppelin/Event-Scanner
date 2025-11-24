@@ -203,14 +203,17 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
 
         assert!(
             elapsed < timeout_duration,
-            "Timed out waiting for events. Still expecting: {:#?}",
+            "Timed out waiting for events.\nNext Expected:\n{:#?}\nRemaining:\n{:#?}",
+            expected,
             remaining.collect::<Vec<_>>()
         );
 
         let time_left = timeout_duration - elapsed;
         let message = tokio::time::timeout(time_left, tokio_stream::StreamExt::next(stream))
             .await
-            .expect("timed out waiting for next batch");
+            .unwrap_or_else(|_| {
+                panic!("timed out waiting for next stream batch, expected event: {expected:#?}")
+            });
 
         match message {
             Some(Ok(ScannerMessage::Data(batch))) => {
