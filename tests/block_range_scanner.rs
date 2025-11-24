@@ -48,7 +48,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 }
 
 #[tokio::test]
-async fn stream_from_latest_starts_at_tip_not_confirmed() -> anyhow::Result<()> {
+async fn stream_from_starts_at_latest_once_it_has_enough_confirmations() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
