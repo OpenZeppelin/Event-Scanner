@@ -137,7 +137,6 @@ impl BlockRangeScanner {
         Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
     }
 
-    /// Sets the maximum block range per RPC call for the scanner.
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.max_block_range = max_block_range;

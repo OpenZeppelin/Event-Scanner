@@ -1,11 +1,16 @@
-use alloy::{eips::BlockId, network::Network, primitives::BlockNumber};
+use alloy::{
+    consensus::BlockHeader,
+    eips::{BlockId, BlockNumberOrTag},
+    network::{BlockResponse, Network},
+    primitives::BlockNumber,
+};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{BlockScannerResult, common, reorg_handler::ReorgHandler},
-    robust_provider::RobustProvider,
+    robust_provider::{self, RobustProvider},
     types::TryStream,
 };
 
@@ -64,8 +69,16 @@ impl<N: Network> SyncHandler<N> {
 
     /// Determines whether we need to catch up or can start live immediately
     async fn determine_sync_state(&self) -> Result<SyncState, ScannerError> {
+        let get_start_block = async || -> Result<BlockNumber, robust_provider::Error> {
+            let block = match self.start_id {
+                BlockId::Number(BlockNumberOrTag::Number(num)) => num,
+                _ => self.provider.get_block(self.start_id).await?.header().number(),
+            };
+            Ok(block)
+        };
+
         let (start_block, confirmed_tip) = tokio::try_join!(
-            self.provider.get_block_number_by_id(self.start_id),
+            get_start_block(),
             self.provider.get_latest_confirmed(self.block_confirmations)
         )?;
 
