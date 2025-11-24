@@ -342,7 +342,7 @@ macro_rules! assert_range_coverage {
                     streamed_ranges.push(range.clone());
                     assert!(
                         start == streamed_start && streamed_end <= end,
-                        "Unexpected range bounds, expected max. range: {:#?}, got: {:#?}\nPrevious streams:\n{:#?}",
+                        "Unexpected range bounds, expected max. range: {:#?}, got: {:#?}\nAlready streamed:\n{:#?}",
                         start..=end,
                         range,
                         streamed_ranges,
