@@ -72,6 +72,9 @@ async fn no_past_events_returns_empty() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
+    let expected: &[TestCounter::CountIncreased] = &[];
+
+    assert_next!(stream, expected);
     assert_closed!(stream);
 
     Ok(())

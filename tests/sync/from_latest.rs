@@ -147,9 +147,13 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
+    // Latest is empty
+    let expected: &[TestCounter::CountIncreased] = &[];
+    assert_next!(stream, expected);
+    let mut stream = assert_empty!(stream);
+
     // give scanner time to start
     sleep(Duration::from_millis(10)).await;
-
     // Live events arrive
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
