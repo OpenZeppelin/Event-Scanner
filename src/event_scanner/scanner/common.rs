@@ -120,11 +120,9 @@ pub fn spawn_log_consumers<N: Network>(
             }
 
             if let ConsumerMode::CollectLatest { .. } = mode {
-                if collected.is_empty() {
-                    info!("No latest logs collected");
-                } else {
-                    info!("Sending collected logs to consumer");
+                if !collected.is_empty() {
                     collected.reverse(); // restore chronological order
+                    info!("Sending collected logs to consumer");
                     _ = sender.try_stream(collected).await;
                 }
             }
