@@ -123,13 +123,14 @@ pub fn spawn_log_consumers<N: Network>(
                 if collected.is_empty() {
                     info!("No logs found");
                     _ = sender.try_stream(Notification::NoPastLogsFound).await;
-                } else {
-                    info!(count = collected.len(), "Logs found");
-                    collected.reverse(); // restore chronological order
-
-                    info!("Sending collected logs to consumer");
-                    _ = sender.try_stream(collected).await;
+                    return;
                 }
+
+                info!(count = collected.len(), "Logs found");
+                collected.reverse(); // restore chronological order
+
+                info!("Sending collected logs to consumer");
+                _ = sender.try_stream(collected).await;
             }
         });
 

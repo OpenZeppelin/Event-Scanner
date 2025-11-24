@@ -7,8 +7,7 @@ use crate::ScannerError;
 
 /// Messages streamed by the scanner to subscribers.
 ///
-/// Each message represents either data (logs), an error, or a notification about the scanner's
-/// state or behavior.
+/// Each message represents either data or a notification about the scanner's state or behavior.
 #[derive(Copy, Debug, Clone)]
 pub enum ScannerMessage<T: Clone> {
     /// Data streamed to the subscriber.
