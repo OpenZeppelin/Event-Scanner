@@ -16,7 +16,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// 1. **Latest events phase**: Collects up to `count` most recent events by scanning backwards
     ///    from the current chain tip. Events are delivered in chronological order.
-    /// 2. **Automatic transition**: Emits [`Notification::StartingLiveStream`][switch_to_live] to
+    /// 2. **Automatic transition**: Emits [`Notification::SwitchingToLive`][switch_to_live] to
     ///    signal the mode change
     /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
     ///    on-chain
@@ -50,7 +50,7 @@ impl EventScannerBuilder<Synchronize> {
     ///         }
     ///         Ok(Message::Notification(notification)) => {
     ///             println!("Notification received: {:?}", notification);
-    ///             // You'll see Notification::StartingLiveStream when transitioning
+    ///             // You'll see Notification::SwitchingToLive when transitioning
     ///         }
     ///         Err(e) => {
     ///             eprintln!("Error: {}", e);
@@ -101,7 +101,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [subscribe]: crate::EventScanner::subscribe
     /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::Notification::ReorgDetected
-    /// [switch_to_live]: crate::types::Notification::StartingLiveStream
+    /// [switch_to_live]: crate::types::Notification::SwitchingToLive
     #[must_use]
     pub fn from_latest(self, count: usize) -> EventScannerBuilder<SyncFromLatestEvents> {
         EventScannerBuilder::<SyncFromLatestEvents>::new(count)
@@ -114,7 +114,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// 1. **Historical sync phase**: Streams events from `from_block` up to the current confirmed
     ///    tip
-    /// 2. **Automatic transition**: Emits [`Notification::StartingLiveStream`][switch_to_live] to
+    /// 2. **Automatic transition**: Emits [`Notification::SwitchingToLive`][switch_to_live] to
     ///    signal the mode change
     /// 3. **Live streaming phase**: Continuously monitors and streams new events as they arrive
     ///    on-chain
@@ -148,7 +148,7 @@ impl EventScannerBuilder<Synchronize> {
     ///         }
     ///         Ok(Message::Notification(notification)) => {
     ///             println!("Notification received: {:?}", notification);
-    ///             // You'll see Notification::StartingLiveStream when transitioning
+    ///             // You'll see Notification::SwitchingToLive when transitioning
     ///         }
     ///         Err(e) => {
     ///             eprintln!("Error: {}", e);
@@ -208,7 +208,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [subscribe]: crate::EventScanner::subscribe
     /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::Notification::ReorgDetected
-    /// [switch_to_live]: crate::types::Notification::StartingLiveStream
+    /// [switch_to_live]: crate::types::Notification::SwitchingToLive
     #[must_use]
     pub fn from_block(self, block_id: impl Into<BlockId>) -> EventScannerBuilder<SyncFromBlock> {
         EventScannerBuilder::<SyncFromBlock>::new(block_id.into())

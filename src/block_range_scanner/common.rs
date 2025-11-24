@@ -33,7 +33,7 @@ pub(crate) async fn stream_live_blocks<N: Network>(
         return;
     };
 
-    if notify_after_first_block && !sender.try_stream(Notification::StartingLiveStream).await {
+    if notify_after_first_block && !sender.try_stream(Notification::SwitchingToLive).await {
         return;
     }
 

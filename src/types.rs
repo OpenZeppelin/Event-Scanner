@@ -15,7 +15,7 @@ pub enum ScannerMessage<T: Clone> {
 
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub enum Notification {
-    StartingLiveStream,
+    SwitchingToLive,
     ReorgDetected,
 }
 
