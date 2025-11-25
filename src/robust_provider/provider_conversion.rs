@@ -82,8 +82,14 @@ pub trait IntoRobustProvider<N: Network = Ethereum> {
     fn into_robust_provider(self) -> impl Future<Output = Result<RobustProvider<N>, Error>> + Send;
 }
 
-impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
+impl<N: Network, P: IntoProvider<N> + Send + 'static> IntoRobustProvider<N> for P {
     async fn into_robust_provider(self) -> Result<RobustProvider<N>, Error> {
         RobustProviderBuilder::new(self).build().await
     }
+}
+
+pub(crate) async fn into_root_provider<N: Network, P: IntoProvider<N>>(
+    provider: P,
+) -> Result<RootProvider<N>, Error> {
+    Ok(provider.into_provider().await?.root().to_owned())
 }

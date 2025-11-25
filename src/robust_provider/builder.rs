@@ -1,10 +1,16 @@
-use std::{marker::PhantomData, time::Duration};
+use std::{pin::Pin, time::Duration};
 
-use alloy::{network::Network, providers::Provider};
+use alloy::{
+    network::Network,
+    providers::{Provider, RootProvider},
+};
 
 use crate::robust_provider::{
-    Error, IntoProvider, RobustProvider, subscription::DEFAULT_RECONNECT_INTERVAL,
+    Error, IntoProvider, RobustProvider, provider_conversion::into_root_provider,
+    subscription::DEFAULT_RECONNECT_INTERVAL,
 };
+
+type BoxedProviderFuture<N> = Pin<Box<dyn Future<Output = Result<RootProvider<N>, Error>> + Send>>;
 
 // RPC retry and timeout settings
 /// Default timeout used by `RobustProvider`
@@ -16,22 +22,21 @@ pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
 pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
-#[derive(Clone)]
 pub struct RobustProviderBuilder<N: Network, P: IntoProvider<N>> {
     primary_provider: P,
-    fallback_providers: Vec<P>,
+    fallback_providers: Vec<BoxedProviderFuture<N>>,
     call_timeout: Duration,
     subscription_timeout: Duration,
     max_retries: usize,
     min_delay: Duration,
     reconnect_interval: Duration,
-    _network: PhantomData<N>,
 }
 
 impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     /// Create a new [`RobustProvider`] with default settings.
     ///
     /// The provided provider is treated as the primary provider.
+    /// Any type implementing [`IntoProvider`] can be used.
     #[must_use]
     pub fn new(provider: P) -> Self {
         Self {
@@ -42,7 +47,6 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
             max_retries: DEFAULT_MAX_RETRIES,
             min_delay: DEFAULT_MIN_DELAY,
             reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
-            _network: PhantomData,
         }
     }
 
@@ -58,8 +62,8 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     ///
     /// Fallback providers are used when the primary provider times out or fails.
     #[must_use]
-    pub fn fallback(mut self, provider: P) -> Self {
-        self.fallback_providers.push(provider);
+    pub fn fallback<F: IntoProvider<N> + Send + 'static>(mut self, provider: F) -> Self {
+        self.fallback_providers.push(Box::pin(into_root_provider(provider)));
         self
     }
 
@@ -115,9 +119,9 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
     pub async fn build(self) -> Result<RobustProvider<N>, Error> {
         let primary_provider = self.primary_provider.into_provider().await?.root().to_owned();
 
-        let mut fallback_providers = vec![];
-        for p in self.fallback_providers {
-            fallback_providers.push(p.into_provider().await?.root().to_owned());
+        let mut fallback_providers = Vec::with_capacity(self.fallback_providers.len());
+        for fallback in self.fallback_providers {
+            fallback_providers.push(fallback.await?);
         }
 
         Ok(RobustProvider {
