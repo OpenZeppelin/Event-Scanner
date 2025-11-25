@@ -5,16 +5,31 @@ use tracing::{info, warn};
 
 use crate::ScannerError;
 
-#[derive(Debug, Clone)]
+/// Messages streamed by the scanner to subscribers.
+///
+/// Each message represents either data or a notification about the scanner's state or behavior.
+#[derive(Copy, Debug, Clone)]
 pub enum ScannerMessage<T: Clone> {
+    /// Data streamed to the subscriber.
     Data(T),
+
+    /// Notification about scanner state changes or important events.
     Notification(Notification),
 }
 
+/// Notifications emitted by the scanner to signal state changes or important events.
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub enum Notification {
+    /// Emitted when transitioning from the latest events phase to live streaming mode
+    /// in sync scanners.
     SwitchingToLive,
+
+    /// Emitted when a blockchain reorganization is detected during scanning.
     ReorgDetected,
+
+    /// Emitted during the latest events phase when no matching logs are found in the
+    /// scanned range.
+    NoPastLogsFound,
 }
 
 impl<T: Clone> From<Notification> for ScannerMessage<T> {

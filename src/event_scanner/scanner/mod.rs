@@ -299,6 +299,13 @@ impl EventScannerBuilder<Unspecified> {
     /// - **Default range**: By default, scans from `Earliest` to `Latest` block
     /// - **Reorg handling**: Periodically checks the tip to detect reorgs during the scan
     ///
+    /// # Notifications
+    ///
+    /// The scanner emits the following notification before delivering log data:
+    ///
+    /// - **[`Notification::NoPastLogsFound`][no_logs]**: Emitted when no matching logs are found in
+    ///   the scanned range.
+    ///
     /// # Arguments
     ///
     /// * `count` - Maximum number of recent events to collect per listener (must be greater than 0)
@@ -323,6 +330,7 @@ impl EventScannerBuilder<Unspecified> {
     /// [start]: EventScanner::start
     /// [sync_from_latest]: EventScannerBuilder::from_latest
     /// [reorg]: crate::Notification::ReorgDetected
+    /// [no_logs]: crate::Notification::NoPastLogsFound
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
         EventScannerBuilder::<LatestEvents>::new(count)
