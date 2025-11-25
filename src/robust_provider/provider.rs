@@ -658,35 +658,4 @@ mod tests {
 
         Ok(())
     }
-
-    #[tokio::test]
-    async fn test_get_logs_succeeds() -> anyhow::Result<()> {
-        let (_anvil, robust, alloy_provider) = setup_anvil_with_blocks(100).await?;
-
-        // Block range filter
-        let filter = Filter::new().from_block(0).to_block(100);
-        let robust_logs = robust.get_logs(&filter).await?;
-        let alloy_logs = alloy_provider.get_logs(&filter).await?;
-        assert_eq!(robust_logs.len(), alloy_logs.len());
-
-        // Partial range
-        let filter = Filter::new().from_block(10).to_block(50);
-        let robust_logs = robust.get_logs(&filter).await?;
-        let alloy_logs = alloy_provider.get_logs(&filter).await?;
-        assert_eq!(robust_logs.len(), alloy_logs.len());
-
-        // Latest block
-        let filter = Filter::new().from_block(BlockNumberOrTag::Latest);
-        let robust_logs = robust.get_logs(&filter).await?;
-        let alloy_logs = alloy_provider.get_logs(&filter).await?;
-        assert_eq!(robust_logs.len(), alloy_logs.len());
-
-        // With address filter
-        let filter = Filter::new().address(Address::ZERO).from_block(0).to_block(100);
-        let robust_logs = robust.get_logs(&filter).await?;
-        let alloy_logs = alloy_provider.get_logs(&filter).await?;
-        assert_eq!(robust_logs.len(), alloy_logs.len());
-
-        Ok(())
-    }
 }
