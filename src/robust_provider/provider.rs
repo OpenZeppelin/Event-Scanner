@@ -287,7 +287,6 @@ mod tests {
     use crate::robust_provider::RobustProviderBuilder;
     use alloy::{
         consensus::BlockHeader,
-        primitives::Address,
         providers::{ProviderBuilder, WsConnect, ext::AnvilApi},
     };
     use alloy_node_bindings::{Anvil, AnvilInstance};
