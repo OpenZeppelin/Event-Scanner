@@ -135,3 +135,57 @@ impl<N: Network, P: IntoProvider<N>> RobustProviderBuilder<N, P> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::providers::{ProviderBuilder, WsConnect};
+    use alloy_node_bindings::Anvil;
+
+    #[tokio::test]
+    async fn test_builder_primary_type_different_to_fallback() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let fill_provider = ProviderBuilder::new()
+            .connect_ws(WsConnect::new(anvil.ws_endpoint_url().as_str()))
+            .await?;
+
+        let root_provider =
+            ProviderBuilder::new().connect_http(anvil.endpoint_url()).root().to_owned();
+
+        let robust = RobustProviderBuilder::new(fill_provider)
+            .fallback(root_provider)
+            .call_timeout(Duration::from_secs(5))
+            .build()
+            .await?;
+
+        assert_eq!(robust.fallback_providers.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_builder_with_multiple_fallback_types() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+
+        let fill_provider = ProviderBuilder::new()
+            .connect_ws(WsConnect::new(anvil.ws_endpoint_url().as_str()))
+            .await?;
+
+        let root_provider =
+            ProviderBuilder::new().connect_http(anvil.endpoint_url()).root().to_owned();
+
+        let url_provider = anvil.endpoint_url();
+
+        let robust = RobustProviderBuilder::new(fill_provider)
+            .fallback(root_provider)
+            .fallback(url_provider.clone())
+            .fallback(url_provider)
+            .build()
+            .await?;
+
+        assert_eq!(robust.fallback_providers.len(), 3);
+
+        Ok(())
+    }
+}
