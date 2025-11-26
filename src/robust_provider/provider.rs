@@ -660,7 +660,11 @@ mod tests {
 
         // Returns block number even if it doesnt 'exist' on chain
         let block_num = robust.get_block_number_by_id(BlockId::number(999_999)).await?;
-        assert_eq!(block_num, 999_999);
+        let alloy_block_num = alloy_provider
+            .get_block_number_by_id(BlockId::number(999_999))
+            .await?
+            .expect("Should return block num");
+        assert_eq!(alloy_block_num, block_num);
 
         Ok(())
     }
