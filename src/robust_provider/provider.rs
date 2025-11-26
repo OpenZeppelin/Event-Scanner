@@ -38,6 +38,8 @@ impl<N: Network> RobustProvider<N> {
 
     /// Fetch a block by [`BlockNumberOrTag`] with retry and timeout.
     ///
+    /// This is a wrapper function for [`Provider::get_block_by_number`].
+    ///
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
@@ -61,6 +63,8 @@ impl<N: Network> RobustProvider<N> {
 
     /// Fetch a block number by [`BlockId`]  with retry and timeout.
     ///
+    /// This is a wrapper function for [`Provider::get_block`].
+    ///
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
@@ -80,6 +84,8 @@ impl<N: Network> RobustProvider<N> {
 
     /// Fetch the latest block number with retry and timeout.
     ///
+    /// This is a wrapper function for [`Provider::get_block_number`].
+    ///
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
@@ -95,6 +101,31 @@ impl<N: Network> RobustProvider<N> {
             error!(error = %e, "eth_getBlockNumber failed");
         }
         result
+    }
+
+    /// Get the block number for a given block identifier.
+    ///
+    /// This is a wrapper function for [`Provider::get_block_number_by_id`].
+    ///
+    /// # Arguments
+    ///
+    /// * `block_id` - The block identifier to fetch the block number for.
+    ///
+    /// # Errors
+    ///
+    /// See [retry errors](#retry-errors).
+    pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<u64, Error> {
+        info!("get_block_number_by_id called");
+        let result = self
+            .retry_with_total_timeout(
+                move |provider| async move { provider.get_block_number_by_id(block_id).await },
+                false,
+            )
+            .await;
+        if let Err(e) = &result {
+            error!(error = %e, "get_block_number_by_id failed");
+        }
+        result?.ok_or_else(|| Error::BlockNotFound(block_id))
     }
 
     /// Fetch the latest confirmed block number with retry and timeout.
@@ -119,6 +150,8 @@ impl<N: Network> RobustProvider<N> {
 
     /// Fetch a block by [`BlockHash`] with retry and timeout.
     ///
+    /// This is a wrapper function for [`Provider::get_block_by_hash`].
+    ///
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
@@ -138,6 +171,8 @@ impl<N: Network> RobustProvider<N> {
     }
 
     /// Fetch logs for the given [`Filter`] with retry and timeout.
+    ///
+    /// This is a wrapper function for [`Provider::get_logs`].
     ///
     /// # Errors
     ///
@@ -162,6 +197,8 @@ impl<N: Network> RobustProvider<N> {
     /// * Handles connection errors by switching to fallback providers
     /// * Detects and recovers from lagged subscriptions
     /// * Periodically attempts to reconnect to the primary provider
+    ///
+    /// This is a wrapper function for [`Provider::subscribe_blocks`].
     ///
     /// # Errors
     ///

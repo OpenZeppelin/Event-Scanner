@@ -87,7 +87,7 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    // First increase the counter to have some balance
+    // First increase the contract_2 newCount
     contract_2.increase().send().await?.watch().await?;
     contract_2.increase().send().await?.watch().await?;
     contract_2.increase().send().await?.watch().await?;

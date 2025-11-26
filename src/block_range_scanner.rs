@@ -75,7 +75,7 @@ use crate::{
 
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockId,
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::{B256, BlockNumber},
 };
@@ -348,23 +348,12 @@ impl<N: Network> Service<N> {
         let provider = self.provider.clone();
         let max_block_range = self.max_block_range;
 
-        let get_start_block = async || -> Result<BlockNumber, ScannerError> {
-            let block = match start_id {
-                BlockId::Number(BlockNumberOrTag::Number(num)) => num,
-                _ => provider.get_block(start_id).await?.header().number(),
-            };
-            Ok(block)
-        };
-
-        let get_confirmed_tip = async || -> Result<BlockNumber, ScannerError> {
-            let confirmed_block = provider.get_latest_confirmed(block_confirmations).await?;
-            Ok(confirmed_block)
-        };
-
         // Step 1:
         // Fetches the starting block and confirmed tip for historical sync in parallel
-        let (start_block, confirmed_tip) =
-            tokio::try_join!(get_start_block(), get_confirmed_tip())?;
+        let (start_block, confirmed_tip) = tokio::try_join!(
+            provider.get_block_number_by_id(start_id),
+            provider.get_latest_confirmed(block_confirmations)
+        )?;
 
         let subscription = self.provider.subscribe_blocks().await?;
         info!("Buffering live blocks");
@@ -452,7 +441,7 @@ impl<N: Network> Service<N> {
         let provider = self.provider.clone();
 
         let (start_block, end_block) =
-            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id),)?;
+            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
 
         // normalize block range
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
