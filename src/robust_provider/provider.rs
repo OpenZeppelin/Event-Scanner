@@ -3,7 +3,7 @@ use std::{fmt::Debug, time::Duration};
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
     network::{Ethereum, Network},
-    primitives::BlockHash,
+    primitives::{BlockHash, BlockNumber},
     providers::{Provider, RootProvider},
     pubsub::Subscription,
     rpc::types::{Filter, Log},
@@ -90,7 +90,7 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    pub async fn get_block_number(&self) -> Result<u64, Error> {
+    pub async fn get_block_number(&self) -> Result<BlockNumber, Error> {
         info!("eth_getBlockNumber called");
         let result = self
             .retry_with_total_timeout(
@@ -115,7 +115,7 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<u64, Error> {
+    pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<BlockNumber, Error> {
         info!("get_block_number_by_id called");
         let result = self
             .retry_with_total_timeout(
