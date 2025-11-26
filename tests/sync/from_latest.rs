@@ -155,8 +155,6 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    // Latest events are empty
-
     // Assert `SwitchingToLive` after emitting live events, because the test finishes the "latest
     // events" phase before new events are emitted, thus the "live" phase actually starts from a
     // future block.
