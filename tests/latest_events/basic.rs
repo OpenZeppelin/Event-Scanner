@@ -3,12 +3,11 @@ use alloy::{
 };
 
 use crate::common::{TestCounter, deploy_counter, setup_common, setup_latest_scanner};
-use event_scanner::{EventFilter, EventScannerBuilder, assert_closed, assert_next};
+use event_scanner::{EventFilter, EventScannerBuilder, Notification, assert_closed, assert_next};
 
 #[tokio::test]
 async fn exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
-    let count = 5;
-    let setup = setup_latest_scanner(None, None, count, None, None).await?;
+    let setup = setup_latest_scanner(None, None, 5, None, None).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
     let mut stream = setup.stream;
@@ -17,7 +16,6 @@ async fn exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    // Ask for the latest 5
     scanner.start().await?;
 
     assert_next!(
@@ -64,7 +62,7 @@ async fn fewer_available_than_count_returns_all() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn no_events_returns_empty() -> anyhow::Result<()> {
+async fn no_past_events_returns_empty() -> anyhow::Result<()> {
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let scanner = setup.scanner;
@@ -72,9 +70,7 @@ async fn no_events_returns_empty() -> anyhow::Result<()> {
 
     scanner.start().await?;
 
-    let expected: &[TestCounter::CountIncreased] = &[];
-
-    assert_next!(stream, expected);
+    assert_next!(stream, Notification::NoPastLogsFound);
     assert_closed!(stream);
 
     Ok(())

@@ -1,4 +1,8 @@
-use alloy::{eips::BlockId, network::Network};
+use alloy::{
+    consensus::BlockHeader,
+    eips::BlockId,
+    network::{BlockResponse, Network},
+};
 
 use super::common::{ConsumerMode, handle_stream};
 use crate::{
@@ -45,13 +49,28 @@ impl EventScannerBuilder<LatestEvents> {
         let scanner = self.build(provider).await?;
 
         let provider = scanner.block_range_scanner.provider();
+        let latest_block = provider.get_block_number().await?;
 
-        if let BlockId::Hash(from_hash) = scanner.config.from_block {
-            provider.get_block_by_hash(from_hash.into()).await?;
+        let from_num = match scanner.config.from_block {
+            BlockId::Number(from_block) => from_block.as_number().unwrap_or(0),
+            BlockId::Hash(from_hash) => {
+                provider.get_block_by_hash(from_hash.into()).await?.header().number()
+            }
+        };
+
+        if from_num > latest_block {
+            Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
         }
 
-        if let BlockId::Hash(to_hash) = scanner.config.to_block {
-            provider.get_block_by_hash(to_hash.into()).await?;
+        let to_num = match scanner.config.to_block {
+            BlockId::Number(to_block) => to_block.as_number().unwrap_or(0),
+            BlockId::Hash(to_hash) => {
+                provider.get_block_by_hash(to_hash.into()).await?.header().number()
+            }
+        };
+
+        if to_num > latest_block {
+            Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
         }
 
         Ok(scanner)
@@ -280,5 +299,71 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_from_block_above_latest_returns_error() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(latest_block + 100)
+            .to_block(latest_block)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
+                assert_eq!(max, latest_block + 100);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_to_block_above_latest_returns_error() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(0)
+            .to_block(latest_block + 100)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest("to_block", max, latest)) => {
+                assert_eq!(max, latest_block + 100);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_to_and_from_block_above_latest_returns_error() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(latest_block + 50)
+            .to_block(latest_block + 100)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
+                assert_eq!(max, latest_block + 50);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error for 'from_block'"),
+        }
     }
 }

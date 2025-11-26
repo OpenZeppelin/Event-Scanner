@@ -1,4 +1,6 @@
 use alloy::{primitives::U256, providers::ext::AnvilApi};
+use std::time::Duration;
+use tokio::time::sleep;
 
 use crate::common::{TestCounter, setup_sync_from_latest_scanner};
 use event_scanner::{Notification, assert_empty, assert_event_sequence_final, assert_next};
@@ -119,6 +121,8 @@ async fn exact_historical_count_then_live() -> anyhow::Result<()> {
     );
     let mut stream = assert_empty!(stream);
 
+    // give scanner time to subscribe to live events
+    sleep(Duration::from_millis(10)).await;
     // Live continues
     contract.increase().send().await?.watch().await?;
 
@@ -142,10 +146,11 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
     scanner.start().await?;
 
     // Latest is empty
-    let expected: &[TestCounter::CountIncreased] = &[];
-    assert_next!(stream, expected);
+    assert_next!(stream, Notification::NoPastLogsFound);
     let mut stream = assert_empty!(stream);
 
+    // give scanner time to set up live subscription
+    sleep(Duration::from_millis(10)).await;
     // Live events arrive
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
@@ -198,6 +203,8 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
     );
     let mut stream = assert_empty!(stream);
 
+    // give scanner time to start
+    sleep(Duration::from_millis(10)).await;
     // Immediately produce a new live event in a new block
     contract.increase().send().await?.watch().await?;
 

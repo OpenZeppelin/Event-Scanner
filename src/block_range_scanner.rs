@@ -384,7 +384,7 @@ impl<N: Network> Service<N> {
         let provider = self.provider.clone();
 
         let (start_block, end_block) =
-            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id),)?;
+            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
 
         // normalize block range
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {

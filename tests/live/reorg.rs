@@ -22,15 +22,6 @@ async fn rescans_events_within_same_block() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    // reorg the chain
-    let tx_block_pairs = vec![
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
-    ];
-
-    provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
-
     // assert initial events are emitted as expected
     assert_event_sequence!(
         stream,
@@ -42,6 +33,16 @@ async fn rescans_events_within_same_block() -> anyhow::Result<()> {
             CountIncreased { newCount: U256::from(5) }
         ]
     );
+
+    // reorg the chain
+    let tx_block_pairs = vec![
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+    ];
+
+    provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
+
     // assert expected messages post-reorg
     assert_next!(stream, Notification::ReorgDetected);
     // assert the reorged events are emitted
@@ -70,15 +71,6 @@ async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    // reorg the chain
-    let tx_block_pairs = vec![
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 1),
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 2),
-    ];
-
-    provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
-
     // assert initial events are emitted as expected
     assert_event_sequence!(
         stream,
@@ -90,6 +82,16 @@ async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
             CountIncreased { newCount: U256::from(5) }
         ]
     );
+
+    // reorg the chain
+    let tx_block_pairs = vec![
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 1),
+        (TransactionData::JSON(contract.increase().into_transaction_request()), 2),
+    ];
+
+    provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
+
     // assert expected messages post-reorg
     assert_next!(stream, Notification::ReorgDetected);
     // assert the reorged events are emitted
