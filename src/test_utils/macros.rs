@@ -233,13 +233,16 @@ pub async fn assert_event_sequence<S: Stream<Item = EventScannerResult> + Unpin>
                 }
             }
             Some(Ok(other)) => {
-                panic!("Expected Message::Data, got: {other:#?}");
+                panic!("Expected Message::Data,\nGot: {other:#?}");
             }
             Some(Err(e)) => {
-                panic!("Expected Ok(Message::Data), got Err: {e:#?}");
+                panic!("Expected Ok(Message::Data),\nGot Err: {e:#?}");
             }
             None => {
-                panic!("Stream closed while still expecting: {:#?}", remaining.collect::<Vec<_>>());
+                panic!(
+                    "Stream closed while still expecting:\n{:#?}",
+                    remaining.collect::<Vec<_>>()
+                );
             }
         }
     }

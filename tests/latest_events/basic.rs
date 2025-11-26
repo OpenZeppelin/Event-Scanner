@@ -62,7 +62,7 @@ async fn fewer_available_than_count_returns_all() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn no_events_returns_empty() -> anyhow::Result<()> {
+async fn no_past_events_returns_empty() -> anyhow::Result<()> {
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let scanner = setup.scanner;

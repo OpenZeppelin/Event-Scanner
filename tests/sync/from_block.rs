@@ -32,12 +32,12 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
         ]
     );
 
+    // chain tip reached
+    assert_next!(stream, Notification::SwitchingToLive);
+
     // now emit live events
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
-
-    // chain tip reached
-    assert_next!(stream, Notification::SwitchingToLive);
 
     // live events
     assert_event_sequence_final!(
@@ -100,14 +100,13 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(2) }
         ]
     );
+    assert_next!(stream, Notification::SwitchingToLive);
 
     // emit "live" events
     for _ in 0..2 {
         contract.increase().send().await?.watch().await?;
     }
 
-    // switching to "live" phase
-    assert_next!(stream, Notification::SwitchingToLive);
     // assert confirmed live events are streamed separately
     let stream = assert_event_sequence_final!(
         stream,
