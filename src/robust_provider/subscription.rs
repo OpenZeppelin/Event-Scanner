@@ -380,6 +380,18 @@ mod tests {
         trigger_failover_with_delay(stream, next_provider, expected_block, Duration::ZERO).await
     }
 
+    /// Waits for timeout and asserts a backend gone or timeout error.
+    async fn assert_timeout_error(
+        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
+        extra_delay: Duration,
+    ) {
+        sleep(SHORT_TIMEOUT + extra_delay + BUFFER_TIME).await;
+        let err = stream.next().await.unwrap().unwrap_err();
+        assert_backend_gone_or_timeout(err);
+        let next = stream.next().await;
+        assert!(next.is_none(), "Expected stream to be finished, got: {next:?}");
+    }
+
     #[tokio::test]
     async fn ws_fails_http_fallback_returns_primary_error() -> anyhow::Result<()> {
         // Setup: Create WS primary and HTTP fallback
@@ -407,16 +419,7 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // Verify: HTTP fallback can't provide subscription, so we get an error
-        let task = tokio::spawn(async move {
-            sleep(SHORT_TIMEOUT + BUFFER_TIME).await;
-            http_provider.anvil_mine(Some(1), None).await.unwrap();
-        });
-        let err = stream.next().await.unwrap().unwrap_err();
-        task.await?;
-        assert_backend_gone_or_timeout(err);
-
-        let next = stream.next().await;
-        assert!(next.is_none(), "Expected stream to be finished, got: {next:?}");
+        assert_timeout_error(&mut stream, Duration::ZERO).await;
 
         Ok(())
     }
@@ -522,9 +525,7 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // FP2 times out -> tries PP (fails) -> no more fallbacks -> error
-        sleep(SHORT_TIMEOUT * 2 + BUFFER_TIME).await;
-        let err = stream.next().await.unwrap().unwrap_err();
-        assert_backend_gone_or_timeout(err);
+        assert_timeout_error(&mut stream, SHORT_TIMEOUT).await;
 
         Ok(())
     }
@@ -545,9 +546,7 @@ mod tests {
         assert_next_block!(stream, 1);
 
         // No fallback available - should error after timeout
-        sleep(SHORT_TIMEOUT + BUFFER_TIME).await;
-        let err = stream.next().await.unwrap().unwrap_err();
-        assert_backend_gone_or_timeout(err);
+        assert_timeout_error(&mut stream, Duration::ZERO).await;
 
         Ok(())
     }
