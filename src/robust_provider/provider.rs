@@ -330,19 +330,23 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::sleep;
 
-    async fn setup_anvil_with_blocks(
-        num_blocks: u64,
-    ) -> anyhow::Result<(AnvilInstance, RobustProvider, impl Provider)> {
+    async fn setup_anvil() -> anyhow::Result<(AnvilInstance, RobustProvider, impl Provider)> {
         let anvil = Anvil::new().try_spawn()?;
         let alloy_provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
-
-        alloy_provider.anvil_mine(Some(num_blocks), None).await?;
 
         let robust = RobustProviderBuilder::new(alloy_provider.clone())
             .max_timeout(Duration::from_secs(5))
             .build()
             .await?;
 
+        Ok((anvil, robust, alloy_provider))
+    }
+
+    async fn setup_anvil_with_blocks(
+        num_blocks: u64,
+    ) -> anyhow::Result<(AnvilInstance, RobustProvider, impl Provider)> {
+        let (anvil, robust, alloy_provider) = setup_anvil().await?;
+        alloy_provider.anvil_mine(Some(num_blocks), None).await?;
         Ok((anvil, robust, alloy_provider))
     }
 
@@ -578,7 +582,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_block_by_number_future_block_fails() -> anyhow::Result<()> {
-        let (_anvil, robust, _alloy_provider) = setup_anvil_with_blocks(100).await?;
+        let (_anvil, robust, _alloy_provider) = setup_anvil().await?;
 
         let future_block = 999_999;
         let result = robust.get_block_by_number(BlockNumberOrTag::Number(future_block)).await;
@@ -592,13 +596,29 @@ mod tests {
     async fn test_get_block_succeeds() -> anyhow::Result<()> {
         let (_anvil, robust, alloy_provider) = setup_anvil_with_blocks(100).await?;
 
-        let block_id = BlockId::number(50);
-        let robust_block = robust.get_block(block_id).await?;
-        let alloy_block = alloy_provider.get_block(block_id).await?.expect("block should exist");
-        assert_eq!(robust_block.header.number, alloy_block.header.number);
-        assert_eq!(robust_block.header.hash, alloy_block.header.hash);
+        let block_ids = [
+            BlockId::number(50),
+            BlockId::latest(),
+            BlockId::earliest(),
+            BlockId::safe(),
+            BlockId::finalized(),
+        ];
 
-        let block_hash = alloy_block.header.hash;
+        for block_id in block_ids {
+            let robust_block = robust.get_block(block_id).await?;
+            let alloy_block =
+                alloy_provider.get_block(block_id).await?.expect("block should exist");
+
+            assert_eq!(robust_block.header.number, alloy_block.header.number);
+            assert_eq!(robust_block.header.hash, alloy_block.header.hash);
+        }
+
+        // test block hash
+        let block = alloy_provider
+            .get_block_by_number(BlockNumberOrTag::Number(50))
+            .await?
+            .expect("block should exist");
+        let block_hash = block.header.hash;
         let block_id = BlockId::hash(block_hash);
         let robust_block = robust.get_block(block_id).await?;
         assert_eq!(robust_block.header.hash, block_hash);
@@ -609,7 +629,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_block_fails() -> anyhow::Result<()> {
-        let (_anvil, robust, _alloy_provider) = setup_anvil_with_blocks(100).await?;
+        let (_anvil, robust, _alloy_provider) = setup_anvil().await?;
 
         // Future block number
         let result = robust.get_block(BlockId::number(999_999)).await;
@@ -665,13 +685,14 @@ mod tests {
             .await?
             .expect("Should return block num");
         assert_eq!(alloy_block_num, block_num);
+        assert_eq!(block_num, 999_999);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_get_block_number_by_id_fails() -> anyhow::Result<()> {
-        let (_anvil, robust, _alloy_provider) = setup_anvil_with_blocks(100).await?;
+        let (_anvil, robust, _alloy_provider) = setup_anvil().await?;
 
         let result = robust.get_block_number_by_id(BlockId::hash(BlockHash::ZERO)).await;
         assert!(matches!(result, Err(Error::BlockNotFound(_))));
@@ -690,6 +711,22 @@ mod tests {
         // Zero confirmations returns latest
         let confirmed_block = robust.get_latest_confirmed(0).await?;
         assert_eq!(confirmed_block, 100);
+
+        // Single confirmation
+        let confirmed_block = robust.get_latest_confirmed(1).await?;
+        assert_eq!(confirmed_block, 99);
+
+        // confirmations = latest - 1
+        let confirmed_block = robust.get_latest_confirmed(99).await?;
+        assert_eq!(confirmed_block, 1);
+
+        // confirmations = latest (should return 0)
+        let confirmed_block = robust.get_latest_confirmed(100).await?;
+        assert_eq!(confirmed_block, 0);
+
+        // confirmations = latest + 1 (saturates at zero)
+        let confirmed_block = robust.get_latest_confirmed(101).await?;
+        assert_eq!(confirmed_block, 0);
 
         // Saturates at zero when confirmations > latest
         let confirmed_block = robust.get_latest_confirmed(200).await?;
@@ -728,7 +765,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_block_by_hash_fails() -> anyhow::Result<()> {
-        let (_anvil, robust, _alloy_provider) = setup_anvil_with_blocks(100).await?;
+        let (_anvil, robust, _alloy_provider) = setup_anvil().await?;
 
         let result = robust.get_block_by_hash(BlockHash::ZERO).await;
         assert!(matches!(result, Err(Error::BlockNotFound(_))));
