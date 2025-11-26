@@ -8,7 +8,7 @@
 //! * more robust WebSocket block subscriptions with automatic reconnection
 //!
 //! Use [`RobustProviderBuilder`] to construct a provider with sensible defaults
-//! and optional fallbacks, or implement the [`IntoRobustProvider`] and [`IntoProvider`]
+//! and optional fallbacks, or implement the [`IntoRobustProvider`] and [`IntoRootProvider`]
 //! traits to support custom providers.
 //!
 //! # How it works
@@ -68,5 +68,5 @@ pub mod subscription;
 pub use builder::*;
 pub use error::Error;
 pub use provider::RobustProvider;
-pub use provider_conversion::{IntoProvider, IntoRobustProvider};
+pub use provider_conversion::{IntoRobustProvider, IntoRootProvider};
 pub use subscription::RobustSubscription;
