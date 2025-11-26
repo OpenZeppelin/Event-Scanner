@@ -117,7 +117,7 @@ impl<N: Network> RobustProvider<N> {
     pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<u64, Error> {
         info!("get_block_number_by_id called");
         let result = self
-            .retry_with_total_timeout(
+            .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number_by_id(block_id).await },
                 false,
             )
