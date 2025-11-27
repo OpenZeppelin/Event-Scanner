@@ -63,13 +63,14 @@ impl<N: Network> RobustSubscription<N> {
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         let subscription_timeout = self.robust_provider.subscription_timeout;
         loop {
-            self.try_reconnect_to_primary(false).await;
-
             if let Some(subscription) = &mut self.subscription {
                 let recv_result = timeout(subscription_timeout, subscription.recv()).await;
                 match recv_result {
                     Ok(recv_result) => match recv_result {
                         Ok(header) => {
+                            if self.current_fallback_index.is_some() {
+                                self.try_reconnect_to_primary(false).await;
+                            }
                             self.consecutive_lags = 0;
                             return Ok(header);
                         }
@@ -547,6 +548,61 @@ mod tests {
 
         // No fallback available - should error after timeout
         assert_timeout_error(&mut stream, Duration::ZERO).await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn subscription_periodically_reconnects_to_primary_while_on_fallback()
+    -> anyhow::Result<()> {
+        // Use a longer reconnect interval to make timing more predictable
+        let reconnect_interval = Duration::from_millis(800);
+
+        let (_anvil_1, primary) = spawn_ws_anvil().await?;
+        let (_anvil_2, fallback) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(primary.clone())
+            .fallback(fallback.clone())
+            .subscription_timeout(SHORT_TIMEOUT)
+            .reconnect_interval(reconnect_interval)
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+        let mut stream = subscription.into_stream();
+
+        // Start on primary
+        primary.anvil_mine(Some(1), None).await?;
+        assert_next_block!(stream, 1);
+
+        // PP times out -> FP (this sets last_reconnect_attempt)
+        trigger_failover(&mut stream, fallback.clone(), 1).await?;
+        let failover_time = Instant::now();
+
+        // Now on fallback - mine blocks before reconnect_interval elapses
+        // These should stay on fallback (no reconnect attempt)
+        fallback.anvil_mine(Some(1), None).await?;
+        assert_next_block!(stream, 2);
+
+        fallback.anvil_mine(Some(1), None).await?;
+        assert_next_block!(stream, 3);
+
+        // Ensure reconnect_interval has fully elapsed since failover
+        let elapsed = failover_time.elapsed();
+        if elapsed < reconnect_interval + BUFFER_TIME {
+            sleep(reconnect_interval + BUFFER_TIME - elapsed).await;
+        }
+
+        // Mine on fallback - receiving this block triggers try_reconnect_to_primary
+        fallback.anvil_mine(Some(1), None).await?;
+        assert_next_block!(stream, 4);
+
+        // Now we should be back on primary
+        primary.anvil_mine(Some(1), None).await?;
+        assert_next_block!(stream, 2);
+
+        primary.anvil_mine(Some(1), None).await?;
+        assert_next_block!(stream, 3);
 
         Ok(())
     }
