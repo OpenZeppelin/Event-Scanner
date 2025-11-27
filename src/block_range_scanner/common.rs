@@ -96,7 +96,7 @@ async fn initialize_live_streaming_state<N: Network>(
     let confirmed = incoming_block_num.saturating_sub(block_confirmations);
 
     // Catch up on any confirmed blocks between stream_start and the confirmed tip
-    let previous_batch_end = stream_historical_blocks(
+    let previous_batch_end = stream_block_range(
         stream_start,
         stream_start,
         confirmed,
@@ -242,7 +242,7 @@ async fn stream_next_batch<N: Network>(
         return true;
     }
 
-    state.previous_batch_end = stream_historical_blocks(
+    state.previous_batch_end = stream_block_range(
         stream_start,
         state.batch_start,
         batch_end_num,
@@ -273,7 +273,7 @@ struct LiveStreamingState<N: Network> {
 }
 
 /// Assumes that `min_block <= next_start_block <= end`.
-pub(crate) async fn stream_historical_blocks<N: Network>(
+pub(crate) async fn stream_block_range<N: Network>(
     min_block: BlockNumber,
     mut next_start_block: BlockNumber,
     end: BlockNumber,

@@ -343,7 +343,7 @@ impl<N: Network> Service<N> {
         tokio::spawn(async move {
             let mut reorg_handler = ReorgHandler::new(provider.clone());
 
-            common::stream_historical_blocks(
+            common::stream_block_range(
                 start_block_num,
                 start_block_num,
                 end_block_num,
