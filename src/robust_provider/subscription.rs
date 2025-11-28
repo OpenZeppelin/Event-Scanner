@@ -395,10 +395,6 @@ mod tests {
         assert!(next.is_none(), "Expected stream to be finished, got: {next:?}");
     }
 
-    // ----------------------------------------------------------------------------
-    // Regular Flow Tests
-    // ----------------------------------------------------------------------------
-
     #[tokio::test]
     async fn test_multiple_consecutive_recv_calls() -> anyhow::Result<()> {
         let (_anvil, provider) = spawn_ws_anvil().await?;
@@ -461,9 +457,22 @@ mod tests {
         Ok(())
     }
 
-    // ----------------------------------------------------------------------------
-    // Lag Handling Edge Cases
-    // ----------------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_is_empty_returns_true_when_subscription_none() -> anyhow::Result<()> {
+        let (_anvil, provider) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(provider.clone())
+            .subscription_timeout(SHORT_TIMEOUT)
+            .build()
+            .await?;
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        subscription.subscription = None;
+        assert!(subscription.is_empty());
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_lag_count_increments_and_resets() -> anyhow::Result<()> {
