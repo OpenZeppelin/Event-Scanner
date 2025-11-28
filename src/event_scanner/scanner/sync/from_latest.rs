@@ -72,7 +72,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let latest_block = provider.get_block_number().await?;
 
         // Setup rewind and live streams to run in parallel.
-        let rewind_stream = client.rewind(BlockNumberOrTag::Earliest, latest_block).await?;
+        let rewind_stream = client.rewind(latest_block, BlockNumberOrTag::Earliest).await?;
 
         // Start streaming...
         tokio::spawn(async move {
