@@ -395,6 +395,170 @@ mod tests {
         assert!(next.is_none(), "Expected stream to be finished, got: {next:?}");
     }
 
+    // ----------------------------------------------------------------------------
+    // Regular Flow Tests
+    // ----------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_multiple_consecutive_recv_calls() -> anyhow::Result<()> {
+        let (_anvil, provider) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(provider.clone())
+            .subscription_timeout(SHORT_TIMEOUT)
+            .build()
+            .await?;
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        for i in 1..=5 {
+            provider.anvil_mine(Some(1), None).await?;
+            let block = subscription.recv().await?;
+            assert_eq!(block.number, i);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stream_consuming_multiple_blocks() -> anyhow::Result<()> {
+        let (_anvil, provider) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(provider.clone())
+            .subscription_timeout(SHORT_TIMEOUT)
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+        let mut stream = subscription.into_stream();
+
+        for i in 1..=5 {
+            provider.anvil_mine(Some(1), None).await?;
+            assert_next_block!(stream, i);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stream_consumes_multiple_blocks_in_sequence() -> anyhow::Result<()> {
+        let (_anvil, provider) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(provider.clone())
+            .subscription_timeout(SHORT_TIMEOUT)
+            .build()
+            .await?;
+
+        let subscription = robust.subscribe_blocks().await?;
+        let mut stream = subscription.into_stream();
+
+        provider.anvil_mine(Some(5), None).await?;
+        assert_next_block!(stream, 1);
+        assert_next_block!(stream, 2);
+        assert_next_block!(stream, 3);
+        assert_next_block!(stream, 4);
+        assert_next_block!(stream, 5);
+
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------------------
+    // Lag Handling Edge Cases
+    // ----------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_lag_count_increments_and_resets() -> anyhow::Result<()> {
+        // This test verifies the lag counter logic by directly manipulating the internal state
+        // In a real scenario, RecvError::Lagged would be triggered by the broadcast channel
+        // when the receiver can't keep up with the sender
+
+        let (_anvil, provider) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(provider.clone())
+            .subscription_timeout(SHORT_TIMEOUT)
+            .build()
+            .await?;
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        // Verify initial state
+        assert_eq!(subscription.consecutive_lags, 0);
+
+        // Simulate lag by directly calling process_recv_error
+        // In production, this would be called by recv() when the channel lags
+        subscription.process_recv_error(RecvError::Lagged(5)).await?;
+        assert_eq!(subscription.consecutive_lags, 1, "Lag count should increment to 1");
+
+        // Another lag
+        subscription.process_recv_error(RecvError::Lagged(3)).await?;
+        assert_eq!(subscription.consecutive_lags, 2, "Lag count should increment to 2");
+
+        // Now receive a successful block - this should reset the counter
+        provider.anvil_mine(Some(1), None).await?;
+        let block = subscription.recv().await?;
+        assert_eq!(block.number, 1);
+        assert_eq!(
+            subscription.consecutive_lags, 0,
+            "Lag count should reset to 0 after successful recv"
+        );
+
+        // Verify it stays at 0 for subsequent successful receives
+        provider.anvil_mine(Some(1), None).await?;
+        let block = subscription.recv().await?;
+        assert_eq!(block.number, 2);
+        assert_eq!(subscription.consecutive_lags, 0, "Lag count should remain 0");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_lag_count_triggers_failover_at_max() -> anyhow::Result<()> {
+        // Test that MAX_LAG_COUNT consecutive lags trigger a provider switch
+        let (_anvil_1, primary) = spawn_ws_anvil().await?;
+        let (_anvil_2, fallback) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(primary.clone())
+            .fallback(fallback.clone())
+            .subscription_timeout(SHORT_TIMEOUT)
+            .build()
+            .await?;
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        // Verify initial state
+        assert_eq!(subscription.consecutive_lags, 0);
+        assert_eq!(subscription.current_fallback_index, None, "Should start on primary");
+
+        // Simulate MAX_LAG_COUNT - 1 lags (should NOT trigger failover)
+        for i in 1..MAX_LAG_COUNT {
+            subscription.process_recv_error(RecvError::Lagged(10)).await?;
+            assert_eq!(subscription.consecutive_lags, i, "Lag count should be {i}");
+            assert_eq!(subscription.current_fallback_index, None, "Should still be on primary");
+        }
+
+        // One more lag should trigger failover
+        subscription.process_recv_error(RecvError::Lagged(10)).await?;
+        assert_eq!(
+            subscription.consecutive_lags, MAX_LAG_COUNT,
+            "Lag count should be MAX_LAG_COUNT"
+        );
+        assert_eq!(
+            subscription.current_fallback_index,
+            Some(0),
+            "Should have failed over to fallback[0]"
+        );
+
+        // Verify fallback works
+        fallback.anvil_mine(Some(1), None).await?;
+        let block = subscription.recv().await?;
+        assert_eq!(block.number, 1);
+        assert_eq!(
+            subscription.consecutive_lags, 0,
+            "Lag count should reset after successful recv on fallback"
+        );
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn ws_fails_http_fallback_returns_primary_error() -> anyhow::Result<()> {
         // Setup: Create WS primary and HTTP fallback
