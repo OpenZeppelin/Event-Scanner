@@ -132,11 +132,18 @@ async fn stream_blocks_continuously<
         let incoming_block_num = incoming_block.number();
         info!(block_number = incoming_block_num, "Received block header");
 
-        // Check for reorgs and update state accordingly
-        let Some(common_ancestor) =
-            check_for_reorg(state.previous_batch_end.as_ref(), reorg_handler, sender).await
-        else {
-            return;
+        let Some(previous_batch_end) = state.previous_batch_end.as_ref() else {
+            // previously detected reorg wasn't fully handled
+            continue;
+        };
+
+        let common_ancestor = match reorg_handler.check(previous_batch_end).await {
+            Ok(reorg_opt) => reorg_opt,
+            Err(e) => {
+                error!(error = %e, "Failed to perform reorg check");
+                _ = sender.try_stream(e).await;
+                return;
+            }
         };
 
         if let Some(common_ancestor) = common_ancestor {
@@ -145,7 +152,7 @@ async fn stream_blocks_continuously<
             }
         } else {
             // No reorg: advance batch_start to after the previous batch
-            advance_batch_start_after_previous_end(state);
+            state.batch_start = previous_batch_end.header().number() + 1;
         }
 
         // Stream the next batch of confirmed blocks
@@ -162,25 +169,6 @@ async fn stream_blocks_continuously<
         .await
         {
             return; // Channel closed
-        }
-    }
-}
-
-/// Checks if a reorg occurred by verifying the previous batch end block.
-/// Returns `None` if the channel is closed.
-async fn check_for_reorg<N: Network>(
-    previous_batch_end: Option<&N::BlockResponse>,
-    reorg_handler: &mut ReorgHandler<N>,
-    sender: &mpsc::Sender<BlockScannerResult>,
-) -> Option<Option<N::BlockResponse>> {
-    let batch_end = previous_batch_end?;
-
-    match reorg_handler.check(batch_end).await {
-        Ok(reorg_opt) => Some(reorg_opt),
-        Err(e) => {
-            error!(error = %e, "Failed to perform reorg check");
-            _ = sender.try_stream(e).await;
-            None
         }
     }
 }
@@ -217,13 +205,6 @@ async fn handle_reorg_detected<N: Network>(
     }
 
     true
-}
-
-/// Advances `batch_start` after processing a normal (non-reorg) block
-fn advance_batch_start_after_previous_end<N: Network>(state: &mut LiveStreamingState<N>) {
-    if let Some(prev_batch_end) = state.previous_batch_end.as_ref() {
-        state.batch_start = prev_batch_end.header().number() + 1;
-    }
 }
 
 /// Streams the next batch of blocks up to `batch_end_num`.

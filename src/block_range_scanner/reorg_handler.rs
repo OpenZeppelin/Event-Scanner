@@ -130,6 +130,6 @@ impl<N: Network> ReorgHandler<N> {
             self.buffer.clear();
             finalized
         };
-        return Ok(Some(common_ancestor));
+        Ok(Some(common_ancestor))
     }
 }
