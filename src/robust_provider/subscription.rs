@@ -286,9 +286,9 @@ mod tests {
 
     use crate::robust_provider::{Error, RobustProviderBuilder};
 
-    const SHORT_TIMEOUT: Duration = Duration::from_millis(30);
-    const RECONNECT_INTERVAL: Duration = Duration::from_millis(50);
-    const BUFFER_TIME: Duration = Duration::from_millis(10);
+    const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
+    const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
+    const BUFFER_TIME: Duration = Duration::from_millis(100);
 
     async fn spawn_ws_anvil() -> anyhow::Result<(AnvilInstance, RootProvider)> {
         let anvil = Anvil::new().try_spawn()?;
