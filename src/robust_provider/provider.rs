@@ -527,40 +527,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ws_fails_http_fallback_returns_primary_error() -> anyhow::Result<()> {
-        let anvil_1 = Anvil::new().try_spawn()?;
-
-        let ws_provider =
-            ProviderBuilder::new().connect(anvil_1.ws_endpoint_url().as_str()).await?;
-
-        let anvil_2 = Anvil::new().try_spawn()?;
-        let http_provider = ProviderBuilder::new().connect_http(anvil_2.endpoint_url());
-
-        let robust = RobustProviderBuilder::fragile(ws_provider.clone())
-            .fallback(http_provider)
-            .call_timeout(Duration::from_millis(500))
-            .build()
-            .await?;
-
-        // force ws_provider to fail and return BackendGone
-        drop(anvil_1);
-
-        let err = robust.subscribe_blocks().await.unwrap_err();
-
-        // The error should be either a Timeout or BackendGone from the primary WS provider,
-        // NOT a PubsubUnavailable error (which would indicate HTTP fallback was attempted)
-        match err {
-            Error::Timeout => {}
-            Error::RpcError(e) => {
-                assert!(matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)));
-            }
-            Error::BlockNotFound(id) => panic!("Unexpected error type: BlockNotFound({id})"),
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_get_block_by_number_succeeds() -> anyhow::Result<()> {
         let (_anvil, robust, alloy_provider) = setup_anvil_with_blocks(100).await?;
 
