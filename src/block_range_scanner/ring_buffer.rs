@@ -9,6 +9,7 @@ pub(crate) struct RingBuffer<T> {
 impl<T> RingBuffer<T> {
     /// Creates an empty [`RingBuffer`] with a specific capacity.
     pub fn new(capacity: usize) -> Self {
+        assert!(capacity > 0, "RingBuffer.capacity cannot be 0");
         Self { inner: VecDeque::with_capacity(capacity), capacity }
     }
 
@@ -31,5 +32,16 @@ impl<T> RingBuffer<T> {
 
     pub fn clear(&mut self) {
         self.inner.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic = "RingBuffer.capacity cannot be 0"]
+    fn zero_capacity_should_reject_elements() {
+        _ = RingBuffer::<u32>::new(0);
     }
 }
