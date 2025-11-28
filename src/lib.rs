@@ -8,6 +8,8 @@ mod error;
 mod event_scanner;
 mod types;
 
+pub use block_range_scanner::RingBufferCapacity;
+
 pub use error::ScannerError;
 pub use types::{Notification, ScannerMessage};
 

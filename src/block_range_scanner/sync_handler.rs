@@ -4,7 +4,9 @@ use tracing::{error, info};
 
 use crate::{
     Notification, ScannerError,
-    block_range_scanner::{BlockScannerResult, common, reorg_handler::ReorgHandler},
+    block_range_scanner::{
+        BlockScannerResult, common, reorg_handler::ReorgHandler, ring_buffer::RingBufferCapacity,
+    },
     robust_provider::RobustProvider,
     types::TryStream,
 };
@@ -32,9 +34,10 @@ impl<N: Network> SyncHandler<N> {
         max_block_range: u64,
         start_id: BlockId,
         block_confirmations: u64,
+        past_blocks_storage_capacity: RingBufferCapacity,
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Self {
-        let reorg_handler = ReorgHandler::new(provider.clone());
+        let reorg_handler = ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
         Self { provider, max_block_range, start_id, block_confirmations, sender, reorg_handler }
     }
 

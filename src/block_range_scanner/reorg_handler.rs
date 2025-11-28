@@ -8,6 +8,7 @@ use tracing::{info, warn};
 
 use crate::{
     ScannerError,
+    block_range_scanner::ring_buffer::RingBufferCapacity,
     robust_provider::{self, RobustProvider},
 };
 
@@ -20,8 +21,8 @@ pub(crate) struct ReorgHandler<N: Network = Ethereum> {
 }
 
 impl<N: Network> ReorgHandler<N> {
-    pub fn new(provider: RobustProvider<N>) -> Self {
-        Self { provider, buffer: RingBuffer::new(10) }
+    pub fn new(provider: RobustProvider<N>, capacity: RingBufferCapacity) -> Self {
+        Self { provider, buffer: RingBuffer::new(capacity) }
     }
 
     pub async fn check(

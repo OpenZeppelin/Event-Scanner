@@ -87,6 +87,7 @@ mod ring_buffer;
 mod sync_handler;
 
 use reorg_handler::ReorgHandler;
+pub use ring_buffer::RingBufferCapacity;
 
 pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
@@ -123,6 +124,7 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
 #[derive(Clone)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
+    pub past_blocks_storage_capacity: RingBufferCapacity,
 }
 
 impl Default for BlockRangeScanner {
@@ -134,12 +136,24 @@ impl Default for BlockRangeScanner {
 impl BlockRangeScanner {
     #[must_use]
     pub fn new() -> Self {
-        Self { max_block_range: DEFAULT_MAX_BLOCK_RANGE }
+        Self {
+            max_block_range: DEFAULT_MAX_BLOCK_RANGE,
+            past_blocks_storage_capacity: RingBufferCapacity::Limited(10),
+        }
     }
 
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.max_block_range = max_block_range;
+        self
+    }
+
+    #[must_use]
+    pub fn past_blocks_storage_capacity(
+        mut self,
+        past_blocks_storage_capacity: RingBufferCapacity,
+    ) -> Self {
+        self.past_blocks_storage_capacity = past_blocks_storage_capacity;
         self
     }
 
@@ -153,13 +167,18 @@ impl BlockRangeScanner {
         provider: impl IntoRobustProvider<N>,
     ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
         let provider = provider.into_robust_provider().await?;
-        Ok(ConnectedBlockRangeScanner { provider, max_block_range: self.max_block_range })
+        Ok(ConnectedBlockRangeScanner {
+            provider,
+            max_block_range: self.max_block_range,
+            past_blocks_storage_capacity: self.past_blocks_storage_capacity,
+        })
     }
 }
 
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
+    past_blocks_storage_capacity: RingBufferCapacity,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
@@ -175,7 +194,11 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     ///
     /// Returns an error if the subscription service fails to start.
     pub fn run(&self) -> Result<BlockRangeScannerClient, ScannerError> {
-        let (service, cmd_tx) = Service::new(self.provider.clone(), self.max_block_range);
+        let (service, cmd_tx) = Service::new(
+            self.provider.clone(),
+            self.max_block_range,
+            self.past_blocks_storage_capacity,
+        );
         tokio::spawn(async move {
             service.run().await;
         });
@@ -213,18 +236,24 @@ pub enum Command {
 struct Service<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
+    past_blocks_storage_capacity: RingBufferCapacity,
     error_count: u64,
     command_receiver: mpsc::Receiver<Command>,
     shutdown: bool,
 }
 
 impl<N: Network> Service<N> {
-    pub fn new(provider: RobustProvider<N>, max_block_range: u64) -> (Self, mpsc::Sender<Command>) {
+    pub fn new(
+        provider: RobustProvider<N>,
+        max_block_range: u64,
+        past_blocks_storage_capacity: RingBufferCapacity,
+    ) -> (Self, mpsc::Sender<Command>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
         let service = Self {
             provider,
             max_block_range,
+            past_blocks_storage_capacity,
             error_count: 0,
             command_receiver: cmd_rx,
             shutdown: false,
@@ -287,6 +316,7 @@ impl<N: Network> Service<N> {
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
+        let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let latest = self.provider.get_block_number().await?;
         let provider = self.provider.clone();
 
@@ -300,7 +330,8 @@ impl<N: Network> Service<N> {
         info!("WebSocket connected for live blocks");
 
         tokio::spawn(async move {
-            let mut reorg_handler = ReorgHandler::new(provider.clone());
+            let mut reorg_handler =
+                ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
             common::stream_live_blocks(
                 range_start,
@@ -325,6 +356,7 @@ impl<N: Network> Service<N> {
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
+        let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
 
         let (start_block, end_block) =
@@ -341,7 +373,8 @@ impl<N: Network> Service<N> {
         info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
 
         tokio::spawn(async move {
-            let mut reorg_handler = ReorgHandler::new(provider.clone());
+            let mut reorg_handler =
+                ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
             common::stream_block_range(
                 start_block_num,
@@ -369,6 +402,7 @@ impl<N: Network> Service<N> {
             self.max_block_range,
             start_id,
             block_confirmations,
+            self.past_blocks_storage_capacity,
             sender,
         );
         sync_handler.run().await
@@ -381,6 +415,7 @@ impl<N: Network> Service<N> {
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Result<(), ScannerError> {
         let max_block_range = self.max_block_range;
+        let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
 
         let (start_block, end_block) =
@@ -393,7 +428,8 @@ impl<N: Network> Service<N> {
         };
 
         tokio::spawn(async move {
-            let mut reorg_handler = ReorgHandler::new(provider.clone());
+            let mut reorg_handler =
+                ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
             Self::stream_rewind(from, to, max_block_range, &sender, &provider, &mut reorg_handler)
                 .await;
