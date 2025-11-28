@@ -277,7 +277,7 @@ pub(crate) async fn stream_block_range<N: Network>(
         };
 
         if !sender.try_stream(next_start_block..=batch_end_num).await {
-            return Some(batch_end);
+            return None; // channel closed
         }
 
         batch_count += 1;
