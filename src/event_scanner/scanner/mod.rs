@@ -6,10 +6,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    EventFilter, RingBufferCapacity, ScannerError,
+    EventFilter, ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
-        MAX_BUFFERED_MESSAGES,
+        MAX_BUFFERED_MESSAGES, RingBufferCapacity,
     },
     event_scanner::{EventScannerResult, listener::EventListener},
     robust_provider::IntoRobustProvider,
