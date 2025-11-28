@@ -1,7 +1,7 @@
 //! Robust, retrying wrapper around Alloy providers.
 //!
 //! This module exposes [`RobustProvider`], a small wrapper around Alloy's
-//! `RootProvider` that adds:
+//! [`RootProvider`](alloy::providers::RootProvider) that adds:
 //! * bounded per-call timeouts
 //! * exponential backoff retries
 //! * transparent failover between a primary and one or more fallback providers
