@@ -15,6 +15,8 @@ pub enum Error {
     RpcError(Arc<RpcError<TransportErrorKind>>),
     #[error("Block not found, Block Id: {0}")]
     BlockNotFound(BlockId),
+    #[error("Subscription closed")]
+    Closed,
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {
