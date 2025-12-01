@@ -32,7 +32,7 @@ pub enum ScannerError {
     InvalidMaxBlockRange,
 
     #[error("Subscription closed")]
-    Closed,
+    SubscriptionClosed,
 }
 
 impl From<RobustProviderError> for ScannerError {
@@ -41,7 +41,7 @@ impl From<RobustProviderError> for ScannerError {
             RobustProviderError::Timeout => ScannerError::Timeout,
             RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
-            RobustProviderError::Closed => ScannerError::Closed,
+            RobustProviderError::Closed => ScannerError::SubscriptionClosed,
         }
     }
 }
