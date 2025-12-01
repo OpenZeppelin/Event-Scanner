@@ -93,7 +93,7 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
-    /// Process subscription receive errors and handle failover
+    /// Process subscription receive errors
     fn process_recv_error(recv_error: &RecvError) -> Result<(), Error> {
         match recv_error {
             RecvError::Closed => {
