@@ -98,8 +98,8 @@ async fn run_scanner(
                     info!("Callback successfully executed with event {:?}", log.inner.data);
                 }
             }
-            Ok(Message::Notification(info)) => {
-                info!("Received info: {:?}", info);
+            Ok(Message::Notification(notification)) => {
+                info!("Received notification: {:?}", notification);
             }
             Err(e) => {
                 error!("Received error: {}", e);
