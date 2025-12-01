@@ -61,13 +61,6 @@ impl<N: Network> RobustSubscription<N> {
     /// 2. **Fallback failure**: Immediately when a fallback provider fails, before attempting the
     ///    next fallback provider
     ///
-    /// # Lag Handling
-    ///
-    /// If the subscription lags (receiver can't keep up with sender), the subscription tracks
-    /// consecutive lag occurrences. After 3 consecutive lags ([`MAX_LAG_COUNT`]), the subscription
-    /// will automatically switch to a fallback provider. The lag counter resets to 0 upon
-    /// successfully receiving a block.
-    ///
     /// # Errors
     ///
     /// Returns an error if all providers have been exhausted and failed.
