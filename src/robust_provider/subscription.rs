@@ -27,7 +27,7 @@ const MAX_LAG_COUNT: usize = 3;
 /// and periodic reconnection attempts to the primary provider.
 #[derive(Debug)]
 pub struct RobustSubscription<N: Network> {
-    subscription: Option<Subscription<N::HeaderResponse>>,
+    subscription: Subscription<N::HeaderResponse>,
     robust_provider: RobustProvider<N>,
     last_reconnect_attempt: Option<Instant>,
     consecutive_lags: usize,
@@ -41,7 +41,7 @@ impl<N: Network> RobustSubscription<N> {
         robust_provider: RobustProvider<N>,
     ) -> Self {
         Self {
-            subscription: Some(subscription),
+            subscription,
             robust_provider,
             last_reconnect_attempt: None,
             consecutive_lags: 0,
@@ -62,8 +62,8 @@ impl<N: Network> RobustSubscription<N> {
     /// Returns an error if all providers have been exhausted and failed.
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         let subscription_timeout = self.robust_provider.subscription_timeout;
-        while let Some(subscription) = &mut self.subscription {
-            let recv_result = timeout(subscription_timeout, subscription.recv()).await;
+        loop {
+            let recv_result = timeout(subscription_timeout, self.subscription.recv()).await;
             match recv_result {
                 Ok(recv_result) => match recv_result {
                     Ok(header) => {
@@ -78,7 +78,7 @@ impl<N: Network> RobustSubscription<N> {
                     }
                 },
                 Err(elapsed_err) => {
-                    error!(
+                    warn!(
                         timeout_secs = subscription_timeout.as_secs(),
                         "Subscription timeout - no block received, switching provider"
                     );
@@ -87,8 +87,8 @@ impl<N: Network> RobustSubscription<N> {
                 }
             }
         }
-        // No subscription available
-        Err(RpcError::Transport(TransportErrorKind::BackendGone).into())
+        // // No subscription available
+        // Err(RpcError::Transport(TransportErrorKind::BackendGone).into())
     }
 
     /// Process subscription receive errors and handle failover
@@ -145,7 +145,7 @@ impl<N: Network> RobustSubscription<N> {
         match subscription {
             Ok(sub) => {
                 info!("Successfully reconnected to primary provider");
-                self.subscription = Some(sub);
+                self.subscription = sub;
                 self.current_fallback_index = None;
                 self.last_reconnect_attempt = None;
                 true
@@ -181,7 +181,7 @@ impl<N: Network> RobustSubscription<N> {
 
         match subscription {
             Ok((sub, fallback_idx)) => {
-                self.subscription = Some(sub);
+                self.subscription = sub;
                 self.current_fallback_index = Some(fallback_idx);
                 Ok(())
             }
@@ -200,10 +200,7 @@ impl<N: Network> RobustSubscription<N> {
     /// Check if the subscription channel is empty (no pending messages)
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        match &self.subscription {
-            Some(sub) => sub.is_empty(),
-            None => true,
-        }
+        self.subscription.is_empty()
     }
 
     /// Convert the subscription into a stream.
@@ -432,23 +429,6 @@ mod tests {
             let block = subscription.recv().await?;
             assert_eq!(block.number, i);
         }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_is_empty_returns_true_when_subscription_none() -> anyhow::Result<()> {
-        let (_anvil, provider) = spawn_ws_anvil().await?;
-
-        let robust = RobustProviderBuilder::fragile(provider.clone())
-            .subscription_timeout(SHORT_TIMEOUT)
-            .build()
-            .await?;
-
-        let mut subscription = robust.subscribe_blocks().await?;
-
-        subscription.subscription = None;
-        assert!(subscription.is_empty());
 
         Ok(())
     }
