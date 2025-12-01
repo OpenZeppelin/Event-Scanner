@@ -240,17 +240,11 @@ impl<N: 'static + Clone + Send + Network> Stream for RobustSubscriptionStream<N>
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let (result, rx) = ready!(self.inner.poll(cx));
-
+        self.inner.set(make_future(rx));
         match result {
-            Ok(item) => {
-                self.inner.set(make_future(rx));
-                Poll::Ready(Some(Ok(item)))
-            }
+            Ok(item) => Poll::Ready(Some(Ok(item))),
             Err(Error::Closed) => Poll::Ready(None),
-            Err(e) => {
-                self.inner.set(make_future(rx));
-                Poll::Ready(Some(Err(e)))
-            }
+            Err(e) => Poll::Ready(Some(Err(e))),
         }
     }
 }
