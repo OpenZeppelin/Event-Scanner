@@ -21,7 +21,7 @@ use crate::robust_provider::{Error, RobustProvider};
 pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Maximum number of consecutive lags before switching providers
-const MAX_LAG_COUNT: usize = 3;
+pub const MAX_LAG_COUNT: usize = 3;
 
 /// A robust subscription wrapper that automatically handles provider failover
 /// and periodic reconnection attempts to the primary provider.
@@ -56,6 +56,23 @@ impl<N: Network> RobustSubscription<N> {
     /// * Handle errors by switching to fallback providers
     /// * Periodically attempt to reconnect to the primary provider
     /// * Will switch to fallback providers if subscription timeout is exhausted
+    ///
+    /// # Primary Provider Reconnection
+    ///
+    /// The primary provider is retried in two scenarios:
+    /// 1. **Periodic reconnection**: Every `reconnect_interval` (default: 30 seconds) while on a
+    ///    fallback provider and successfully receiving blocks. Note: The actual reconnection
+    ///    attempt occurs when a new block is received, so if blocks arrive slower than the
+    ///    reconnect interval, reconnection will be delayed until the next block.
+    /// 2. **Forced reconnection**: Immediately when a fallback provider fails, before attempting
+    ///    the next fallback provider
+    ///
+    /// # Lag Handling
+    ///
+    /// If the subscription lags (receiver can't keep up with sender), the subscription tracks
+    /// consecutive lag occurrences. After 3 consecutive lags ([`MAX_LAG_COUNT`]), the subscription
+    /// will automatically switch to a fallback provider. The lag counter resets to 0 upon
+    /// successfully receiving a block.
     ///
     /// # Errors
     ///
