@@ -87,15 +87,13 @@ impl<N: Network> RobustSubscription<N> {
                 }
             }
         }
-        // // No subscription available
-        // Err(RpcError::Transport(TransportErrorKind::BackendGone).into())
     }
 
     /// Process subscription receive errors and handle failover
     async fn process_recv_error(&mut self, recv_error: RecvError) -> Result<(), Error> {
         match recv_error {
             RecvError::Closed => {
-                error!("Subscription channel closed, switching provider");
+                error!("Provider closed the subscription channel, switching provider");
                 let error = RpcError::Transport(TransportErrorKind::BackendGone).into();
                 self.switch_to_fallback(error).await?;
             }
@@ -108,8 +106,11 @@ impl<N: Network> RobustSubscription<N> {
                 );
 
                 if self.consecutive_lags >= MAX_LAG_COUNT {
-                    error!("Too many consecutive lags, switching provider");
-                    let error = RpcError::Transport(TransportErrorKind::BackendGone).into();
+                    warn!("Too many consecutive lags, switching provider");
+                    let error = RpcError::Transport(TransportErrorKind::Custom(
+                        "Encountered too much lag".into(),
+                    ))
+                    .into();
                     self.switch_to_fallback(error).await?;
                 }
             }
