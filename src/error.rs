@@ -33,6 +33,9 @@ pub enum ScannerError {
 
     #[error("Subscription closed")]
     SubscriptionClosed,
+
+    #[error("Subscriptions Lagged too often")]
+    SubscriptionLagged,
 }
 
 impl From<RobustProviderError> for ScannerError {
@@ -42,6 +45,7 @@ impl From<RobustProviderError> for ScannerError {
             RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
             RobustProviderError::Closed => ScannerError::SubscriptionClosed,
+            RobustProviderError::SubscriptionLagged => ScannerError::SubscriptionLagged,
         }
     }
 }

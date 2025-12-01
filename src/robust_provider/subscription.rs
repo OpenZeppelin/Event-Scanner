@@ -8,7 +8,6 @@ use alloy::{
     network::Network,
     providers::{Provider, RootProvider},
     pubsub::Subscription,
-    transports::{RpcError, TransportErrorKind},
 };
 use tokio::{sync::broadcast::error::RecvError, time::timeout};
 use tokio_stream::Stream;
@@ -124,11 +123,7 @@ impl<N: Network> RobustSubscription<N> {
 
                 if self.consecutive_lags >= MAX_LAG_COUNT {
                     warn!("Too many consecutive lags, switching provider");
-                    let error = RpcError::Transport(TransportErrorKind::Custom(
-                        "Encountered too much lag".into(),
-                    ))
-                    .into();
-                    self.switch_to_fallback(error).await?;
+                    self.switch_to_fallback(Error::SubscriptionLagged).await?;
                 }
             }
         }
@@ -323,6 +318,9 @@ mod tests {
             }
             Error::Closed => {
                 panic!("Unexpected Closed error");
+            }
+            Error::SubscriptionLagged => {
+                panic!("Unexpected SubscriptionLagged error");
             }
         }
     }

@@ -1,3 +1,4 @@
+use crate::robust_provider::subscription::MAX_LAG_COUNT;
 use std::sync::Arc;
 
 use alloy::{
@@ -17,6 +18,8 @@ pub enum Error {
     BlockNotFound(BlockId),
     #[error("Subscription closed")]
     Closed,
+    #[error("Subscription lag exceeded maximum consecutive lag count: {MAX_LAG_COUNT:?}")]
+    SubscriptionLagged,
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {
