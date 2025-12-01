@@ -60,6 +60,7 @@ impl<N: Network> RobustSubscription<N> {
     /// # Errors
     ///
     /// Returns an error if all providers have been exhausted and failed.
+    /// It will also propagate any underlying subscription errors
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         let subscription_timeout = self.robust_provider.subscription_timeout;
         loop {
@@ -180,17 +181,10 @@ impl<N: Network> RobustSubscription<N> {
             .try_fallback_providers_from(&operation, true, last_error, start_index)
             .await;
 
-        match subscription {
-            Ok((sub, fallback_idx)) => {
-                self.subscription = sub;
-                self.current_fallback_index = Some(fallback_idx);
-                Ok(())
-            }
-            Err(e) => {
-                error!(error = %e, "eth_subscribe failed - no fallbacks available");
-                Err(e)
-            }
-        }
+        let (sub, fallback_idx) = subscription?;
+        self.subscription = sub;
+        self.current_fallback_index = Some(fallback_idx);
+        Ok(())
     }
 
     /// Returns true if currently using a fallback provider
