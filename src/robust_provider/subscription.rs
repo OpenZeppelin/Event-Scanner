@@ -94,9 +94,8 @@ impl<N: Network> RobustSubscription<N> {
     async fn process_recv_error(&mut self, recv_error: RecvError) -> Result<(), Error> {
         match recv_error {
             RecvError::Closed => {
-                error!("Provider closed the subscription channel, switching provider");
-                let error = RpcError::Transport(TransportErrorKind::BackendGone).into();
-                self.switch_to_fallback(error).await?;
+                error!("Provider closed the subscription channel");
+                return Err(Error::Closed);
             }
             RecvError::Lagged(skipped) => {
                 self.consecutive_lags += 1;
@@ -209,7 +208,6 @@ type SubscriptionResult<N> = (Result<<N as Network>::HeaderResponse, Error>, Rob
 
 pub struct RobustSubscriptionStream<N: Network> {
     inner: ReusableBoxFuture<'static, SubscriptionResult<N>>,
-    finished: bool,
 }
 
 async fn make_future<N: Network>(mut rx: RobustSubscription<N>) -> SubscriptionResult<N> {
@@ -221,13 +219,7 @@ impl<N: 'static + Clone + Send + Network> RobustSubscriptionStream<N> {
     /// Create a new `RobustSubscriptionStream`.
     #[must_use]
     pub fn new(rx: RobustSubscription<N>) -> Self {
-        Self { inner: ReusableBoxFuture::new(make_future(rx)), finished: false }
-    }
-
-    /// Returns true if the stream has reached a terminal state.
-    #[must_use]
-    pub fn is_finished(&self) -> bool {
-        self.finished
+        Self { inner: ReusableBoxFuture::new(make_future(rx)) }
     }
 }
 
@@ -235,10 +227,6 @@ impl<N: 'static + Clone + Send + Network> Stream for RobustSubscriptionStream<N>
     type Item = Result<N::HeaderResponse, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.finished {
-            return Poll::Ready(None);
-        }
-
         let (result, rx) = ready!(self.inner.poll(cx));
 
         match result {
@@ -246,8 +234,9 @@ impl<N: 'static + Clone + Send + Network> Stream for RobustSubscriptionStream<N>
                 self.inner.set(make_future(rx));
                 Poll::Ready(Some(Ok(item)))
             }
+            Err(Error::Closed) => Poll::Ready(None),
             Err(e) => {
-                self.finished = true;
+                self.inner.set(make_future(rx));
                 Poll::Ready(Some(Err(e)))
             }
         }
@@ -288,7 +277,22 @@ mod tests {
         Ok((anvil, provider.root().to_owned()))
     }
 
-    fn assert_backend_gone_or_timeout(err: Error) {
+    async fn assert_backend_gone_or_timeout(
+        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
+    ) {
+        let err = stream.next().await.unwrap().unwrap_err();
+        match_backend_gone_or_timeout(err);
+    }
+
+    async fn assert_backend_gone_or_timeout_after_delay(
+        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
+        extra_delay: Duration,
+    ) {
+        sleep(SHORT_TIMEOUT + extra_delay + BUFFER_TIME).await;
+        assert_backend_gone_or_timeout(stream).await;
+    }
+
+    fn match_backend_gone_or_timeout(err: Error) {
         match err {
             Error::Timeout => {}
             Error::RpcError(e) => {
@@ -300,32 +304,10 @@ mod tests {
             Error::BlockNotFound(_) => {
                 panic!("Unexpected BlockNotFound error");
             }
-        }
-    }
-
-    #[macro_export]
-    macro_rules! assert_stream_finished {
-        ($stream: expr) => {
-            $crate::assert_stream_finished!($stream, finish_secs = 3)
-        };
-        ($stream: expr, finish_secs = $finish: expr) => {{
-            let next_item = tokio_stream::StreamExt::next(&mut $stream).await;
-            match next_item {
-                Some(Ok(item)) => panic!("Expected no item during quiet window, got: {:?}", item),
-                None => {}
-                Some(Err(e)) => {
-                    assert!(matches!(e, Error::Timeout), "Expected Timeout error, got: {:?}", e);
-
-                    let second = tokio::time::timeout(
-                        std::time::Duration::from_secs($finish),
-                        tokio_stream::StreamExt::next(&mut $stream),
-                    )
-                    .await
-                    .expect("expected stream to finish after quiet window");
-                    assert!(second.is_none(), "Expected stream to be finished, got: {:?}", second);
-                }
+            Error::Closed => {
+                panic!("Unexpected Closed error");
             }
-        }};
+        }
     }
 
     #[macro_export]
@@ -373,18 +355,6 @@ mod tests {
         expected_block: u64,
     ) -> anyhow::Result<()> {
         trigger_failover_with_delay(stream, next_provider, expected_block, Duration::ZERO).await
-    }
-
-    /// Waits for timeout and asserts a backend gone or timeout error.
-    async fn assert_timeout_error(
-        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
-        extra_delay: Duration,
-    ) {
-        sleep(SHORT_TIMEOUT + extra_delay + BUFFER_TIME).await;
-        let err = stream.next().await.unwrap().unwrap_err();
-        assert_backend_gone_or_timeout(err);
-        let next = stream.next().await;
-        assert!(next.is_none(), "Expected stream to be finished, got: {next:?}");
     }
 
     // ----------------------------------------------------------------------------
@@ -445,7 +415,6 @@ mod tests {
 
         // Convert to stream
         let mut stream = subscription.into_stream();
-        assert!(!stream.is_finished());
 
         // Use the stream
         provider.anvil_mine(Some(1), None).await?;
@@ -497,7 +466,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stream_is_finished_state_transitions() -> anyhow::Result<()> {
+    async fn test_stream_creation() -> anyhow::Result<()> {
         let (_anvil, provider) = spawn_ws_anvil().await?;
 
         let robust = RobustProviderBuilder::fragile(provider.clone())
@@ -506,16 +475,17 @@ mod tests {
             .await?;
 
         let subscription = robust.subscribe_blocks().await?;
-        let stream = subscription.into_stream();
+        let mut stream = subscription.into_stream();
 
-        // Initially not finished
-        assert!(!stream.is_finished());
+        // Stream should work normally
+        provider.anvil_mine(Some(1), None).await?;
+        assert_next_block!(stream, 1);
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_stream_is_finished_after_error() -> anyhow::Result<()> {
+    async fn test_stream_continues_streaming_errors() -> anyhow::Result<()> {
         let (_anvil, provider) = spawn_ws_anvil().await?;
 
         let robust = RobustProviderBuilder::fragile(provider.clone())
@@ -530,14 +500,12 @@ mod tests {
         provider.anvil_mine(Some(1), None).await?;
         assert_next_block!(stream, 1);
 
-        // Trigger timeout error
-        let err = stream.next().await.unwrap().unwrap_err();
-        assert_backend_gone_or_timeout(err);
+        // Trigger timeout error - the stream will continue to stream errors
+        assert_backend_gone_or_timeout(&mut stream).await;
 
-        // Stream should be finished
-        assert!(stream.is_finished());
-        let next = stream.next().await;
-        assert!(next.is_none());
+        // Without fallbacks, subsequent calls will continue to return errors
+        // (not None, since only Error::Closed terminates the stream)
+        assert_backend_gone_or_timeout(&mut stream).await;
 
         Ok(())
     }
@@ -690,7 +658,7 @@ mod tests {
         assert_next_block!(stream, 1);
 
         // No fallback available - should error after timeout
-        assert_timeout_error(&mut stream, Duration::ZERO).await;
+        assert_backend_gone_or_timeout(&mut stream).await;
 
         Ok(())
     }
@@ -722,7 +690,7 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // Verify: HTTP fallback can't provide subscription, so we get an error
-        assert_timeout_error(&mut stream, Duration::ZERO).await;
+        assert_backend_gone_or_timeout(&mut stream).await;
 
         Ok(())
     }
@@ -757,7 +725,7 @@ mod tests {
         trigger_failover(&mut stream, fallback.clone(), 1).await?;
 
         // FB -> try PP (fails) -> no more fallbacks -> error
-        assert_timeout_error(&mut stream, SHORT_TIMEOUT).await;
+        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT).await;
 
         Ok(())
     }
@@ -796,7 +764,7 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // FP2 times out -> tries PP (fails) -> no more fallbacks -> error
-        assert_timeout_error(&mut stream, SHORT_TIMEOUT).await;
+        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT).await;
 
         Ok(())
     }
@@ -837,7 +805,7 @@ mod tests {
         trigger_failover_with_delay(&mut stream, fb_3.clone(), 1, SHORT_TIMEOUT).await?;
 
         // FB3 -> try PP (fails) -> no more fallbacks -> error
-        assert_timeout_error(&mut stream, SHORT_TIMEOUT).await;
+        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT).await;
 
         Ok(())
     }
@@ -879,11 +847,7 @@ mod tests {
         trigger_failover_with_delay(&mut stream, fb_4.clone(), 1, SHORT_TIMEOUT).await?;
         trigger_failover_with_delay(&mut stream, fb_5.clone(), 1, SHORT_TIMEOUT).await?;
 
-        // All exhausted
-        let err = stream.next().await.unwrap().unwrap_err();
-        assert_backend_gone_or_timeout(err);
-        let next = stream.next().await;
-        assert!(next.is_none(), "Expected stream to be finished, got: {next:?}");
+        assert_backend_gone_or_timeout(&mut stream).await;
 
         Ok(())
     }
@@ -1149,8 +1113,7 @@ mod tests {
         drop(anvil);
 
         // Should get BackendGone or Timeout error
-        let err = stream.next().await.unwrap().unwrap_err();
-        assert_backend_gone_or_timeout(err);
+        assert_backend_gone_or_timeout(&mut stream).await;
 
         Ok(())
     }
@@ -1175,13 +1138,7 @@ mod tests {
         drop(anvil);
 
         // First failure
-        sleep(SHORT_TIMEOUT + BUFFER_TIME).await;
-        let err = stream.next().await.unwrap().unwrap_err();
-        assert_backend_gone_or_timeout(err);
-
-        // Stream should be finished - no more items
-        let next = stream.next().await;
-        assert!(next.is_none());
+        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT + BUFFER_TIME).await;
 
         Ok(())
     }
