@@ -62,6 +62,7 @@ Create an event stream for the given event filters registered with the `EventSca
 use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}, sol_types::SolEvent};
 use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
 use tokio_stream::StreamExt;
+use tracing::{error, info};
 
 use crate::MyContract;
 
@@ -76,7 +77,8 @@ async fn run_scanner(
     // Configure scanner with custom batch size (optional)
     let mut scanner = EventScannerBuilder::live()
         .max_block_range(500)  // Process up to 500 blocks per batch
-        .connect(robust_provider);
+        .connect(robust_provider)
+        .await?;
 
     // Register an event listener
     let filter = EventFilter::new()
@@ -91,14 +93,16 @@ async fn run_scanner(
     // Process messages from the stream
     while let Some(message) = stream.next().await {
         match message {
-            Message::Data(logs) => {
-                println!("Received {} logs: {logs:?}", logs.len());
+            Ok(Message::Data(logs)) => {
+                for log in logs {
+                    info!("Callback successfully executed with event {:?}", log.inner.data);
+                }
             }
-            Message::Notification(notification) => {
-                println!("Notification received: {notification:?}");
+            Ok(Message::Notification(notification)) => {
+                info!("Received notification: {:?}", notification);
             }
-            Message::Error(err) => {
-                eprintln!("Error: {err}");
+            Err(e) => {
+                error!("Received error: {}", e);
             }
         }
     }
