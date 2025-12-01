@@ -19,9 +19,6 @@ use crate::robust_provider::{Error, RobustProvider};
 /// Default time interval between primary provider reconnection attempts
 pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Maximum number of consecutive lags before switching providers
-pub const MAX_LAG_COUNT: usize = 3;
-
 /// A robust subscription wrapper that automatically handles provider failover
 /// and periodic reconnection attempts to the primary provider.
 #[derive(Debug)]
@@ -29,7 +26,6 @@ pub struct RobustSubscription<N: Network> {
     subscription: Subscription<N::HeaderResponse>,
     robust_provider: RobustProvider<N>,
     last_reconnect_attempt: Option<Instant>,
-    consecutive_lags: usize,
     current_fallback_index: Option<usize>,
 }
 
@@ -43,7 +39,6 @@ impl<N: Network> RobustSubscription<N> {
             subscription,
             robust_provider,
             last_reconnect_attempt: None,
-            consecutive_lags: 0,
             current_fallback_index: None,
         }
     }
@@ -63,8 +58,8 @@ impl<N: Network> RobustSubscription<N> {
     ///    fallback provider and successfully receiving blocks. Note: The actual reconnection
     ///    attempt occurs when a new block is received, so if blocks arrive slower than the
     ///    reconnect interval, reconnection will be delayed until the next block.
-    /// 2. **Forced reconnection**: Immediately when a fallback provider fails, before attempting
-    ///    the next fallback provider
+    /// 2. **Fallback failure**: Immediately when a fallback provider fails, before attempting the
+    ///    next fallback provider
     ///
     /// # Lag Handling
     ///
@@ -87,11 +82,10 @@ impl<N: Network> RobustSubscription<N> {
                         if self.is_on_fallback() {
                             self.try_reconnect_to_primary(false).await;
                         }
-                        self.consecutive_lags = 0;
                         return Ok(header);
                     }
                     Err(recv_error) => {
-                        self.process_recv_error(recv_error).await?;
+                        Self::process_recv_error(&recv_error)?;
                     }
                 },
                 Err(elapsed_err) => {
@@ -107,27 +101,14 @@ impl<N: Network> RobustSubscription<N> {
     }
 
     /// Process subscription receive errors and handle failover
-    async fn process_recv_error(&mut self, recv_error: RecvError) -> Result<(), Error> {
+    fn process_recv_error(recv_error: &RecvError) -> Result<(), Error> {
         match recv_error {
             RecvError::Closed => {
                 error!("Provider closed the subscription channel");
-                return Err(Error::Closed);
+                Err(Error::Closed)
             }
-            RecvError::Lagged(skipped) => {
-                self.consecutive_lags += 1;
-                warn!(
-                    skipped = skipped,
-                    consecutive_lags = self.consecutive_lags,
-                    "Subscription lagged"
-                );
-
-                if self.consecutive_lags >= MAX_LAG_COUNT {
-                    warn!("Too many consecutive lags, switching provider");
-                    self.switch_to_fallback(Error::SubscriptionLagged).await?;
-                }
-            }
+            RecvError::Lagged(count) => Err(Error::Lagged(*count)),
         }
-        Ok(())
     }
 
     /// Try to reconnect to the primary provider if enough time has elapsed.
@@ -313,7 +294,7 @@ mod tests {
             Error::Closed => {
                 panic!("Unexpected Closed error");
             }
-            Error::SubscriptionLagged => {
+            Error::Lagged(_) => {
                 panic!("Unexpected SubscriptionLagged error");
             }
         }
@@ -515,104 +496,6 @@ mod tests {
         // Without fallbacks, subsequent calls will continue to return errors
         // (not None, since only Error::Closed terminates the stream)
         assert_backend_gone_or_timeout(&mut stream).await;
-
-        Ok(())
-    }
-
-    // ----------------------------------------------------------------------------
-    // Lag Handling Tests
-    // ----------------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn test_lag_count_increments_and_resets() -> anyhow::Result<()> {
-        // This test verifies the lag counter logic by directly manipulating the internal state
-        // In a real scenario, RecvError::Lagged would be triggered by the broadcast channel
-        // when the receiver can't keep up with the sender
-
-        let (_anvil, provider) = spawn_ws_anvil().await?;
-
-        let robust = RobustProviderBuilder::fragile(provider.clone())
-            .subscription_timeout(SHORT_TIMEOUT)
-            .build()
-            .await?;
-
-        let mut subscription = robust.subscribe_blocks().await?;
-
-        // Verify initial state
-        assert_eq!(subscription.consecutive_lags, 0);
-
-        // Simulate lag by directly calling process_recv_error
-        // In production, this would be called by recv() when the channel lags
-        subscription.process_recv_error(RecvError::Lagged(5)).await?;
-        assert_eq!(subscription.consecutive_lags, 1, "Lag count should increment to 1");
-
-        // Another lag
-        subscription.process_recv_error(RecvError::Lagged(3)).await?;
-        assert_eq!(subscription.consecutive_lags, 2, "Lag count should increment to 2");
-
-        // Now receive a successful block - this should reset the counter
-        provider.anvil_mine(Some(1), None).await?;
-        let block = subscription.recv().await?;
-        assert_eq!(block.number, 1);
-        assert_eq!(
-            subscription.consecutive_lags, 0,
-            "Lag count should reset to 0 after successful recv"
-        );
-
-        // Verify it stays at 0 for subsequent successful receives
-        provider.anvil_mine(Some(1), None).await?;
-        let block = subscription.recv().await?;
-        assert_eq!(block.number, 2);
-        assert_eq!(subscription.consecutive_lags, 0, "Lag count should remain 0");
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_lag_count_triggers_failover_at_max() -> anyhow::Result<()> {
-        // Test that MAX_LAG_COUNT consecutive lags trigger a provider switch
-        let (_anvil_1, primary) = spawn_ws_anvil().await?;
-        let (_anvil_2, fallback) = spawn_ws_anvil().await?;
-
-        let robust = RobustProviderBuilder::fragile(primary.clone())
-            .fallback(fallback.clone())
-            .subscription_timeout(SHORT_TIMEOUT)
-            .build()
-            .await?;
-
-        let mut subscription = robust.subscribe_blocks().await?;
-
-        // Verify initial state
-        assert_eq!(subscription.consecutive_lags, 0);
-        assert_eq!(subscription.current_fallback_index, None, "Should start on primary");
-
-        // Simulate MAX_LAG_COUNT - 1 lags (should NOT trigger failover)
-        for i in 1..MAX_LAG_COUNT {
-            subscription.process_recv_error(RecvError::Lagged(10)).await?;
-            assert_eq!(subscription.consecutive_lags, i, "Lag count should be {i}");
-            assert_eq!(subscription.current_fallback_index, None, "Should still be on primary");
-        }
-
-        // One more lag should trigger failover
-        subscription.process_recv_error(RecvError::Lagged(10)).await?;
-        assert_eq!(
-            subscription.consecutive_lags, MAX_LAG_COUNT,
-            "Lag count should be MAX_LAG_COUNT"
-        );
-        assert_eq!(
-            subscription.current_fallback_index,
-            Some(0),
-            "Should have failed over to fallback[0]"
-        );
-
-        // Verify fallback works
-        fallback.anvil_mine(Some(1), None).await?;
-        let block = subscription.recv().await?;
-        assert_eq!(block.number, 1);
-        assert_eq!(
-            subscription.consecutive_lags, 0,
-            "Lag count should reset after successful recv on fallback"
-        );
 
         Ok(())
     }

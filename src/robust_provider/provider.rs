@@ -14,6 +14,8 @@ use tracing::{error, info};
 
 use crate::robust_provider::{Error, RobustSubscription};
 
+pub const MAX_CHANNEL_SIZE: usize = 128;
+
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
 /// This wrapper around Alloy providers automatically handles retries,
@@ -207,7 +209,9 @@ impl<N: Network> RobustProvider<N> {
         info!("eth_subscribe called");
         let subscription = self
             .try_operation_with_failover(
-                move |provider| async move { provider.subscribe_blocks().await },
+                move |provider| async move {
+                    provider.subscribe_blocks().channel_size(MAX_CHANNEL_SIZE).await
+                },
                 true,
             )
             .await;
