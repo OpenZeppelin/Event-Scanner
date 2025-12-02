@@ -276,8 +276,8 @@ mod tests {
 
     use crate::robust_provider::RobustProviderBuilder;
     use alloy::{
+        network::Ethereum,
         providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
-        transports::{RpcError, TransportErrorKind},
     };
     use alloy_node_bindings::{Anvil, AnvilInstance};
     use tokio::time::sleep;
@@ -291,39 +291,6 @@ mod tests {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
         Ok((anvil, provider.root().to_owned()))
-    }
-
-    async fn assert_backend_gone_or_timeout(
-        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
-    ) {
-        let err = stream.next().await.unwrap().unwrap_err();
-        match_backend_gone_or_timeout(err);
-    }
-
-    async fn assert_backend_gone_or_timeout_after_delay(
-        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
-        extra_delay: Duration,
-    ) {
-        sleep(SHORT_TIMEOUT + extra_delay + BUFFER_TIME).await;
-        assert_backend_gone_or_timeout(stream).await;
-    }
-
-    fn match_backend_gone_or_timeout(err: Error) {
-        match err {
-            Error::Timeout => {}
-            Error::RpcError(e) => {
-                assert!(
-                    matches!(e.as_ref(), RpcError::Transport(TransportErrorKind::BackendGone)),
-                    "Expected BackendGone error, got: {e:?}",
-                );
-            }
-            Error::Closed => {
-                panic!("Unexpected Closed error");
-            }
-            Error::Lagged(_) => {
-                panic!("Unexpected SubscriptionLagged error");
-            }
-        }
     }
 
     macro_rules! assert_next_block {
@@ -345,7 +312,7 @@ mod tests {
 
     /// Waits for current provider to timeout, then mines on `next_provider` to trigger failover.
     async fn trigger_failover_with_delay(
-        stream: &mut RobustSubscriptionStream<alloy::network::Ethereum>,
+        stream: &mut RobustSubscriptionStream<Ethereum>,
         next_provider: RootProvider,
         expected_block: u64,
         extra_delay: Duration,
@@ -511,11 +478,11 @@ mod tests {
         assert_next_block!(stream, 1);
 
         // Trigger timeout error - the stream will continue to stream errors
-        assert_backend_gone_or_timeout(&mut stream).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         // Without fallbacks, subsequent calls will continue to return errors
         // (not None, since only Error::Closed terminates the stream)
-        assert_backend_gone_or_timeout(&mut stream).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -570,7 +537,7 @@ mod tests {
         assert_next_block!(stream, 1);
 
         // No fallback available - should error after timeout
-        assert_backend_gone_or_timeout(&mut stream).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -602,7 +569,7 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // Verify: HTTP fallback can't provide subscription, so we get an error
-        assert_backend_gone_or_timeout(&mut stream).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -637,7 +604,7 @@ mod tests {
         trigger_failover(&mut stream, fallback.clone(), 1).await?;
 
         // FB -> try PP (fails) -> no more fallbacks -> error
-        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -676,7 +643,7 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // FP2 times out -> tries PP (fails) -> no more fallbacks -> error
-        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -717,7 +684,7 @@ mod tests {
         trigger_failover_with_delay(&mut stream, fb_3.clone(), 1, SHORT_TIMEOUT).await?;
 
         // FB3 -> try PP (fails) -> no more fallbacks -> error
-        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -759,7 +726,7 @@ mod tests {
         trigger_failover_with_delay(&mut stream, fb_4.clone(), 1, SHORT_TIMEOUT).await?;
         trigger_failover_with_delay(&mut stream, fb_5.clone(), 1, SHORT_TIMEOUT).await?;
 
-        assert_backend_gone_or_timeout(&mut stream).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -1025,7 +992,7 @@ mod tests {
         drop(anvil);
 
         // Should get BackendGone or Timeout error
-        assert_backend_gone_or_timeout(&mut stream).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
@@ -1050,7 +1017,7 @@ mod tests {
         drop(anvil);
 
         // First failure
-        assert_backend_gone_or_timeout_after_delay(&mut stream, SHORT_TIMEOUT + BUFFER_TIME).await;
+        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
     }
