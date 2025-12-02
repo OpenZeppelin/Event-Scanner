@@ -36,7 +36,7 @@ impl From<CommonError> for Error {
     fn from(err: CommonError) -> Self {
         match err {
             CommonError::Timeout => Error::Timeout,
-            CommonError::RpcError(e) => Error::RpcError(e),
+            CommonError::RpcError(e) => Error::RpcError(Arc::new(e)),
         }
     }
 }

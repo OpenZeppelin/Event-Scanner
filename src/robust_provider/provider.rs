@@ -27,17 +27,17 @@ pub enum Error {
 }
 
 /// Errors that can occur when using [`RobustProvider`].
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub(crate) enum CommonError {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
-    RpcError(Arc<RpcError<TransportErrorKind>>),
+    RpcError(RpcError<TransportErrorKind>),
 }
 
 impl From<RpcError<TransportErrorKind>> for CommonError {
     fn from(err: RpcError<TransportErrorKind>) -> Self {
-        CommonError::RpcError(Arc::new(err))
+        CommonError::RpcError(err)
     }
 }
 
@@ -45,7 +45,7 @@ impl From<CommonError> for Error {
     fn from(err: CommonError) -> Self {
         match err {
             CommonError::Timeout => Error::Timeout,
-            CommonError::RpcError(e) => Error::RpcError(e),
+            CommonError::RpcError(e) => Error::RpcError(Arc::new(e)),
         }
     }
 }
