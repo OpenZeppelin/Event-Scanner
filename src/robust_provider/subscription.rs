@@ -9,10 +9,10 @@ use alloy::{
     providers::{Provider, RootProvider},
     pubsub::Subscription,
 };
-use tokio::{sync::broadcast::error::RecvError, time::timeout};
+use tokio::time::timeout;
 use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::robust_provider::{Error, RobustProvider};
 
@@ -63,8 +63,8 @@ impl<N: Network> RobustSubscription<N> {
     ///
     /// # Errors
     ///
-    /// Returns an error if all providers have been exhausted and failed.
-    /// It will also propagate any underlying subscription errors
+    /// * Propagates any underlying subscription errors.
+    /// * If all providers have been exhausted and failed, returns the last attempt's error.
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         let subscription_timeout = self.robust_provider.subscription_timeout;
         loop {
@@ -78,7 +78,7 @@ impl<N: Network> RobustSubscription<N> {
                         return Ok(header);
                     }
                     Err(recv_error) => {
-                        Self::process_recv_error(&recv_error)?;
+                        return Err(recv_error.into());
                     }
                 },
                 Err(elapsed_err) => {
@@ -90,17 +90,6 @@ impl<N: Network> RobustSubscription<N> {
                     self.switch_to_fallback(elapsed_err.into()).await?;
                 }
             }
-        }
-    }
-
-    /// Process subscription receive errors
-    fn process_recv_error(recv_error: &RecvError) -> Result<(), Error> {
-        match recv_error {
-            RecvError::Closed => {
-                error!("Provider closed the subscription channel");
-                Err(Error::Closed)
-            }
-            RecvError::Lagged(count) => Err(Error::Lagged(*count)),
         }
     }
 

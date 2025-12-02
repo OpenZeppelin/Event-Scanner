@@ -5,7 +5,8 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use thiserror::Error;
-use tokio::time::error as TokioError;
+use tokio::{sync::broadcast::error::RecvError, time::error as TokioError};
+use tracing::error;
 
 #[derive(Error, Debug, Clone)]
 pub enum Error {
@@ -30,5 +31,20 @@ impl From<RpcError<TransportErrorKind>> for Error {
 impl From<TokioError::Elapsed> for Error {
     fn from(_: TokioError::Elapsed) -> Self {
         Error::Timeout
+    }
+}
+
+impl From<RecvError> for Error {
+    fn from(err: RecvError) -> Self {
+        match err {
+            RecvError::Closed => {
+                error!("Provider closed the subscription channel");
+                Error::Closed
+            }
+            RecvError::Lagged(count) => {
+                error!(skipped = count, "Receiver lagged");
+                Error::Lagged(count)
+            }
+        }
     }
 }
