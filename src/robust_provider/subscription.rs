@@ -150,12 +150,11 @@ impl<N: Network> RobustSubscription<N> {
         // Start searching from the next provider after the current one
         let start_index = self.current_fallback_index.map_or(0, |idx| idx + 1);
 
-        let subscription = self
+        let (sub, fallback_idx) = self
             .robust_provider
             .try_fallback_providers_from(&operation, true, last_error, start_index)
-            .await;
+            .await?;
 
-        let (sub, fallback_idx) = subscription?;
         self.subscription = sub;
         self.current_fallback_index = Some(fallback_idx);
         Ok(())
@@ -222,10 +221,10 @@ impl<N: 'static + Clone + Send + Network> From<RobustSubscription<N>>
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use std::time::Duration;
 
+    use crate::robust_provider::{Error, RobustProviderBuilder};
     use alloy::{
         providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
         transports::{RpcError, TransportErrorKind},
@@ -233,8 +232,6 @@ mod tests {
     use alloy_node_bindings::{Anvil, AnvilInstance};
     use tokio::time::sleep;
     use tokio_stream::StreamExt;
-
-    use crate::robust_provider::{Error, RobustProviderBuilder};
 
     const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
     const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
