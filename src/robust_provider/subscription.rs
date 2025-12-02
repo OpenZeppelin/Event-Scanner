@@ -17,7 +17,7 @@ use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
 use tracing::{error, info, warn};
 
-use crate::robust_provider::{RobustProvider, provider::Error as ProviderError};
+use crate::robust_provider::{RobustProvider, provider::CommonError};
 
 /// Errors that can occur when using [`RobustSubscription`].
 #[derive(Error, Debug, Clone)]
@@ -32,15 +32,11 @@ pub enum Error {
     Lagged(u64),
 }
 
-impl From<ProviderError> for Error {
-    fn from(err: ProviderError) -> Self {
+impl From<CommonError> for Error {
+    fn from(err: CommonError) -> Self {
         match err {
-            ProviderError::Timeout => Error::Timeout,
-            ProviderError::RpcError(e) => Error::RpcError(e),
-            ProviderError::BlockNotFound(_) => {
-                // This shouldn't happen in subscription context, but we need to handle it
-                Error::RpcError(Arc::new(RpcError::NullResp))
-            }
+            CommonError::Timeout => Error::Timeout,
+            CommonError::RpcError(e) => Error::RpcError(e),
         }
     }
 }
@@ -184,7 +180,7 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
-    async fn switch_to_fallback(&mut self, last_error: Error) -> Result<(), Error> {
+    async fn switch_to_fallback(&mut self, last_error: CommonError) -> Result<(), Error> {
         // If we're on a fallback, try primary first before moving to next fallback
         if self.is_on_fallback() && self.try_reconnect_to_primary(true).await {
             return Ok(());
@@ -202,7 +198,7 @@ impl<N: Network> RobustSubscription<N> {
 
         let (sub, fallback_idx) = self
             .robust_provider
-            .try_fallback_providers_from(&operation, true, last_error.into(), start_index)
+            .try_fallback_providers_from(&operation, true, last_error, start_index)
             .await?;
 
         self.subscription = sub;

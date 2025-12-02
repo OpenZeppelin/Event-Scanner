@@ -59,7 +59,7 @@
 //! }
 //! ```
 
-use crate::robust_provider::subscription::RobustSubscription;
+use crate::robust_provider::subscription::{self, RobustSubscription};
 use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -600,9 +600,25 @@ impl<N: Network> Service<N> {
                 Ok(block) => block,
                 Err(e) => {
                     error!(error = %e, "Error receiving block from stream");
-                    // Error from subscription, exit the stream
-                    _ = sender.try_stream(e).await;
-                    return;
+                    match e {
+                        subscription::Error::Lagged(_) => {
+                            // scanner already accounts for skipped block numbers
+                            // next block will be the actual incoming block
+                            continue;
+                        }
+                        subscription::Error::Timeout => {
+                            _ = sender.try_stream(ScannerError::Timeout).await;
+                            return;
+                        }
+                        subscription::Error::RpcError(rpc_err) => {
+                            _ = sender.try_stream(ScannerError::RpcError(rpc_err)).await;
+                            return;
+                        }
+                        subscription::Error::Closed => {
+                            _ = sender.try_stream(ScannerError::SubscriptionClosed).await;
+                            return;
+                        }
+                    }
                 }
             };
 
