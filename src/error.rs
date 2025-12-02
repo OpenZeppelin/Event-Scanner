@@ -6,7 +6,12 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::{robust_provider::Error as RobustProviderError, types::ScannerResult};
+use crate::{
+    robust_provider::{
+        provider::Error as RobustProviderError, subscription::Error as RobustSubscriptionError,
+    },
+    types::ScannerResult,
+};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -44,8 +49,17 @@ impl From<RobustProviderError> for ScannerError {
             RobustProviderError::Timeout => ScannerError::Timeout,
             RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
             RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
-            RobustProviderError::Closed => ScannerError::SubscriptionClosed,
-            RobustProviderError::Lagged(count) => ScannerError::SubscriptionLagged(count),
+        }
+    }
+}
+
+impl From<RobustSubscriptionError> for ScannerError {
+    fn from(error: RobustSubscriptionError) -> ScannerError {
+        match error {
+            RobustSubscriptionError::Timeout => ScannerError::Timeout,
+            RobustSubscriptionError::RpcError(err) => ScannerError::RpcError(err),
+            RobustSubscriptionError::Closed => ScannerError::SubscriptionClosed,
+            RobustSubscriptionError::Lagged(count) => ScannerError::SubscriptionLagged(count),
         }
     }
 }

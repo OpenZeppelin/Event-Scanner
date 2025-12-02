@@ -69,7 +69,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
     ScannerError, ScannerMessage,
-    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
+    robust_provider::{IntoRobustProvider, RobustProvider, provider::Error as RobustProviderError},
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 

@@ -60,13 +60,11 @@
 //! You can also convert existing providers using [`IntoRobustProvider`]
 
 pub mod builder;
-pub mod error;
 pub mod provider;
 pub mod provider_conversion;
 pub mod subscription;
 
 pub use builder::*;
-pub use error::Error;
 pub use provider::RobustProvider;
 pub use provider_conversion::{IntoRobustProvider, IntoRootProvider};
 pub use subscription::RobustSubscription;

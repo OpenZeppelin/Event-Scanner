@@ -1,5 +1,6 @@
 use std::{
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
@@ -8,13 +9,62 @@ use alloy::{
     network::Network,
     providers::{Provider, RootProvider},
     pubsub::Subscription,
+    transports::{RpcError, TransportErrorKind},
 };
-use tokio::time::timeout;
+use thiserror::Error;
+use tokio::{sync::broadcast::error::RecvError, time::timeout};
 use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
-use crate::robust_provider::{Error, RobustProvider};
+use crate::robust_provider::{RobustProvider, provider::Error as ProviderError};
+
+/// Errors that can occur when using [`RobustSubscription`].
+#[derive(Error, Debug, Clone)]
+pub enum Error {
+    #[error("Operation timed out")]
+    Timeout,
+    #[error("RPC call failed after exhausting all retry attempts: {0}")]
+    RpcError(Arc<RpcError<TransportErrorKind>>),
+    #[error("Subscription closed")]
+    Closed,
+    #[error("Subscription lagged behind by: {0}")]
+    Lagged(u64),
+}
+
+impl From<ProviderError> for Error {
+    fn from(err: ProviderError) -> Self {
+        match err {
+            ProviderError::Timeout => Error::Timeout,
+            ProviderError::RpcError(e) => Error::RpcError(e),
+            ProviderError::BlockNotFound(_) => {
+                // This shouldn't happen in subscription context, but we need to handle it
+                Error::RpcError(Arc::new(RpcError::NullResp))
+            }
+        }
+    }
+}
+
+impl From<RecvError> for Error {
+    fn from(err: RecvError) -> Self {
+        match err {
+            RecvError::Closed => {
+                error!("Provider closed the subscription channel");
+                Error::Closed
+            }
+            RecvError::Lagged(count) => {
+                error!(skipped = count, "Receiver lagged");
+                Error::Lagged(count)
+            }
+        }
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
 
 /// Default time interval between primary provider reconnection attempts
 pub const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(30);
@@ -152,7 +202,7 @@ impl<N: Network> RobustSubscription<N> {
 
         let (sub, fallback_idx) = self
             .robust_provider
-            .try_fallback_providers_from(&operation, true, last_error, start_index)
+            .try_fallback_providers_from(&operation, true, last_error.into(), start_index)
             .await?;
 
         self.subscription = sub;
@@ -224,7 +274,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::robust_provider::{Error, RobustProviderBuilder};
+    use crate::robust_provider::RobustProviderBuilder;
     use alloy::{
         providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
         transports::{RpcError, TransportErrorKind},
@@ -267,9 +317,6 @@ mod tests {
                     "Expected BackendGone error, got: {e:?}",
                 );
             }
-            Error::BlockNotFound(_) => {
-                panic!("Unexpected BlockNotFound error");
-            }
             Error::Closed => {
                 panic!("Unexpected Closed error");
             }
@@ -279,26 +326,20 @@ mod tests {
         }
     }
 
-    #[macro_export]
     macro_rules! assert_next_block {
         ($stream: expr, $expected: expr) => {
             assert_next_block!($stream, $expected, timeout = 5)
         };
         ($stream: expr, $expected: expr, timeout = $secs: expr) => {
-            let message = tokio::time::timeout(
+            let block = tokio::time::timeout(
                 std::time::Duration::from_secs($secs),
                 tokio_stream::StreamExt::next(&mut $stream),
             )
             .await
-            .expect("timed out");
-            if let Some(block) = message {
-                match block {
-                    Ok(block) => assert_eq!(block.number, $expected),
-                    Err(e) => panic!("Got err {e:?}"),
-                }
-            } else {
-                panic!("Expected block {:?}, got: {message:?}", $expected)
-            }
+            .expect("timed out")
+            .unwrap();
+            let block = block.unwrap();
+            assert_eq!(block.number, $expected);
         };
     }
 

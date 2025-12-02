@@ -8,7 +8,7 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 
-use crate::robust_provider::{Error, RobustProvider, RobustProviderBuilder};
+use crate::robust_provider::{RobustProvider, RobustProviderBuilder, provider::Error};
 
 pub trait IntoRootProvider<N: Network = Ethereum> {
     fn into_root_provider(self) -> impl Future<Output = Result<RootProvider<N>, Error>> + Send;

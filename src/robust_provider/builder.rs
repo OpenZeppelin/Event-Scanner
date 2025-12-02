@@ -3,7 +3,7 @@ use std::{pin::Pin, time::Duration};
 use alloy::{network::Network, providers::RootProvider};
 
 use crate::robust_provider::{
-    Error, IntoRootProvider, RobustProvider, subscription::DEFAULT_RECONNECT_INTERVAL,
+    IntoRootProvider, RobustProvider, provider::Error, subscription::DEFAULT_RECONNECT_INTERVAL,
 };
 
 type BoxedProviderFuture<N> = Pin<Box<dyn Future<Output = Result<RootProvider<N>, Error>> + Send>>;

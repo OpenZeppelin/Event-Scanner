@@ -1,4 +1,4 @@
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
@@ -9,10 +9,46 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
-use tokio::time::timeout;
+use thiserror::Error;
+use tokio::time::{error as TokioError, timeout};
 use tracing::{error, info};
 
-use crate::robust_provider::{Error, RobustSubscription};
+use crate::robust_provider::RobustSubscription;
+
+/// Errors that can occur when using [`RobustProvider`].
+#[derive(Error, Debug, Clone)]
+pub enum Error {
+    #[error("Operation timed out")]
+    Timeout,
+    #[error("RPC call failed after exhausting all retry attempts: {0}")]
+    RpcError(Arc<RpcError<TransportErrorKind>>),
+    #[error("Block not found, Block Id: {0}")]
+    BlockNotFound(BlockId),
+}
+
+impl From<RpcError<TransportErrorKind>> for Error {
+    fn from(err: RpcError<TransportErrorKind>) -> Self {
+        Error::RpcError(Arc::new(err))
+    }
+}
+
+impl From<TokioError::Elapsed> for Error {
+    fn from(_: TokioError::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
+
+impl From<super::subscription::Error> for Error {
+    fn from(err: super::subscription::Error) -> Self {
+        match err {
+            super::subscription::Error::Timeout => Error::Timeout,
+            super::subscription::Error::RpcError(e) => Error::RpcError(e),
+            super::subscription::Error::Closed | super::subscription::Error::Lagged(_) => {
+                Error::Timeout
+            }
+        }
+    }
+}
 
 pub const MAX_CHANNEL_SIZE: usize = 128;
 
