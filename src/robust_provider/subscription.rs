@@ -274,7 +274,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::robust_provider::RobustProviderBuilder;
+    use crate::robust_provider::{RobustProviderBuilder, provider::MAX_CHANNEL_SIZE};
     use alloy::{
         network::Ethereum,
         providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi},
@@ -502,21 +502,37 @@ mod tests {
             .build()
             .await?;
 
-        let subscription = robust.subscribe_blocks().await?;
-        let mut stream = subscription.into_stream();
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        // Initial state: on primary
+        assert!(subscription.current_fallback_index.is_none());
+        assert!(subscription.last_reconnect_attempt.is_none());
 
         // Test: Primary works initially
         primary.anvil_mine(Some(1), None).await?;
-        assert_next_block!(stream, 1);
+        assert_eq!(subscription.recv().await?.number, 1);
 
         primary.anvil_mine(Some(1), None).await?;
-        assert_next_block!(stream, 2);
+        assert_eq!(subscription.recv().await?.number, 2);
 
         // After timeout, should failover to fallback provider
-        trigger_failover(&mut stream, fallback.clone(), 1).await?;
+        let fb = fallback.clone();
+        tokio::spawn(async move {
+            sleep(SHORT_TIMEOUT + BUFFER_TIME).await;
+            fb.anvil_mine(Some(1), None).await.unwrap();
+        });
+        assert_eq!(subscription.recv().await?.number, 1);
 
+        // After failover: on fallback[0]
+        assert_eq!(subscription.current_fallback_index, Some(0));
+        assert!(subscription.last_reconnect_attempt.is_some());
+
+        // PP is not used after failover
+        primary.anvil_mine(Some(1), None).await?;
         fallback.anvil_mine(Some(1), None).await?;
-        assert_next_block!(stream, 2);
+
+        // From fallback, not primary's block 3
+        assert_eq!(subscription.recv().await?.number, 2);
 
         Ok(())
     }
@@ -643,47 +659,6 @@ mod tests {
         assert_next_block!(stream, 2);
 
         // FP2 times out -> tries PP (fails) -> no more fallbacks -> error
-        assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_fallback_starting_from_different_indices() -> anyhow::Result<()> {
-        let (anvil_pp, primary) = spawn_ws_anvil().await?;
-        let (_anvil_1, fb_1) = spawn_ws_anvil().await?;
-        let (_anvil_2, fb_2) = spawn_ws_anvil().await?;
-        let (_anvil_3, fb_3) = spawn_ws_anvil().await?;
-
-        let robust = RobustProviderBuilder::fragile(primary.clone())
-            .fallback(fb_1.clone())
-            .fallback(fb_2.clone())
-            .fallback(fb_3.clone())
-            .subscription_timeout(SHORT_TIMEOUT)
-            .call_timeout(SHORT_TIMEOUT)
-            .build()
-            .await?;
-
-        let subscription = robust.subscribe_blocks().await?;
-        let mut stream = subscription.into_stream();
-
-        // Start on primary
-        primary.anvil_mine(Some(1), None).await?;
-        assert_next_block!(stream, 1);
-
-        // Kill primary
-        drop(anvil_pp);
-
-        // PP -> FB1
-        trigger_failover(&mut stream, fb_1.clone(), 1).await?;
-
-        // FB1 -> try PP (fails) -> FB2
-        trigger_failover_with_delay(&mut stream, fb_2.clone(), 1, SHORT_TIMEOUT).await?;
-
-        // FB2 -> try PP (fails) -> FB3
-        trigger_failover_with_delay(&mut stream, fb_3.clone(), 1, SHORT_TIMEOUT).await?;
-
-        // FB3 -> try PP (fails) -> no more fallbacks -> error
         assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
 
         Ok(())
@@ -1018,6 +993,27 @@ mod tests {
 
         // First failure
         assert!(matches!(stream.next().await.unwrap(), Err(Error::Timeout)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subscription_lagged_error() -> anyhow::Result<()> {
+        let (_anvil, provider) = spawn_ws_anvil().await?;
+
+        let robust = RobustProviderBuilder::fragile(provider.clone())
+            .subscription_timeout(Duration::from_secs(5))
+            .build()
+            .await?;
+
+        let mut subscription = robust.subscribe_blocks().await?;
+
+        // Mine more blocks than channel can hold without consuming
+        provider.anvil_mine(Some(MAX_CHANNEL_SIZE as u64 + 1), None).await?;
+
+        // First recv should return Lagged error (skipped some blocks)
+        let result = subscription.recv().await;
+        assert!(matches!(result, Err(Error::Lagged(_))));
 
         Ok(())
     }
