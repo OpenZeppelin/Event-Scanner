@@ -26,33 +26,33 @@ pub enum Error {
     BlockNotFound(BlockId),
 }
 
-/// Errors that can occur when using [`RobustProvider`].
+/// Low-level error related to RPC calls.
 #[derive(Error, Debug)]
-pub(crate) enum CommonError {
+pub(crate) enum CoreError {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
     RpcError(RpcError<TransportErrorKind>),
 }
 
-impl From<RpcError<TransportErrorKind>> for CommonError {
+impl From<RpcError<TransportErrorKind>> for CoreError {
     fn from(err: RpcError<TransportErrorKind>) -> Self {
-        CommonError::RpcError(err)
+        CoreError::RpcError(err)
     }
 }
 
-impl From<CommonError> for Error {
-    fn from(err: CommonError) -> Self {
+impl From<CoreError> for Error {
+    fn from(err: CoreError) -> Self {
         match err {
-            CommonError::Timeout => Error::Timeout,
-            CommonError::RpcError(e) => Error::RpcError(Arc::new(e)),
+            CoreError::Timeout => Error::Timeout,
+            CoreError::RpcError(e) => Error::RpcError(Arc::new(e)),
         }
     }
 }
 
-impl From<TokioError::Elapsed> for CommonError {
+impl From<TokioError::Elapsed> for CoreError {
     fn from(_: TokioError::Elapsed) -> Self {
-        CommonError::Timeout
+        CoreError::Timeout
     }
 }
 
@@ -317,7 +317,7 @@ impl<N: Network> RobustProvider<N> {
         &self,
         operation: F,
         require_pubsub: bool,
-    ) -> Result<T, CommonError>
+    ) -> Result<T, CoreError>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -338,8 +338,8 @@ impl<N: Network> RobustProvider<N> {
         &self,
         operation: F,
         require_pubsub: bool,
-        last_error: CommonError,
-    ) -> Result<T, CommonError>
+        last_error: CoreError,
+    ) -> Result<T, CoreError>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -353,9 +353,9 @@ impl<N: Network> RobustProvider<N> {
         &self,
         operation: F,
         require_pubsub: bool,
-        mut last_error: CommonError,
+        mut last_error: CoreError,
         start_index: usize,
-    ) -> Result<(T, usize), CommonError>
+    ) -> Result<(T, usize), CoreError>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -394,7 +394,7 @@ impl<N: Network> RobustProvider<N> {
         &self,
         provider: &RootProvider<N>,
         operation: F,
-    ) -> Result<T, CommonError>
+    ) -> Result<T, CoreError>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -413,8 +413,8 @@ impl<N: Network> RobustProvider<N> {
                 .sleep(tokio::time::sleep),
         )
         .await
-        .map_err(CommonError::from)?
-        .map_err(CommonError::from)
+        .map_err(CoreError::from)?
+        .map_err(CoreError::from)
     }
 
     /// Check if a provider supports pubsub
@@ -516,7 +516,7 @@ mod tests {
 
         let call_count = AtomicUsize::new(0);
 
-        let result: Result<(), CommonError> = provider
+        let result: Result<(), CoreError> = provider
             .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
@@ -526,7 +526,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(result, Err(CommonError::RpcError(_))));
+        assert!(matches!(result, Err(CoreError::RpcError(_))));
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
@@ -545,7 +545,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(result, Err(CommonError::Timeout)));
+        assert!(matches!(result, Err(CoreError::Timeout)));
     }
 
     #[tokio::test]
