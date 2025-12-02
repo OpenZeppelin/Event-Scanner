@@ -6,7 +6,12 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::{robust_provider::provider::Error as RobustProviderError, types::ScannerResult};
+use crate::{
+    robust_provider::{
+        provider::Error as RobustProviderError, subscription::Error as RobustSubscriptionError,
+    },
+    types::ScannerResult,
+};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -33,6 +38,9 @@ pub enum ScannerError {
 
     #[error("Subscription closed")]
     SubscriptionClosed,
+
+    #[error("Subscription Lagged by {0}")]
+    SubscriptionLagged(u64),
 }
 
 impl From<RobustProviderError> for ScannerError {
@@ -45,12 +53,22 @@ impl From<RobustProviderError> for ScannerError {
     }
 }
 
+impl From<RobustSubscriptionError> for ScannerError {
+    fn from(error: RobustSubscriptionError) -> ScannerError {
+        match error {
+            RobustSubscriptionError::Timeout => ScannerError::Timeout,
+            RobustSubscriptionError::RpcError(err) => ScannerError::RpcError(err),
+            RobustSubscriptionError::Closed => ScannerError::SubscriptionClosed,
+            RobustSubscriptionError::Lagged(count) => ScannerError::SubscriptionLagged(count),
+        }
+    }
+}
+
 impl From<RpcError<TransportErrorKind>> for ScannerError {
     fn from(error: RpcError<TransportErrorKind>) -> Self {
         ScannerError::RpcError(Arc::new(error))
     }
 }
-
 impl<T: Clone> PartialEq<ScannerError> for ScannerResult<T> {
     fn eq(&self, other: &ScannerError) -> bool {
         match self {

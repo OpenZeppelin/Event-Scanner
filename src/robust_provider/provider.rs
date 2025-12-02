@@ -26,36 +26,6 @@ pub enum Error {
     BlockNotFound(BlockId),
 }
 
-/// Errors that can occur when using [`RobustProvider`].
-#[derive(Error, Debug, Clone)]
-pub(crate) enum CommonError {
-    #[error("Operation timed out")]
-    Timeout,
-    #[error("RPC call failed after exhausting all retry attempts: {0}")]
-    RpcError(Arc<RpcError<TransportErrorKind>>),
-}
-
-impl From<RpcError<TransportErrorKind>> for CommonError {
-    fn from(err: RpcError<TransportErrorKind>) -> Self {
-        CommonError::RpcError(Arc::new(err))
-    }
-}
-
-impl From<CommonError> for Error {
-    fn from(err: CommonError) -> Self {
-        match err {
-            CommonError::Timeout => Error::Timeout,
-            CommonError::RpcError(e) => Error::RpcError(e),
-        }
-    }
-}
-
-impl From<TokioError::Elapsed> for CommonError {
-    fn from(_: TokioError::Elapsed) -> Self {
-        CommonError::Timeout
-    }
-}
-
 impl From<RpcError<TransportErrorKind>> for Error {
     fn from(err: RpcError<TransportErrorKind>) -> Self {
         Error::RpcError(Arc::new(err))
@@ -164,8 +134,7 @@ impl<N: Network> RobustProvider<N> {
                 move |provider| async move { provider.get_block_number().await },
                 false,
             )
-            .await
-            .map_err(Error::from);
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getBlockNumber failed");
         }
@@ -253,8 +222,7 @@ impl<N: Network> RobustProvider<N> {
                 move |provider| async move { provider.get_logs(filter).await },
                 false,
             )
-            .await
-            .map_err(Error::from);
+            .await;
         if let Err(e) = &result {
             error!(error = %e, "eth_getLogs failed");
         }
@@ -288,7 +256,7 @@ impl<N: Network> RobustProvider<N> {
             Ok(sub) => Ok(RobustSubscription::new(sub, self.clone())),
             Err(e) => {
                 error!(error = %e, "eth_subscribe failed");
-                Err(e.into())
+                Err(e)
             }
         }
     }
@@ -317,7 +285,7 @@ impl<N: Network> RobustProvider<N> {
         &self,
         operation: F,
         require_pubsub: bool,
-    ) -> Result<T, CommonError>
+    ) -> Result<T, Error>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -338,8 +306,8 @@ impl<N: Network> RobustProvider<N> {
         &self,
         operation: F,
         require_pubsub: bool,
-        last_error: CommonError,
-    ) -> Result<T, CommonError>
+        last_error: Error,
+    ) -> Result<T, Error>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -353,9 +321,9 @@ impl<N: Network> RobustProvider<N> {
         &self,
         operation: F,
         require_pubsub: bool,
-        mut last_error: CommonError,
+        mut last_error: Error,
         start_index: usize,
-    ) -> Result<(T, usize), CommonError>
+    ) -> Result<(T, usize), Error>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -394,7 +362,7 @@ impl<N: Network> RobustProvider<N> {
         &self,
         provider: &RootProvider<N>,
         operation: F,
-    ) -> Result<T, CommonError>
+    ) -> Result<T, Error>
     where
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
@@ -413,8 +381,8 @@ impl<N: Network> RobustProvider<N> {
                 .sleep(tokio::time::sleep),
         )
         .await
-        .map_err(CommonError::from)?
-        .map_err(CommonError::from)
+        .map_err(Error::from)?
+        .map_err(Error::from)
     }
 
     /// Check if a provider supports pubsub
@@ -516,7 +484,7 @@ mod tests {
 
         let call_count = AtomicUsize::new(0);
 
-        let result: Result<(), CommonError> = provider
+        let result: Result<(), Error> = provider
             .try_operation_with_failover(
                 |_| async {
                     call_count.fetch_add(1, Ordering::SeqCst);
@@ -526,7 +494,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(result, Err(CommonError::RpcError(_))));
+        assert!(matches!(result, Err(Error::RpcError(_))));
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
@@ -545,7 +513,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(result, Err(CommonError::Timeout)));
+        assert!(matches!(result, Err(Error::Timeout)));
     }
 
     #[tokio::test]
