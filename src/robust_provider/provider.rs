@@ -26,7 +26,7 @@ pub enum Error {
     BlockNotFound(BlockId),
 }
 
-/// Low-level error related to RPC calls.
+/// Low-level error related to RPC calls and failover logic.
 #[derive(Error, Debug)]
 pub(crate) enum CoreError {
     #[error("Operation timed out")]
