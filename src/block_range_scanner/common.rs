@@ -80,10 +80,11 @@ async fn get_first_block<
         match first_block {
             Ok(block) => return Some(block),
             Err(e) => {
-                error!(error = %e, "Error receiving block from stream");
                 match e {
                     subscription::Error::Lagged(_) => {
-                        continue;
+                        // scanner already accounts for skipped block numbers
+                        // next block will be the actual incoming block
+                        info!("Skipping Error::Lagged, next block should be the first live block");
                     }
                     subscription::Error::Timeout => {
                         _ = sender.try_stream(ScannerError::Timeout).await;
@@ -99,7 +100,7 @@ async fn get_first_block<
                     }
                 }
             }
-        };
+        }
     }
 
     None
