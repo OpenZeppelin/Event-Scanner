@@ -91,13 +91,15 @@ async fn run_scanner(
     // Process messages from the stream
     while let Some(message) = stream.next().await {
         match message {
-            Message::Data(logs) => {
-                println!("Received {} logs: {logs:?}", logs.len());
+            Ok(message) => {
+                Message::Data(logs) => {
+                    println!("Received {} logs: {logs:?}", logs.len());
+                }
+                Message::Notification(notification) => {
+                    println!("Notification received: {notification:?}");
+                }
             }
-            Message::Notification(notification) => {
-                println!("Notification received: {notification:?}");
-            }
-            Message::Error(err) => {
+            Err(err) => {
                 eprintln!("Error: {err}");
             }
         }
@@ -227,7 +229,7 @@ The scanner delivers three types of messages through the event stream:
 
 - **`Message::Data(Vec<Log>)`** – Contains a batch of matching event logs. Each log includes the raw event data, transaction hash, block number, and other metadata.
 - **`Message::Notification(Notification)`** – Notifications from the scanner:
-- **`Message::Error(ScannerError)`** – Error notifications if the scanner encounters issues (e.g., RPC failures, connection problems)
+- **`ScannerError`** – Errors indicating that the scanner has encountered issues (e.g., RPC failures, connection problems)
 
 Always handle all message types in your stream processing loop to ensure robust error handling and proper reorg detection.
 
