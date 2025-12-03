@@ -4,7 +4,7 @@ use crate::{
     Notification, ScannerMessage,
     block_range_scanner::{BlockScannerResult, MAX_BUFFERED_MESSAGES},
     event_scanner::{EventScannerResult, filter::EventFilter, listener::EventListener},
-    robust_provider::{Error as RobustProviderError, RobustProvider},
+    robust_provider::{RobustProvider, provider::Error as RobustProviderError},
     types::TryStream,
 };
 use alloy::{

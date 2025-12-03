@@ -8,85 +8,81 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 
-use crate::robust_provider::{Error, RobustProvider, RobustProviderBuilder};
+use crate::robust_provider::{RobustProvider, RobustProviderBuilder, provider::Error};
 
-pub trait IntoProvider<N: Network = Ethereum> {
-    fn into_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<impl Provider<N>, Error>> + Send;
+pub trait IntoRootProvider<N: Network = Ethereum> {
+    fn into_root_provider(self) -> impl Future<Output = Result<RootProvider<N>, Error>> + Send;
 }
 
-impl<N: Network> IntoProvider<N> for RobustProvider<N> {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+impl<N: Network> IntoRootProvider<N> for RobustProvider<N> {
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
         Ok(self.primary().to_owned())
     }
 }
 
-impl<N: Network> IntoProvider<N> for RootProvider<N> {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+impl<N: Network> IntoRootProvider<N> for RootProvider<N> {
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
         Ok(self)
     }
 }
 
-impl<N: Network> IntoProvider<N> for &str {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+impl<N: Network> IntoRootProvider<N> for &str {
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
         Ok(RootProvider::connect(self).await?)
     }
 }
 
-impl<N: Network> IntoProvider<N> for Url {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
+impl<N: Network> IntoRootProvider<N> for Url {
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
         Ok(RootProvider::connect(self.as_str()).await?)
     }
 }
 
-impl<F, P, N> IntoProvider<N> for FillProvider<F, P, N>
+impl<F, P, N> IntoRootProvider<N> for FillProvider<F, P, N>
 where
     F: TxFiller<N>,
     P: Provider<N>,
     N: Network,
 {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
-        Ok(self)
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
+        Ok(self.root().to_owned())
     }
 }
 
-impl<P, N> IntoProvider<N> for CacheProvider<P, N>
+impl<P, N> IntoRootProvider<N> for CacheProvider<P, N>
 where
     P: Provider<N>,
     N: Network,
 {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
-        Ok(self)
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
+        Ok(self.root().to_owned())
     }
 }
 
-impl<N> IntoProvider<N> for DynProvider<N>
+impl<N> IntoRootProvider<N> for DynProvider<N>
 where
     N: Network,
 {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
-        Ok(self)
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
+        Ok(self.root().to_owned())
     }
 }
 
-impl<P, N> IntoProvider<N> for CallBatchProvider<P, N>
+impl<P, N> IntoRootProvider<N> for CallBatchProvider<P, N>
 where
     P: Provider<N> + 'static,
     N: Network,
 {
-    async fn into_provider(self) -> Result<impl Provider<N>, Error> {
-        Ok(self)
+    async fn into_root_provider(self) -> Result<RootProvider<N>, Error> {
+        Ok(self.root().to_owned())
     }
 }
 
 pub trait IntoRobustProvider<N: Network = Ethereum> {
-    fn into_robust_provider(
-        self,
-    ) -> impl std::future::Future<Output = Result<RobustProvider<N>, Error>> + Send;
+    fn into_robust_provider(self) -> impl Future<Output = Result<RobustProvider<N>, Error>> + Send;
 }
 
-impl<N: Network, P: IntoProvider<N> + Send> IntoRobustProvider<N> for P {
+impl<N: Network, P: IntoRootProvider<N> + Send + 'static> IntoRobustProvider<N> for P {
     async fn into_robust_provider(self) -> Result<RobustProvider<N>, Error> {
         RobustProviderBuilder::new(self).build().await
     }

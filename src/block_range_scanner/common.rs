@@ -2,22 +2,22 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 use crate::{
+    ScannerError,
     block_range_scanner::{BlockScannerResult, reorg_handler::ReorgHandler},
-    robust_provider::RobustProvider,
+    robust_provider::{RobustProvider, RobustSubscription, subscription},
     types::{Notification, TryStream},
 };
 use alloy::{
     consensus::BlockHeader,
     network::{BlockResponse, Network},
     primitives::BlockNumber,
-    pubsub::Subscription,
 };
 use tracing::{debug, error, info, warn};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_live_blocks<N: Network>(
     stream_start: BlockNumber,
-    subscription: Subscription<N::HeaderResponse>,
+    subscription: RobustSubscription<N>,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
     block_confirmations: u64,
@@ -26,10 +26,11 @@ pub(crate) async fn stream_live_blocks<N: Network>(
     notify_after_first_block: bool,
 ) {
     // Phase 1: Wait for first relevant block
-    let mut stream = skip_to_relevant_blocks::<N>(subscription, stream_start, block_confirmations);
+    let mut stream =
+        skip_to_first_relevant_block::<N>(subscription, stream_start, block_confirmations);
 
-    let Some(first_block) = stream.next().await else {
-        warn!("Subscription channel closed before receiving any blocks");
+    let Some(first_block) = get_first_block::<N, _>(&mut stream, sender).await else {
+        // error occurred and streamed
         return;
     };
 
@@ -68,14 +69,52 @@ pub(crate) async fn stream_live_blocks<N: Network>(
     warn!("Live block subscription ended");
 }
 
+async fn get_first_block<
+    N: Network,
+    S: tokio_stream::Stream<Item = Result<N::HeaderResponse, subscription::Error>> + Unpin,
+>(
+    stream: &mut S,
+    sender: &mpsc::Sender<BlockScannerResult>,
+) -> Option<N::HeaderResponse> {
+    while let Some(first_block) = stream.next().await {
+        match first_block {
+            Ok(block) => return Some(block),
+            Err(e) => {
+                error!(error = %e, "Error receiving block from stream");
+                match e {
+                    subscription::Error::Lagged(_) => {
+                        continue;
+                    }
+                    subscription::Error::Timeout => {
+                        _ = sender.try_stream(ScannerError::Timeout).await;
+                        break;
+                    }
+                    subscription::Error::RpcError(rpc_err) => {
+                        _ = sender.try_stream(ScannerError::RpcError(rpc_err)).await;
+                        break;
+                    }
+                    subscription::Error::Closed => {
+                        _ = sender.try_stream(ScannerError::SubscriptionClosed).await;
+                        break;
+                    }
+                }
+            }
+        };
+    }
+
+    None
+}
+
 /// Skips blocks until we reach the first block that's relevant for streaming
-fn skip_to_relevant_blocks<N: Network>(
-    subscription: Subscription<N::HeaderResponse>,
+fn skip_to_first_relevant_block<N: Network>(
+    subscription: RobustSubscription<N>,
     stream_start: BlockNumber,
     block_confirmations: u64,
-) -> impl tokio_stream::Stream<Item = N::HeaderResponse> {
-    subscription.into_stream().skip_while(move |header| {
-        header.number().saturating_sub(block_confirmations) < stream_start
+) -> impl tokio_stream::Stream<Item = Result<N::HeaderResponse, subscription::Error>> {
+    subscription.into_stream().skip_while(move |header| match header {
+        Ok(header) => header.number().saturating_sub(block_confirmations) < stream_start,
+        Err(subscription::Error::Lagged(_)) => true,
+        Err(_) => false,
     })
 }
 
@@ -117,7 +156,7 @@ async fn initialize_live_streaming_state<N: Network>(
 #[allow(clippy::too_many_arguments)]
 async fn stream_blocks_continuously<
     N: Network,
-    S: tokio_stream::Stream<Item = N::HeaderResponse> + Unpin,
+    S: tokio_stream::Stream<Item = Result<N::HeaderResponse, subscription::Error>> + Unpin,
 >(
     stream: &mut S,
     state: &mut LiveStreamingState<N>,
@@ -129,6 +168,32 @@ async fn stream_blocks_continuously<
     reorg_handler: &mut ReorgHandler<N>,
 ) {
     while let Some(incoming_block) = stream.next().await {
+        let incoming_block = match incoming_block {
+            Ok(block) => block,
+            Err(e) => {
+                error!(error = %e, "Error receiving block from stream");
+                match e {
+                    subscription::Error::Lagged(_) => {
+                        // scanner already accounts for skipped block numbers
+                        // next block will be the actual incoming block
+                        continue;
+                    }
+                    subscription::Error::Timeout => {
+                        _ = sender.try_stream(ScannerError::Timeout).await;
+                        return;
+                    }
+                    subscription::Error::RpcError(rpc_err) => {
+                        _ = sender.try_stream(ScannerError::RpcError(rpc_err)).await;
+                        return;
+                    }
+                    subscription::Error::Closed => {
+                        _ = sender.try_stream(ScannerError::SubscriptionClosed).await;
+                        return;
+                    }
+                }
+            }
+        };
+
         let incoming_block_num = incoming_block.number();
         info!(block_number = incoming_block_num, "Received block header");
 

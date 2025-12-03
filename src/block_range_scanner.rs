@@ -69,7 +69,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     ScannerError, ScannerMessage,
     block_range_scanner::sync_handler::SyncHandler,
-    robust_provider::{Error as RobustProviderError, IntoRobustProvider, RobustProvider},
+    robust_provider::{IntoRobustProvider, RobustProvider, provider::Error as RobustProviderError},
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 

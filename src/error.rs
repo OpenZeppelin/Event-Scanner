@@ -6,7 +6,7 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::{robust_provider::Error as RobustProviderError, types::ScannerResult};
+use crate::{robust_provider::provider::Error as RobustProviderError, types::ScannerResult};
 
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
@@ -30,6 +30,9 @@ pub enum ScannerError {
 
     #[error("Max block range must be greater than 0")]
     InvalidMaxBlockRange,
+
+    #[error("Subscription closed")]
+    SubscriptionClosed,
 }
 
 impl From<RobustProviderError> for ScannerError {
@@ -47,6 +50,7 @@ impl From<RpcError<TransportErrorKind>> for ScannerError {
         ScannerError::RpcError(Arc::new(error))
     }
 }
+
 impl<T: Clone> PartialEq<ScannerError> for ScannerResult<T> {
     fn eq(&self, other: &ScannerError) -> bool {
         match self {
