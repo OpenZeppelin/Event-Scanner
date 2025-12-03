@@ -280,7 +280,7 @@ All examples spin up a local `anvil` instance, deploy a demo counter contract, a
 
 The main entry point is `robust_provider::RobustProviderBuilder`, which accepts a wide
 range of provider types (URLs, `RootProvider`, layered providers, etc.) through the
-`IntoProvider` and `IntoRobustProvider` traits.
+`IntoRobustProvider` and `IntoRobustProvider` traits.
 
 A typical setup looks like:
 
