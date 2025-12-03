@@ -124,6 +124,14 @@ impl<N: Network> RobustSubscription<N> {
                         return Ok(header);
                     }
                     Err(recv_error) => {
+                        match recv_error {
+                            RecvError::Closed => {
+                                error!("Provider closed the subscription channel");
+                            }
+                            RecvError::Lagged(count) => {
+                                error!(skipped = count, "Receiver lagged");
+                            }
+                        }
                         return Err(recv_error.into());
                     }
                 },
