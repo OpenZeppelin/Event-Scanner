@@ -172,7 +172,7 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
 }
 
 #[tokio::test]
-#[ignore = "historical currently has no reorg logic: https://github.com/OpenZeppelin/Event-Scanner/issues/56"]
+#[ignore = "historical has reorg logic, but it can be reliably tested once ack-channels are introduced: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
@@ -204,7 +204,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
 }
 
 #[tokio::test]
-#[ignore = "historical currently has no reorg logic: https://github.com/OpenZeppelin/Event-Scanner/issues/56"]
+#[ignore = "historical has reorg logic, but it can be reliably tested once ack-channels are introduced: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;

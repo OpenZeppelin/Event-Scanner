@@ -197,10 +197,13 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Key behaviors
     ///
-    /// - **No duplicates**: Events are not delivered twice across the phase transition
-    /// - **Chronological order**: Historical events are delivered oldest to newest
-    /// - **Seamless transition**: Automatically switches to live mode when caught up
-    /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
+    /// * **No duplicates**: Events are not delivered twice across the phase transition
+    /// * **Chronological order**: Historical events are delivered oldest to newest
+    /// * **Seamless transition**: Automatically switches to live mode when caught up
+    /// * **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
+    /// * **Reorg detection**: When a reorg is detected, [`Notification::ReorgDetected`][reorg] is
+    ///   emitted, the next confirmed window is adjusted to stream the reorged blocks, and continues
+    ///   streaming.
     ///
     /// # Arguments
     ///
@@ -208,14 +211,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Important notes
     ///
-    /// - The live phase continues indefinitely until the scanner is dropped or encounters an error
-    ///
-    /// # Reorg behavior
-    ///
-    /// - **Historical sync phase**: Streams events in chronological order without reorg detection
-    /// - **Live streaming phase**: Respects the configured block confirmations. On reorg, emits
-    ///   [`Notification::ReorgDetected`][reorg], adjusts the next confirmed window (possibly
-    ///   re-emitting confirmed portions), and continues streaming.
+    /// The live phase continues indefinitely until the scanner is dropped or encounters an error.
     ///
     /// [subscribe]: crate::EventScanner::subscribe
     /// [start]: crate::event_scanner::EventScanner::start
