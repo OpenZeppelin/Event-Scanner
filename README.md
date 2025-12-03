@@ -231,7 +231,7 @@ The scanner delivers three types of messages through the event stream:
 
 - **`Message::Data(Vec<Log>)`** – Contains a batch of matching event logs. Each log includes the raw event data, transaction hash, block number, and other metadata.
 - **`Message::Notification(Notification)`** – Notifications from the scanner:
-- **`Message::Error(ScannerError)`** – Error notifications if the scanner encounters issues (e.g., RPC failures, connection problems)
+- **`ScannerError`** – Errors indicating that the scanner has encountered issues (e.g., RPC failures, connection problems)
 
 Always handle all message types in your stream processing loop to ensure robust error handling and proper reorg detection.
 

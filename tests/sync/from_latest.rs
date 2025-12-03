@@ -32,13 +32,16 @@ async fn happy_path_no_duplicates() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(6) },
         ]
     );
-    // Transition to live
-    assert_next!(stream, Notification::SwitchingToLive);
+    let mut stream = assert_empty!(stream);
 
     // Live phase: emit three more, should arrive in order without duplicating latest
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
+    // Assert `SwitchingToLive` after emitting live events, because the test finishes the "latest
+    // events" phase before new events are emitted, thus the "live" phase actually starts from a
+    // future block.
+    assert_next!(stream, Notification::SwitchingToLive);
     assert_event_sequence_final!(
         stream,
         &[
@@ -71,13 +74,16 @@ async fn fewer_historical_then_continues_live() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(2) },
         ]
     );
-    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
     // Live: two more arrive
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
+    // Assert `SwitchingToLive` after emitting live events, because the test finishes the "latest
+    // events" phase before new events are emitted, thus the "live" phase actually starts from a
+    // future block.
+    assert_next!(stream, Notification::SwitchingToLive);
     assert_event_sequence_final!(
         stream,
         &[
@@ -113,7 +119,6 @@ async fn exact_historical_count_then_live() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(4) },
         ]
     );
-    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
     // give scanner time to subscribe to live events
@@ -121,6 +126,10 @@ async fn exact_historical_count_then_live() -> anyhow::Result<()> {
     // Live continues
     contract.increase().send().await?.watch().await?;
 
+    // Assert `SwitchingToLive` after emitting live events, because the test finishes the "latest
+    // events" phase before new events are emitted, thus the "live" phase actually starts from a
+    // future block.
+    assert_next!(stream, Notification::SwitchingToLive);
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(5) }]);
     assert_empty!(stream);
 
@@ -138,15 +147,18 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
 
     // Latest is empty
     assert_next!(stream, Notification::NoPastLogsFound);
-    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
-    // give scanner time to start
+    // give scanner time to set up live subscription
     sleep(Duration::from_millis(10)).await;
     // Live events arrive
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
+    // Assert `SwitchingToLive` after emitting live events, because the test finishes the "latest
+    // events" phase before new events are emitted, thus the "live" phase actually starts from a
+    // future block.
+    assert_next!(stream, Notification::SwitchingToLive);
     assert_event_sequence_final!(
         stream,
         &[
@@ -187,7 +199,6 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
-    assert_next!(stream, Notification::SwitchingToLive);
     let mut stream = assert_empty!(stream);
 
     // give scanner time to start
@@ -195,6 +206,10 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
     // Immediately produce a new live event in a new block
     contract.increase().send().await?.watch().await?;
 
+    // Assert `SwitchingToLive` after emitting live events, because the test finishes the "latest
+    // events" phase before new events are emitted, thus the "live" phase actually starts from a
+    // future block.
+    assert_next!(stream, Notification::SwitchingToLive);
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(4) }]);
     assert_empty!(stream);
 
@@ -224,8 +239,9 @@ async fn waiting_on_live_logs_arriving() -> anyhow::Result<()> {
             TestCounter::CountIncreased { newCount: U256::from(3) },
         ]
     );
-    assert_next!(stream, Notification::SwitchingToLive);
     assert_empty!(stream);
+
+    // `Notification::SwitchingToLive` arrives only on first live block received
 
     Ok(())
 }

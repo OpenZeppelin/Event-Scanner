@@ -65,6 +65,6 @@ pub mod provider_conversion;
 pub mod subscription;
 
 pub use builder::*;
-pub use provider::RobustProvider;
+pub use provider::{Error, RobustProvider};
 pub use provider_conversion::{IntoRobustProvider, IntoRootProvider};
 pub use subscription::RobustSubscription;

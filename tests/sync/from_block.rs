@@ -72,6 +72,9 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     // Act: emit an event that will be mined in block == future_start
     contract.increase().send().await?.watch().await?;
 
+    // only after the live event at `future_start_block` is emitted, will `SwitchingToLive` be
+    // streamed
+    assert_next!(stream, Notification::SwitchingToLive);
     // Assert: the first streamed message arrives and contains the expected event
     assert_next!(stream, &[TestCounter::CountIncreased { newCount: U256::from(3) }]);
     assert_empty!(stream);

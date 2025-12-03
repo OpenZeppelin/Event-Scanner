@@ -9,7 +9,7 @@ use crate::{
     EventFilter, ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
-        MAX_BUFFERED_MESSAGES,
+        MAX_BUFFERED_MESSAGES, RingBufferCapacity,
     },
     event_scanner::{EventScannerResult, listener::EventListener},
     robust_provider::IntoRobustProvider,
@@ -399,6 +399,22 @@ impl<M> EventScannerBuilder<M> {
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.block_range_scanner.max_block_range = max_block_range;
+        self
+    }
+
+    /// Sets how many of past blocks to keep in memory for reorg detection.
+    ///
+    /// IMPORTANT: If zero, reorg detection is disabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `past_blocks_storage_capacity` - Maximum number of blocks to keep in memory.
+    #[must_use]
+    pub fn past_blocks_storage_capacity(
+        mut self,
+        past_blocks_storage_capacity: RingBufferCapacity,
+    ) -> Self {
+        self.block_range_scanner.past_blocks_storage_capacity = past_blocks_storage_capacity;
         self
     }
 
