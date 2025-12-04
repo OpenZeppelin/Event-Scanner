@@ -25,7 +25,10 @@ pub enum Notification {
     SwitchingToLive,
 
     /// Emitted when a blockchain reorganization is detected during scanning.
-    ReorgDetected,
+    ///
+    /// The `common_ancestor_block` field contains the block number of the last block
+    /// that is still valid on the canonical chain.
+    ReorgDetected { common_ancestor_block: u64 },
 
     /// Emitted during the latest events phase when no matching logs are found in the
     /// scanned range.
