@@ -75,7 +75,7 @@ use crate::{
 
 use alloy::{
     consensus::BlockHeader,
-    eips::BlockId,
+    eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::BlockNumber,
 };
@@ -461,6 +461,16 @@ impl<N: Network> Service<N> {
         let from = tip.header().number();
         let to = to.header().number();
 
+        let finalized_block = match provider.get_block_by_number(BlockNumberOrTag::Finalized).await
+        {
+            Ok(block) => block,
+            Err(e) => {
+                error!(error = %e, "Failed to get finalized block");
+                _ = sender.try_stream(e).await;
+                return;
+            }
+        };
+
         // we're iterating in reverse
         let mut batch_from = from;
 
@@ -481,6 +491,13 @@ impl<N: Network> Service<N> {
             // == 0`
             if batch_to == to {
                 break;
+            }
+
+            // Skip reorg check if tip is at or below finalized block
+            let tip_number = tip.header().number();
+            if tip_number <= finalized_block.header().number() {
+                batch_from = batch_to - 1;
+                continue;
             }
 
             let Some(new_batch_from) = Self::handle_reorg_check(
