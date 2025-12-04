@@ -192,6 +192,38 @@ async fn handle_block_range_message<N: Network>(
                 return false;
             }
         }
+        Ok(ScannerMessage::Notification(Notification::ReorgDetected { common_ancestor_block })) => {
+            info!(
+                common_ancestor_block = common_ancestor_block,
+                "Received ReorgDetected notification"
+            );
+
+            // Invalidate logs from reorged blocks
+            if let ConsumerMode::CollectLatest { .. } = mode {
+                let before_count = collected.len();
+                collected.retain(|log| {
+                    // CHECK:  If we should get logs with 'None' block number
+                    //
+                    // Keep logs if block_number is None or <= common_ancestor
+                    log.block_number.is_none_or(|n| n <= common_ancestor_block)
+                });
+                let removed_count = before_count - collected.len();
+                if removed_count > 0 {
+                    info!(
+                        removed_count = removed_count,
+                        remaining_count = collected.len(),
+                        "Invalidated logs from reorged blocks"
+                    );
+                }
+                // Don't forward the notification to the user in CollectLatest mode
+                // since logs haven't been sent yet 
+            } else {
+                // Only forward in stream mode
+                if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
+                    return false;
+                }
+            }
+        }
         Ok(ScannerMessage::Notification(notification)) => {
             info!(notification = ?notification, "Received notification");
             if !sender.try_stream(notification).await {

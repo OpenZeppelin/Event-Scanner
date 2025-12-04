@@ -495,19 +495,20 @@ impl<N: Network> Service<N> {
                 }
             };
 
-            // For now we only care if a reorg occurred, not which block it was.
-            // Once we optimize 'latest' mode to update only the reorged logs, we will need the
-            // exact common ancestor.
-            if reorged_opt.is_some() {
-                info!(block_number = %from, hash = %tip.header().hash(), "Reorg detected");
+            if let Some(common_ancestor) = reorged_opt {
+                let common_ancestor_block = common_ancestor.header().number();
+                info!(
+                    block_number = %from,
+                    hash = %tip.header().hash(),
+                    common_ancestor_block = %common_ancestor_block,
+                    "Reorg detected"
+                );
 
-                if !sender.try_stream(Notification::ReorgDetected).await {
+                if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
                     break;
                 }
 
-                // restart rewind
-                batch_from = from;
-                // store the updated end block hash
+                // Get the new tip block (same height as original tip, but new hash)
                 tip = match provider.get_block_by_number(from.into()).await {
                     Ok(block) => block,
                     Err(RobustProviderError::BlockNotFound(_)) => {
@@ -519,6 +520,29 @@ impl<N: Network> Service<N> {
                         return;
                     }
                 };
+
+                // Re-scan only the affected range (from tip down to common_ancestor + 1)
+                // Then continue the normal rewind from common_ancestor
+                let rescan_from = from;
+                let rescan_to = common_ancestor_block + 1;
+
+                let mut rescan_batch_from = rescan_from;
+                while rescan_batch_from >= rescan_to {
+                    let rescan_batch_to =
+                        rescan_batch_from.saturating_sub(max_block_range - 1).max(rescan_to);
+
+                    if !sender.try_stream(rescan_batch_to..=rescan_batch_from).await {
+                        return;
+                    }
+
+                    if rescan_batch_to == rescan_to {
+                        break;
+                    }
+                    rescan_batch_from = rescan_batch_to - 1;
+                }
+
+                // Continue normal rewind from common_ancestor (which is still valid)
+                batch_from = common_ancestor_block;
             } else {
                 // `batch_to` is always greater than `to`, so `batch_to - 1` is always a valid
                 // unsigned integer
