@@ -483,74 +483,103 @@ impl<N: Network> Service<N> {
                 break;
             }
 
-            let reorged_opt = match reorg_handler.check(&tip).await {
-                Ok(opt) => {
-                    info!(block_number = %from, hash = %tip.header().hash(), "Reorg detected");
-                    opt
-                }
-                Err(e) => {
-                    error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = sender.try_stream(e).await;
-                    return;
-                }
+            let Some(new_batch_from) = Self::handle_reorg_check(
+                &mut tip,
+                from,
+                max_block_range,
+                batch_to,
+                sender,
+                provider,
+                reorg_handler,
+            )
+            .await
+            else {
+                return;
             };
 
-            if let Some(common_ancestor) = reorged_opt {
-                let common_ancestor_block = common_ancestor.header().number();
-                info!(
-                    block_number = %from,
-                    hash = %tip.header().hash(),
-                    common_ancestor_block = %common_ancestor_block,
-                    "Reorg detected"
-                );
-
-                if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
-                    break;
-                }
-
-                // Get the new tip block (same height as original tip, but new hash)
-                tip = match provider.get_block_by_number(from.into()).await {
-                    Ok(block) => block,
-                    Err(RobustProviderError::BlockNotFound(_)) => {
-                        panic!("Block with number '{from}' should exist post-reorg");
-                    }
-                    Err(e) => {
-                        error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream(e).await;
-                        return;
-                    }
-                };
-
-                // Re-scan only the affected range (from tip down to common_ancestor + 1)
-                // Then continue the normal rewind from common_ancestor
-                let rescan_from = from;
-                let rescan_to = common_ancestor_block + 1;
-
-                let mut rescan_batch_from = rescan_from;
-                while rescan_batch_from >= rescan_to {
-                    let rescan_batch_to =
-                        rescan_batch_from.saturating_sub(max_block_range - 1).max(rescan_to);
-
-                    if !sender.try_stream(rescan_batch_to..=rescan_batch_from).await {
-                        return;
-                    }
-
-                    if rescan_batch_to == rescan_to {
-                        break;
-                    }
-                    rescan_batch_from = rescan_batch_to - 1;
-                }
-
-                // Continue normal rewind from common_ancestor (which is still valid)
-                batch_from = common_ancestor_block;
-            } else {
-                // `batch_to` is always greater than `to`, so `batch_to - 1` is always a valid
-                // unsigned integer
-                batch_from = batch_to - 1;
-            }
+            batch_from = new_batch_from;
         }
 
         info!(batch_count = batch_count, "Rewind completed");
+    }
+
+    /// Checks for reorg and handles re-scanning if one is detected.
+    ///
+    /// Returns `Some(new_batch_from)` on success:
+    /// - If no reorg: returns `batch_to - 1`
+    /// - If reorg: returns `common_ancestor_block`
+    ///
+    /// Returns `None` if stream closed or terminal error occurred.
+    async fn handle_reorg_check(
+        tip: &mut N::BlockResponse,
+        from: BlockNumber,
+        max_block_range: u64,
+        batch_to: BlockNumber,
+        sender: &mpsc::Sender<BlockScannerResult>,
+        provider: &RobustProvider<N>,
+        reorg_handler: &mut ReorgHandler<N>,
+    ) -> Option<BlockNumber> {
+        let reorged_opt = match reorg_handler.check(tip).await {
+            Ok(opt) => opt,
+            Err(e) => {
+                error!(error = %e, "Terminal RPC call error, shutting down");
+                _ = sender.try_stream(e).await;
+                return None;
+            }
+        };
+
+        let Some(common_ancestor) = reorged_opt else {
+            // No reorg - continue normal iteration
+            // `batch_to` is always greater than `to`, so `batch_to - 1` is always valid
+            return Some(batch_to - 1);
+        };
+
+        let common_ancestor_block = common_ancestor.header().number();
+        info!(
+            block_number = %from,
+            hash = %tip.header().hash(),
+            common_ancestor_block = %common_ancestor_block,
+            "Reorg detected"
+        );
+
+        if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
+            return None;
+        }
+
+        // Get the new tip block (same height as original tip, but new hash)
+        *tip = match provider.get_block_by_number(from.into()).await {
+            Ok(block) => block,
+            Err(RobustProviderError::BlockNotFound(_)) => {
+                panic!("Block with number '{from}' should exist post-reorg");
+            }
+            Err(e) => {
+                error!(error = %e, "Terminal RPC call error, shutting down");
+                _ = sender.try_stream(e).await;
+                return None;
+            }
+        };
+
+        // Re-scan only the affected range (from tip down to common_ancestor + 1)
+        let rescan_from = from;
+        let rescan_to = common_ancestor_block + 1;
+
+        let mut rescan_batch_from = rescan_from;
+        while rescan_batch_from >= rescan_to {
+            let rescan_batch_to =
+                rescan_batch_from.saturating_sub(max_block_range - 1).max(rescan_to);
+
+            if !sender.try_stream(rescan_batch_to..=rescan_batch_from).await {
+                return None;
+            }
+
+            if rescan_batch_to == rescan_to {
+                break;
+            }
+            rescan_batch_from = rescan_batch_to - 1;
+        }
+
+        // Continue normal rewind from common_ancestor (which is still valid)
+        Some(common_ancestor_block)
     }
 }
 
