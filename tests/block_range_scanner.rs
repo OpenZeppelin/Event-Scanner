@@ -1,6 +1,6 @@
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
-    providers::{ProviderBuilder, ext::AnvilApi},
+    providers::{Provider, ProviderBuilder, ext::AnvilApi},
     rpc::types::anvil::ReorgOptions,
 };
 use alloy_node_bindings::Anvil;
@@ -154,13 +154,14 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     let mut stream = assert_empty!(stream);
 
     // reorg more blocks than the block_confirmation config
+    let latest = provider.get_block_number().await?;
     provider.anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
 
     // mint 1 block to allow the scanner to process reorged blocks (previously streamed + the block
     // confirmed now)
     provider.anvil_mine(Some(1), None).await?;
 
-    assert_next!(stream, Notification::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: latest - 8 });
     assert_range_coverage!(stream, 3..=8);
     let mut stream = assert_empty!(stream);
 
@@ -189,6 +190,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
         .await?;
 
     let depth = 15;
+    let latest = provider.get_block_number().await?;
     _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
     _ = provider.anvil_mine(Some(20), None).await;
 
@@ -196,7 +198,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
     assert_next!(stream, 30..=59);
     assert_next!(stream, 60..=89);
     assert_next!(stream, 90..=110);
-    assert_next!(stream, Notification::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: latest - depth });
     assert_next!(stream, 105..=110);
     assert_closed!(stream);
 
@@ -222,6 +224,7 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 
     let pre_reorg_mine = 20;
     _ = provider.anvil_mine(Some(pre_reorg_mine), None).await;
+    let latest = provider.get_block_number().await?;
     let depth = pre_reorg_mine + 1;
     _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
     _ = provider.anvil_mine(Some(20), None).await;
@@ -230,7 +233,7 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
     assert_next!(stream, 30..=59);
     assert_next!(stream, 60..=89);
     assert_next!(stream, 90..=120);
-    assert_next!(stream, Notification::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: latest - depth });
     assert_next!(stream, 120..=120);
     assert_closed!(stream);
 
