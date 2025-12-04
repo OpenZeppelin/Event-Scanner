@@ -247,11 +247,14 @@ async fn handle_reorg_detected<N: Network>(
     state: &mut LiveStreamingState<N>,
     sender: &mpsc::Sender<BlockScannerResult>,
 ) -> bool {
-    if !sender.try_stream(Notification::ReorgDetected).await {
+    let ancestor_num = common_ancestor.header().number();
+
+    if !sender
+        .try_stream(Notification::ReorgDetected { common_ancestor_block: ancestor_num })
+        .await
+    {
         return false;
     }
-
-    let ancestor_num = common_ancestor.header().number();
 
     // Reset streaming position based on common ancestor
     if ancestor_num < stream_start {
@@ -361,13 +364,17 @@ pub(crate) async fn stream_block_range<N: Network>(
         };
 
         next_start_block = if let Some(common_ancestor) = reorged_opt {
-            if !sender.try_stream(Notification::ReorgDetected).await {
+            let common_ancestor_block = common_ancestor.header().number();
+            if !sender
+                .try_stream(Notification::ReorgDetected { common_ancestor_block })
+                .await
+            {
                 return None;
             }
-            if common_ancestor.header().number() < min_block {
+            if common_ancestor_block < min_block {
                 min_block
             } else {
-                common_ancestor.header().number() + 1
+                common_ancestor_block + 1
             }
         } else {
             batch_end_num.saturating_add(1)
