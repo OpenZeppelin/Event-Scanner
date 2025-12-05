@@ -235,7 +235,7 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 
 #[tokio::test]
 #[ignore = "enable when ack-channels are introduced: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
-async fn historical_reorg_occuring_immediately_after_finalized_processing_are_ignored()
+async fn historical_reorg_occurring_immediately_after_finalized_processing_is_ignored()
 -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;

@@ -47,7 +47,7 @@ pub enum Notification {
     ///
     /// **How to handle**: This is a benign race condition. Your application should be designed to
     /// handle duplicate logs idempotently (e.g., using transaction hashes or log indices as
-    /// deduplication keys). The scanner prioritizes correctness by ensuring all events from the
+    /// deduplication keys). The scanner prioritizes correctness by ensuring all logs from the
     /// canonical chain are delivered, even if it means occasional duplicates during reorgs.
     ReorgDetected,
 
