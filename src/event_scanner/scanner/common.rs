@@ -199,6 +199,9 @@ async fn handle_block_range_message<N: Network>(
             );
 
             // Invalidate logs from reorged blocks
+            // NOTE: We could decide not to remove all the logs and
+            // do an additional RPC call to check if the logs were removed in the reorg
+            // however this approach is simpler + requires fewer RPC calls
             if let ConsumerMode::CollectLatest { .. } = mode {
                 let before_count = collected.len();
                 collected.retain(|log| {
@@ -216,7 +219,7 @@ async fn handle_block_range_message<N: Network>(
                     );
                 }
                 // Don't forward the notification to the user in CollectLatest mode
-                // since logs haven't been sent yet 
+                // since logs haven't been sent yet
             } else {
                 // Only forward in stream mode
                 if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
