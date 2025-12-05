@@ -142,7 +142,7 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockScannerResult>,
-    count: usize,
+    mut take: usize,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
         let EventListener { filter, sender } = listener;
@@ -152,10 +152,9 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
-            // Only used for CollectLatest
-            let mut collected = Vec::with_capacity(count);
+            let mut collected = Vec::with_capacity(take);
 
-            loop {
+            while take > 0 {
                 match range_rx.recv().await {
                     Ok(message) => match message {
                         Ok(ScannerMessage::Data(range)) => {
@@ -165,17 +164,11 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                                         continue;
                                     }
 
-                                    let take = count.saturating_sub(collected.len());
-                                    // if we have enough logs, break
-                                    if take == 0 {
-                                        break;
-                                    }
                                     // take latest within this range
-                                    collected.extend(logs.into_iter().rev().take(take));
-                                    // if we have enough logs, break
-                                    if collected.len() == count {
-                                        break;
-                                    }
+                                    let to_take = take.min(logs.len());
+                                    collected.extend(logs.into_iter().rev().take(to_take));
+                                    // SAFETY: already ensured `to_take <= take`
+                                    take -= to_take;
                                 }
                                 Err(e) => {
                                     error!(error = ?e, "Received error message");
