@@ -370,14 +370,17 @@ impl<N: Network> Service<N> {
             _ => (start_block_num, end_block_num),
         };
 
-        info!(start_block = start_block_num, end_block = end_block_num, "Syncing historical data");
+        info!(
+            start_block = start_block_num,
+            end_block = end_block_num,
+            "Normalized the block range"
+        );
 
         tokio::spawn(async move {
             let mut reorg_handler =
                 ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
-            common::stream_block_range(
-                start_block_num,
+            _ = common::stream_historical_range(
                 start_block_num,
                 end_block_num,
                 max_block_range,

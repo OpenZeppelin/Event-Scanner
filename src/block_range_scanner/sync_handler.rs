@@ -127,7 +127,10 @@ impl<N: Network> SyncHandler<N> {
             )
             .await
             {
-                Ok(start_block) => start_block,
+                Ok(Some(start_block)) => start_block,
+                Ok(None) => {
+                    return; // channel closed
+                }
                 Err(e) => {
                     error!(error = %e, "Error during historical catchup, shutting down");
                     _ = sender.try_stream(e).await;
@@ -158,10 +161,9 @@ impl<N: Network> SyncHandler<N> {
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
         reorg_handler: &mut ReorgHandler<N>,
-    ) -> Result<BlockNumber, ScannerError> {
+    ) -> Result<Option<BlockNumber>, ScannerError> {
         while start_block < confirmed_tip {
-            common::stream_block_range(
-                start_block,
+            if common::stream_historical_range(
                 start_block,
                 confirmed_tip,
                 max_block_range,
@@ -169,7 +171,11 @@ impl<N: Network> SyncHandler<N> {
                 provider,
                 reorg_handler,
             )
-            .await;
+            .await
+            .is_none()
+            {
+                return Ok(None);
+            }
 
             let latest = provider.get_block_number().await?;
 
@@ -179,7 +185,7 @@ impl<N: Network> SyncHandler<N> {
 
         info!("Historical catchup complete, ready to transition to live");
 
-        Ok(start_block)
+        Ok(Some(start_block))
     }
 
     /// Subscribes to live blocks and begins streaming
