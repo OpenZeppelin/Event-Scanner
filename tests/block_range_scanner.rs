@@ -279,7 +279,8 @@ async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
     assert_closed!(stream);
 
     let mut stream = client.stream_historical(0, 99).await?;
-    assert_next!(stream, 0..=99);
+    assert_next!(stream, 0..=36);
+    assert_next!(stream, 37..=99);
     assert_closed!(stream);
 
     Ok(())
@@ -295,15 +296,15 @@ async fn historic_mode_normalises_start_and_end_block() -> anyhow::Result<()> {
     let client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?.run()?;
 
     let mut stream = client.stream_historical(10, 0).await?;
-    assert_next!(stream, 0..=4);
-    assert_next!(stream, 5..=9);
-    assert_next!(stream, 10..=10);
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=5);
+    assert_next!(stream, 6..=10);
     assert_closed!(stream);
 
     let mut stream = client.stream_historical(0, 10).await?;
-    assert_next!(stream, 0..=4);
-    assert_next!(stream, 5..=9);
-    assert_next!(stream, 10..=10);
+    assert_next!(stream, 0..=0);
+    assert_next!(stream, 1..=5);
+    assert_next!(stream, 6..=10);
     assert_closed!(stream);
 
     Ok(())

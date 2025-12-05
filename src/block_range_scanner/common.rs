@@ -350,7 +350,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     let mut batch_start = start;
     let finalized_batch_end = finalized.min(end);
     while batch_start <= finalized_batch_end {
-        let batch_end = batch_start.saturating_add(max_block_range - 1).min(end);
+        let batch_end = batch_start.saturating_add(max_block_range - 1).min(finalized_batch_end);
 
         if !sender.try_stream(batch_start..=batch_end).await {
             return None; // channel closed
