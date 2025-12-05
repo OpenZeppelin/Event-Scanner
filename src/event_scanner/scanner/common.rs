@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use crate::{
     Notification, ScannerMessage,
     block_range_scanner::{BlockScannerResult, MAX_BUFFERED_MESSAGES},
-    event_scanner::{EventScannerResult, filter::EventFilter, listener::EventListener},
+    event_scanner::{filter::EventFilter, listener::EventListener},
     robust_provider::{RobustProvider, provider::Error as RobustProviderError},
     types::TryStream,
 };
@@ -12,10 +12,7 @@ use alloy::{
     rpc::types::{Filter, Log},
 };
 use tokio::{
-    sync::{
-        broadcast::{self, Sender, error::RecvError},
-        mpsc,
-    },
+    sync::broadcast::{self, Sender, error::RecvError},
     task::JoinSet,
 };
 use tokio_stream::{Stream, StreamExt};
@@ -57,7 +54,12 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResult> + Un
 ) {
     let (range_tx, _) = broadcast::channel::<BlockScannerResult>(MAX_BUFFERED_MESSAGES);
 
-    let consumers = spawn_log_consumers(provider, listeners, &range_tx, mode);
+    let consumers = match mode {
+        ConsumerMode::Stream => spawn_log_consumers_in_stream_mode(provider, listeners, &range_tx),
+        ConsumerMode::CollectLatest { count } => {
+            spawn_log_consumers_in_collection_mode(provider, listeners, &range_tx, count)
+        }
+    };
 
     while let Some(message) = stream.next().await {
         if let Err(err) = range_tx.send(message) {
@@ -74,11 +76,73 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResult> + Un
 }
 
 #[must_use]
-pub fn spawn_log_consumers<N: Network>(
+pub fn spawn_log_consumers_in_stream_mode<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockScannerResult>,
-    mode: ConsumerMode,
+) -> JoinSet<()> {
+    listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
+        let EventListener { filter, sender } = listener;
+
+        let provider = provider.clone();
+        let base_filter = Filter::from(&filter);
+        let mut range_rx = range_tx.subscribe();
+
+        set.spawn(async move {
+            loop {
+                match range_rx.recv().await {
+                    Ok(message) => match message {
+                        Ok(ScannerMessage::Data(range)) => {
+                            match get_logs(range, &filter, &base_filter, &provider).await {
+                                Ok(logs) => {
+                                    if logs.is_empty() {
+                                        continue;
+                                    }
+
+                                    if !sender.try_stream(logs).await {
+                                        return;
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(error = ?e, "Received error message");
+                                    if !sender.try_stream(e).await {
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        Ok(ScannerMessage::Notification(notification)) => {
+                            info!(notification = ?notification, "Received notification");
+                            if !sender.try_stream(notification).await {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            error!(error = ?e, "Received error message");
+                            if !sender.try_stream(e).await {
+                                return;
+                            }
+                        }
+                    },
+                    Err(RecvError::Closed) => {
+                        info!("No block ranges to receive, dropping receiver.");
+                        break;
+                    }
+                    Err(RecvError::Lagged(_)) => {}
+                }
+            }
+        });
+
+        set
+    })
+}
+
+#[must_use]
+pub fn spawn_log_consumers_in_collection_mode<N: Network>(
+    provider: &RobustProvider<N>,
+    listeners: &[EventListener],
+    range_tx: &Sender<BlockScannerResult>,
+    count: usize,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
         let EventListener { filter, sender } = listener;
@@ -89,28 +153,51 @@ pub fn spawn_log_consumers<N: Network>(
 
         set.spawn(async move {
             // Only used for CollectLatest
-            let mut collected: Vec<Log> = match mode {
-                ConsumerMode::CollectLatest { count } => Vec::with_capacity(count),
-                ConsumerMode::Stream => Vec::new(),
-            };
+            let mut collected = Vec::with_capacity(count);
 
             loop {
                 match range_rx.recv().await {
-                    Ok(message) => {
-                        if !handle_block_range_message(
-                            message,
-                            &filter,
-                            &base_filter,
-                            &provider,
-                            &sender,
-                            mode,
-                            &mut collected,
-                        )
-                        .await
-                        {
-                            break;
+                    Ok(message) => match message {
+                        Ok(ScannerMessage::Data(range)) => {
+                            match get_logs(range, &filter, &base_filter, &provider).await {
+                                Ok(logs) => {
+                                    if logs.is_empty() {
+                                        continue;
+                                    }
+
+                                    let take = count.saturating_sub(collected.len());
+                                    // if we have enough logs, break
+                                    if take == 0 {
+                                        break;
+                                    }
+                                    // take latest within this range
+                                    collected.extend(logs.into_iter().rev().take(take));
+                                    // if we have enough logs, break
+                                    if collected.len() == count {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(error = ?e, "Received error message");
+                                    if !sender.try_stream(e).await {
+                                        return; // channel closed
+                                    }
+                                }
+                            }
                         }
-                    }
+                        Ok(ScannerMessage::Notification(notification)) => {
+                            info!(notification = ?notification, "Received notification");
+                            if !sender.try_stream(notification).await {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            error!(error = ?e, "Received error message");
+                            if !sender.try_stream(e).await {
+                                return;
+                            }
+                        }
+                    },
                     Err(RecvError::Closed) => {
                         info!("No block ranges to receive, dropping receiver.");
                         break;
@@ -119,19 +206,17 @@ pub fn spawn_log_consumers<N: Network>(
                 }
             }
 
-            if let ConsumerMode::CollectLatest { .. } = mode {
-                if collected.is_empty() {
-                    info!("No logs found");
-                    _ = sender.try_stream(Notification::NoPastLogsFound).await;
-                    return;
-                }
-
-                info!(count = collected.len(), "Logs found");
-                collected.reverse(); // restore chronological order
-
-                info!("Sending collected logs to consumer");
-                _ = sender.try_stream(collected).await;
+            if collected.is_empty() {
+                info!("No logs found");
+                _ = sender.try_stream(Notification::NoPastLogsFound).await;
+                return;
             }
+
+            info!(count = collected.len(), "Logs found");
+            collected.reverse(); // restore chronological order
+
+            info!("Sending collected logs to consumer");
+            _ = sender.try_stream(collected).await;
         });
 
         set
@@ -172,85 +257,4 @@ async fn get_logs<N: Network>(
             Err(e)
         }
     }
-}
-
-#[must_use]
-async fn handle_block_range_message<N: Network>(
-    message: BlockScannerResult,
-    filter: &EventFilter,
-    base_filter: &Filter,
-    provider: &RobustProvider<N>,
-    sender: &mpsc::Sender<EventScannerResult>,
-    mode: ConsumerMode,
-    collected: &mut Vec<Log>,
-) -> bool {
-    match message {
-        Ok(ScannerMessage::Data(range)) => {
-            if !handle_block_range(range, filter, base_filter, provider, sender, mode, collected)
-                .await
-            {
-                return false;
-            }
-        }
-        Ok(ScannerMessage::Notification(notification)) => {
-            info!(notification = ?notification, "Received notification");
-            if !sender.try_stream(notification).await {
-                return false;
-            }
-        }
-        Err(e) => {
-            error!(error = ?e, "Received error message");
-            if !sender.try_stream(e).await {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-#[must_use]
-async fn handle_block_range<N: Network>(
-    range: RangeInclusive<u64>,
-    filter: &EventFilter,
-    base_filter: &Filter,
-    provider: &RobustProvider<N>,
-    sender: &mpsc::Sender<EventScannerResult>,
-    mode: ConsumerMode,
-    collected: &mut Vec<Log>,
-) -> bool {
-    match get_logs(range, filter, base_filter, provider).await {
-        Ok(logs) => {
-            if logs.is_empty() {
-                return true;
-            }
-
-            match mode {
-                ConsumerMode::Stream => {
-                    if !sender.try_stream(logs).await {
-                        return false;
-                    }
-                }
-                ConsumerMode::CollectLatest { count } => {
-                    let take = count.saturating_sub(collected.len());
-                    // if we have enough logs, break
-                    if take == 0 {
-                        return false;
-                    }
-                    // take latest within this range
-                    collected.extend(logs.into_iter().rev().take(take));
-                    // if we have enough logs, break
-                    if collected.len() == count {
-                        return false;
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            error!(error = ?e, "Received error message");
-            if !sender.try_stream(e).await {
-                return false;
-            }
-        }
-    }
-    true
 }
