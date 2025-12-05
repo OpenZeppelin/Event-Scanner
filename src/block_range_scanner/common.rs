@@ -349,7 +349,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     // no reorg check for finalized blocks
     let mut batch_start = start;
     let finalized_batch_end = finalized.min(end);
-    while batch_start < finalized_batch_end {
+    while batch_start <= finalized_batch_end {
         let batch_end = batch_start.saturating_add(max_block_range - 1).min(end);
 
         if !sender.try_stream(batch_start..=batch_end).await {
