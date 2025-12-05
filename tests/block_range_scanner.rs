@@ -238,6 +238,33 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 }
 
 #[tokio::test]
+#[ignore = "enable when ack-channels are introduced: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+async fn historical_reorg_occuring_immediately_after_finalized_processing_are_ignored()
+-> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+    provider.anvil_mine(Some(11), None).await?;
+
+    let client =
+        BlockRangeScanner::new().max_block_range(10).connect(provider.clone()).await?.run()?;
+
+    let mut stream =
+        client.stream_historical(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+
+    assert_next!(stream, 0..=0);
+    let mut stream = assert_empty!(stream);
+
+    _ = provider.anvil_reorg(ReorgOptions { depth: 3, tx_block_pairs: vec![] }).await;
+
+    // no Notification::ReorgDetected is streamed
+    assert_next!(stream, 1..=11);
+    assert_closed!(stream);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
