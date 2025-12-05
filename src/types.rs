@@ -25,6 +25,30 @@ pub enum Notification {
     SwitchingToLive,
 
     /// Emitted when a blockchain reorganization is detected during scanning.
+    ///
+    /// When a reorg occurs, the scanner adjusts its position to re-stream events from the
+    /// canonical chain state. The specific behavior depends on the scanning mode (see individual
+    /// scanner mode documentation for details).
+    ///
+    /// # Redundant Notifications
+    ///
+    /// Due to the asynchronous nature of block scanning and log fetching, you may occasionally
+    /// receive this notification even after the reorg has already been accounted for. This happens
+    /// when:
+    ///
+    /// 1. `BlockRangeScanner` validates and emits a block range
+    /// 2. A reorg occurs on the chain
+    /// 3. `EventScanner` fetches logs for that range, but the RPC provider returns logs from the
+    ///    post-reorg chain state (the provider's view has already updated)
+    /// 4. `BlockRangeScanner` detects the reorg on its next check and emits
+    ///    `Notification::ReorgDetected` with a new range starting from the first reorged block
+    /// 5. `EventScanner` re-fetches logs for this range, which may return duplicate logs already
+    ///    delivered in step 3 (the new range might also extend beyond the original range)
+    ///
+    /// **How to handle**: This is a benign race condition. Your application should be designed to
+    /// handle duplicate logs idempotently (e.g., using transaction hashes or log indices as
+    /// deduplication keys). The scanner prioritizes correctness by ensuring all logs from the
+    /// canonical chain are delivered, even if it means occasional duplicates during reorgs.
     ReorgDetected,
 
     /// Emitted during the latest events phase when no matching logs are found in the
