@@ -350,15 +350,6 @@ pub(crate) async fn stream_historical_range<N: Network>(
     let mut batch_start = start;
     let finalized_batch_end = finalized.min(end);
     while batch_start <= finalized_batch_end {
-        // TODO: consider updating this to the following line once ack-channels are introduced:
-        // ```
-        // let batch_end = batch_start.saturating_add(max_block_range - 1).min(end);
-        // ```
-        // This is so that max_block_range is fully respected.
-        //
-        // NOTE: this suggestion is nice-to-have, can drop it if it increases complexity.
-        //
-        // Ack-channels: https://github.com/OpenZeppelin/Event-Scanner/issues/218
         let batch_end = batch_start.saturating_add(max_block_range - 1).min(finalized_batch_end);
 
         if !sender.try_stream(batch_start..=batch_end).await {
