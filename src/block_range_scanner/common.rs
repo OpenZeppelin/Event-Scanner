@@ -436,7 +436,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
             if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
                 return None;
             }
-            if common_ancestor_block < min_block { min_block } else { common_ancestor_block + 1 }
+            (common_ancestor_block + 1).max(min_common_ancestor)
         } else {
             batch_end_num + 1
         };
