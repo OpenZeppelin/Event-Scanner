@@ -526,8 +526,8 @@ impl<N: Network> Service<N> {
     /// Checks for reorg and handles re-scanning if one is detected.
     ///
     /// Returns `Some(new_batch_from)` on success:
-    /// - If no reorg: returns `batch_to - 1`
-    /// - If reorg: returns `common_ancestor_block`
+    /// * If no reorg: returns `batch_to - 1`
+    /// * If reorg: returns `common_ancestor_block`
     ///
     /// Returns `None` if stream closed or terminal error occurred.
     async fn handle_reorg_check(
@@ -549,7 +549,7 @@ impl<N: Network> Service<N> {
         };
 
         let Some(common_ancestor) = reorged_opt else {
-            // No reorg - continue normal iteration
+            // No reorg we can continue normal iteration
             // `batch_to` is always greater than `to`, so `batch_to - 1` is always valid
             return Some(batch_to - 1);
         };
