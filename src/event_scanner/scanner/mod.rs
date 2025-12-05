@@ -378,13 +378,6 @@ impl EventScannerBuilder<SyncFromBlock> {
     }
 }
 
-// TODO: explain that due to technical details, there's an edge case where reorgs can occasionally
-// be discovered even after they've (unintentionally) been accounted for. After BlockRangeScanner
-// streams a block range, a reorg occurs, but EventScanner fetches logs from up-to-date, post-reorg
-// blocks; BlockRangeScanner only then detects that a reorg has occurred in the meantime, and emits
-// a Notification::ReorgDetected and the corrected range, prompting EventScanner to re-stream the
-// same logs again.
-
 impl<M> EventScannerBuilder<M> {
     /// Sets the maximum block range per event batch.
     ///
