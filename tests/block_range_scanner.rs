@@ -211,25 +211,21 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 
     provider.anvil_mine(Some(120), None).await?;
 
-    let end_num = 120;
-
     let client =
         BlockRangeScanner::new().max_block_range(30).connect(provider.clone()).await?.run()?;
 
-    let mut stream = client
-        .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num))
-        .await?;
-
-    let pre_reorg_mine = 20;
-    _ = provider.anvil_mine(Some(pre_reorg_mine), None).await;
-    let depth = pre_reorg_mine + 1;
-    _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
-    _ = provider.anvil_mine(Some(20), None).await;
+    let mut stream =
+        client.stream_historical(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
 
     assert_next!(stream, 0..=29);
-    assert_next!(stream, 30..=59);
-    assert_next!(stream, 60..=89);
-    assert_next!(stream, 90..=120);
+    assert_next!(stream, 30..=56);
+    assert_next!(stream, 57..=86);
+    assert_next!(stream, 87..=116);
+    assert_next!(stream, 117..=120);
+    let mut stream = assert_empty!(stream);
+
+    _ = provider.anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs: vec![] }).await;
+
     assert_next!(stream, Notification::ReorgDetected);
     assert_next!(stream, 120..=120);
     assert_closed!(stream);
