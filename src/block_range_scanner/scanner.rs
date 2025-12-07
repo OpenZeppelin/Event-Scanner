@@ -219,7 +219,6 @@ impl<N: Network> BlockRangeScanner<N> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
         let max_block_range = self.max_block_range;
-        let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
 
         let (start_block, end_block) = tokio::try_join!(
@@ -245,16 +244,12 @@ impl<N: Network> BlockRangeScanner<N> {
         );
 
         tokio::spawn(async move {
-            let mut reorg_handler =
-                ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
-
             _ = common::stream_historical_range(
                 start_block_num,
                 end_block_num,
                 max_block_range,
                 &blocks_sender,
                 &provider,
-                &mut reorg_handler,
             )
             .await;
 

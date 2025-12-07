@@ -12,7 +12,7 @@ use crate::{
 use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
-    network::{BlockResponse, Network},
+    network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::BlockNumber,
 };
 
@@ -385,17 +385,13 @@ struct LiveStreamingState<N: Network> {
 }
 
 #[must_use]
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
-)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(sender, provider)))]
 pub(crate) async fn stream_historical_range<N: Network>(
     start: BlockNumber,
     end: BlockNumber,
     max_block_range: u64,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
-    reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<()> {
     // NOTE: Edge case - If the chain is too young to expose finalized blocks (height < finalized
     // depth) just use zero.
@@ -407,7 +403,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     let finalized_block_num =
         provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
-    // no reorg check for finalized blocks
+    // Phase 1: Stream all finalized blocks without any reorg checks (using RangeIterator)
     let finalized_batch_end = finalized_block_num.min(end);
     let finalized_range_count =
         RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
@@ -434,29 +430,113 @@ pub(crate) async fn stream_historical_range<N: Network>(
         return Some(()); // we're done
     }
 
-    // we have non-finalized block numbers to stream, a reorg can occur
+    // Phase 2: Stream non-finalized blocks, then check for reorg only after the last range.
+    // If a reorg occurred, re-stream all non-finalized blocks. Repeat until stable.
+    // This is an optimization: we defer reorg checks to the end instead of checking per-batch.
+    let non_finalized_start = batch_start;
 
-    // Possible minimal common ancestors when a reorg occurs:
-    // * start > finalized -> the common ancestor we care about is the block before `start`, that's
-    //   where the stream should restart -> this is why we used `start - 1`
-    // * start == finalized -> `start` should never be re-streamed on reorgs; stream should restart
-    //   on `start + 1`
-    // * start < finalized -> if we got here, then `end > finalized`; on reorg, we should only
-    //   re-stream non-finalized blocks
-    let min_common_ancestor = (start.saturating_sub(1)).max(finalized_block_num);
+    // Get the end block's hash BEFORE streaming (critical for reorg detection)
+    // Block numbers persist through reorgs, only hashes change
+    let mut end_block_hash = match provider.get_block_by_number(end.into()).await {
+        Ok(block) => block.header().hash(),
+        Err(e) => {
+            error!("Failed to get end block hash");
+            _ = sender.try_stream(e).await;
+            return None;
+        }
+    };
 
-    stream_range_with_reorg_handling(
-        min_common_ancestor,
-        batch_start,
-        end,
-        max_block_range,
-        sender,
-        provider,
-        reorg_handler,
-    )
-    .await?;
+    loop {
+        // Stream all non-finalized ranges without intermediate reorg checks (using RangeIterator)
+        let non_finalized_range_count =
+            RangeIterator::forward(non_finalized_start, end, max_block_range).count();
+        trace!(
+            non_finalized_start = non_finalized_start,
+            end = end,
+            batch_count = non_finalized_range_count,
+            "Streaming non-finalized blocks (deferred reorg check)"
+        );
 
-    Some(())
+        for range in RangeIterator::forward(non_finalized_start, end, max_block_range) {
+            trace!(
+                range_start = *range.start(),
+                range_end = *range.end(),
+                "Streaming non-finalized range"
+            );
+            if sender.try_stream(range).await.is_closed() {
+                return None; // channel closed
+            }
+        }
+
+        // After streaming the last range, check if end block HASH still exists (reorg check)
+        // Using hash instead of number because block numbers persist through reorgs
+        match provider.get_block_by_hash(end_block_hash).await {
+            Ok(_) => {
+                // Same hash still exists, no reorg - we're done
+                debug!(
+                    end_block_hash = %end_block_hash,
+                    "Historical sync completed, end block hash verified"
+                );
+                return Some(());
+            }
+            Err(robust_provider::Error::BlockNotFound) => {
+                // Reorg detected: the block with our recorded hash no longer exists
+                warn!(
+                    end_block = end,
+                    end_hash = %end_block_hash,
+                    "Reorg detected after streaming last range, re-streaming non-finalized blocks"
+                );
+
+                // Note: For historic mode, we don't have a precise common_ancestor since we
+                // deferred reorg checks. We use `non_finalized_start - 1` as a reasonable estimate.
+                let common_ancestor = non_finalized_start.saturating_sub(1);
+                if sender
+                    .try_stream(Notification::ReorgDetected { common_ancestor })
+                    .await
+                    .is_closed()
+                {
+                    return None; // channel closed
+                }
+
+                // Get the new end block hash for the next iteration
+                end_block_hash = match provider.get_block_by_number(end.into()).await {
+                    Ok(block) => block.header().hash(),
+                    Err(e) => {
+                        error!("Failed to get new end block hash after reorg");
+                        _ = sender.try_stream(e).await;
+                        return None;
+                    }
+                };
+
+                // Re-stream all non-finalized blocks in the next iteration
+            }
+            Err(e) => {
+                error!("Failed to verify end block hash");
+                _ = sender.try_stream(e).await;
+                return None;
+            }
+        }
+
+        // Check if finalized has advanced past end (all blocks now finalized)
+        let current_finalized =
+            match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await {
+                Ok(block) => block,
+                Err(e) => {
+                    error!("Failed to get updated finalized block");
+                    _ = sender.try_stream(e).await;
+                    return None;
+                }
+            };
+
+        if current_finalized >= end {
+            debug!(
+                finalized = current_finalized,
+                end = end,
+                "End block is now finalized, historical sync completed"
+            );
+            return Some(());
+        }
+    }
 }
 
 /// Assumes that `min_common_ancestor <= next_start_block <= end`, performs no internal checks.
