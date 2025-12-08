@@ -130,12 +130,14 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Key behaviors
     ///
-    /// - **Continuous streaming**: Events are delivered in multiple messages as they are fetched
-    /// - **Chronological order**: Events are always delivered oldest to newest
-    /// - **Default range**: By default, scans from `Earliest` to `Latest` block
-    /// - **Batch control**: Use `.max_block_range(n)` to control how many blocks are queried per
+    /// * **Continuous streaming**: Events are delivered in multiple messages as they are fetched
+    /// * **Chronological order**: Events are always delivered oldest to newest
+    /// * **Default range**: By default, scans from `Earliest` to `Latest` block
+    /// * **Batch control**: Use `.max_block_range(n)` to control how many blocks are queried per
     ///   RPC call
-    /// - **Completion**: The scanner completes when the entire range has been processed
+    /// * **Reorg handling**: Performs reorg checks when streaming events from non-finalized blocks;
+    ///   if a reorg is detected, streams events from the reorged blocks
+    /// * **Completion**: The scanner completes when the entire range has been processed.
     #[must_use]
     pub fn historic() -> EventScannerBuilder<Historic> {
         EventScannerBuilder::default()
