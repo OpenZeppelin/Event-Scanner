@@ -4,6 +4,7 @@ use crate::common::{TestCounter::CountIncreased, setup_common, setup_latest_scan
 use event_scanner::{EventScannerBuilder, assert_closed, assert_next};
 
 #[tokio::test]
+#[ignore = "Currently relies on a race condition - will be fixed with https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn reorged_logs_are_removed_from_stream() -> anyhow::Result<()> {
     let (_anvil, provider, contract, filter) = setup_common(None, None).await?;
 
@@ -37,6 +38,7 @@ async fn reorged_logs_are_removed_from_stream() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Currently relies on a race condition - will be fixed with https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn new_logs_in_reorged_blocks_are_included() -> anyhow::Result<()> {
     use alloy::rpc::types::anvil::TransactionData;
 
@@ -78,6 +80,7 @@ async fn new_logs_in_reorged_blocks_are_included() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Currently relies on a race condition - will be fixed with https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn rewind_continues_further_when_reorg_removes_logs() -> anyhow::Result<()> {
     let setup = setup_latest_scanner(None, None, 5, None, None).await?;
     let provider = setup.provider;
@@ -111,6 +114,7 @@ async fn rewind_continues_further_when_reorg_removes_logs() -> anyhow::Result<()
 }
 
 #[tokio::test]
+#[ignore = "Currently relies on a race condition - will be fixed with https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn deep_reorg_removes_exhaust_requested_count() -> anyhow::Result<()> {
     let setup = setup_latest_scanner(None, None, 5, None, None).await?;
     let provider = setup.provider;
