@@ -35,8 +35,8 @@ pub enum ConsumerMode {
 ///
 /// Log consumers are tightly coupled with the `ConsumerMode` because the mode dictates their
 /// entire lifecycle and behavior:
-/// - `Stream` mode: consumers forward logs immediately as they arrive
-/// - `CollectLatest` mode: consumers accumulate logs and send them only at the end
+/// * `Stream` mode: consumers forward logs immediately as they arrive
+/// * `CollectLatest` mode: consumers accumulate logs and send them only at the end
 ///
 /// This tight coupling means consumers cannot be reused across different modes. For example,
 /// the "sync from latest" scanning strategy needs to run two modes sequentially (first

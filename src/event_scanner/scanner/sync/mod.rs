@@ -71,20 +71,20 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Key behaviors
     ///
-    /// - **No duplicates**: Events are not delivered twice across the phase transition
-    /// - **Flexible count**: If fewer than `count` events exist, returns all available events
-    /// - **Reorg handling**: Both phases handle reorgs appropriately:
+    /// * **No duplicates**: Events are not delivered twice across the phase transition
+    /// * **Flexible count**: If fewer than `count` events exist, returns all available events
+    /// * **Reorg handling**: Both phases handle reorgs appropriately:
     ///   - Latest events phase: resets and rescans on reorg detection
     ///   - Live phase: resets stream to the first post-reorg block that satisfies the configured
     ///     block confirmations
-    /// - **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
+    /// * **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
     ///
     /// # Notifications
     ///
     /// During the **latest events phase**, the scanner can emit the following notification
     /// before transitioning to live mode:
     ///
-    /// - **[`Notification::NoPastLogsFound`][no_logs]**: Emitted when no matching logs are found in
+    /// * **[`Notification::NoPastLogsFound`][no_logs]**: Emitted when no matching logs are found in
     ///   the scanned range
     ///
     /// After the latest events phase completes, [`Notification::SwitchingToLive`][switch_to_live]
@@ -97,15 +97,15 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// # Important notes
     ///
-    /// - The live phase continues indefinitely until the scanner is dropped or encounters an error
+    /// * The live phase continues indefinitely until the scanner is dropped or encounters an error
     ///
     /// # Detailed reorg behavior
     ///
-    /// - **Latest events phase**: Restart the scanner. On detecting a reorg, emits
+    /// * **Latest events phase**: Restart the scanner. On detecting a reorg, emits
     ///   [`Notification::ReorgDetected`][reorg], resets the rewind start to the new tip, and
     ///   continues until collectors accumulate `count` logs. Final delivery to listeners preserves
     ///   chronological order.
-    /// - **Live streaming phase**: Starts from `latest_block + 1` and respects the configured block
+    /// * **Live streaming phase**: Starts from `latest_block + 1` and respects the configured block
     ///   confirmations. On reorg, emits [`Notification::ReorgDetected`][reorg], adjusts the next
     ///   confirmed window (possibly re-emitting confirmed portions), and continues streaming.
     ///
@@ -203,7 +203,7 @@ impl EventScannerBuilder<Synchronize> {
     /// * **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
     /// * **Reorg detection**: When a reorg is detected, [`Notification::ReorgDetected`][reorg] is
     ///   emitted, the next confirmed window is adjusted to stream the reorged blocks, and continues
-    ///   streaming.
+    ///   streaming. While syncing, reorg checks are only performed for non-finalized blocks.
     ///
     /// # Arguments
     ///
