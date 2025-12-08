@@ -194,11 +194,15 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                             );
 
                             // Invalidate logs from reorged blocks
+                            // Logs are ordered by block number, so once we find a log
+                            // with block_number > common_ancestor, we can skip the rest
                             let before_count = collected.len();
-                            collected.retain(|log| {
-                                // Keep logs if block_number is None or <= common_ancestor
-                                log.block_number.is_none_or(|n| n <= common_ancestor_block)
-                            });
+                            collected = collected
+                                .into_iter()
+                                .take_while(|log| {
+                                    log.block_number.is_none_or(|n| n <= common_ancestor_block)
+                                })
+                                .collect();
                             let removed_count = before_count - collected.len();
                             if removed_count > 0 {
                                 info!(
