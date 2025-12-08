@@ -505,7 +505,6 @@ impl<N: Network> Service<N> {
 
             let Some(new_batch_from) = Self::handle_reorg_check(
                 &mut tip,
-                from,
                 max_block_range,
                 batch_to,
                 sender,
@@ -532,7 +531,6 @@ impl<N: Network> Service<N> {
     /// Returns `None` if stream closed or terminal error occurred.
     async fn handle_reorg_check(
         tip: &mut N::BlockResponse,
-        from: BlockNumber,
         max_block_range: u64,
         batch_to: BlockNumber,
         sender: &mpsc::Sender<BlockScannerResult>,
@@ -554,9 +552,10 @@ impl<N: Network> Service<N> {
             return Some(batch_to - 1);
         };
 
+        let tip_number = tip.header().number();
         let common_ancestor_block = common_ancestor.header().number();
         info!(
-            block_number = %from,
+            block_number = %tip_number,
             hash = %tip.header().hash(),
             common_ancestor_block = %common_ancestor_block,
             "Reorg detected"
@@ -567,10 +566,10 @@ impl<N: Network> Service<N> {
         }
 
         // Get the new tip block (same height as original tip, but new hash)
-        *tip = match provider.get_block_by_number(from.into()).await {
+        *tip = match provider.get_block_by_number(tip_number.into()).await {
             Ok(block) => block,
             Err(RobustProviderError::BlockNotFound(_)) => {
-                panic!("Block with number '{from}' should exist post-reorg");
+                panic!("Block with number '{tip_number}' should exist post-reorg");
             }
             Err(e) => {
                 error!(error = %e, "Terminal RPC call error, shutting down");
@@ -580,7 +579,7 @@ impl<N: Network> Service<N> {
         };
 
         // Re-scan only the affected range (from tip down to common_ancestor + 1)
-        let rescan_from = from;
+        let rescan_from = tip_number;
         let rescan_to = common_ancestor_block + 1;
 
         let mut rescan_batch_from = rescan_from;
