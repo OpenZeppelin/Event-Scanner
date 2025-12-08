@@ -203,7 +203,7 @@ impl EventScannerBuilder<Synchronize> {
     /// * **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
     /// * **Reorg detection**: When a reorg is detected, [`Notification::ReorgDetected`][reorg] is
     ///   emitted, the next confirmed window is adjusted to stream the reorged blocks, and continues
-    ///   streaming.
+    ///   streaming. While syncing, reorg checks are only performed for non-finalized blocks.
     ///
     /// # Arguments
     ///
