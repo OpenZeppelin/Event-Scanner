@@ -48,13 +48,17 @@ async fn new_logs_in_reorged_blocks_are_included() -> anyhow::Result<()> {
     let scanner = setup.scanner;
     let mut stream = setup.stream;
 
-    for _ in 0..10 {
+    for _ in 0..8 {
         contract.increase().send().await?.watch().await?;
     }
 
+    // Mine 2 empty blocks - max newCount is still 8
+    provider.primary().anvil_mine(Some(2), None).await?;
+
     scanner.start().await?;
 
-    // Trigger a reorg that removes 2 blocks  and adds 2 new events in replacement blocks.
+    // Trigger a reorg that removes 2 empty blocks and adds 2 new events in replacement blocks.
+    // Events 9 and 10 can only come from the reorged blocks.
     let tx_block_pairs = vec![
         (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
         (TransactionData::JSON(contract.increase().into_transaction_request()), 1),
@@ -62,8 +66,6 @@ async fn new_logs_in_reorged_blocks_are_included() -> anyhow::Result<()> {
 
     provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
-    // NOTE: 9 and 10 are from post reorg block (however can verify this in test)
-    // Should be correct given previous test assertion
     assert_next!(
         stream,
         &[
@@ -115,7 +117,7 @@ async fn rewind_continues_further_when_reorg_removes_logs() -> anyhow::Result<()
 
 #[tokio::test]
 #[ignore = "Currently relies on a race condition - will be fixed with https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
-async fn deep_reorg_removes_exhaust_requested_count() -> anyhow::Result<()> {
+async fn deep_reorg_closes_stream_when_fewer_events_remain_than_requested() -> anyhow::Result<()> {
     let setup = setup_latest_scanner(None, None, 5, None, None).await?;
     let provider = setup.provider;
     let contract = setup.contract;
