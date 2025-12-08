@@ -192,11 +192,11 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Key behaviors
     ///
-    /// - **Real-time streaming**: Events are delivered as new blocks are confirmed
-    /// - **Reorg protection**: Waits for configured confirmations before emitting events
-    /// - **Continuous operation**: Runs indefinitely until the scanner is dropped or encounters an
+    /// * **Real-time streaming**: Events are delivered as new blocks are confirmed
+    /// * **Reorg protection**: Waits for configured confirmations before emitting events
+    /// * **Continuous operation**: Runs indefinitely until the scanner is dropped or encounters an
     ///   error
-    /// - **Default confirmations**: By default, waits for 12 block confirmations
+    /// * **Default confirmations**: By default, waits for 12 block confirmations
     ///
     /// # Reorg behavior
     ///
@@ -292,20 +292,20 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Key behaviors
     ///
-    /// - **Single delivery**: Each registered stream receives at most `count` logs in a single
+    /// * **Single delivery**: Each registered stream receives at most `count` logs in a single
     ///   message, chronologically ordered
-    /// - **One-shot operation**: The scanner completes after delivering messages; it does not
+    /// * **One-shot operation**: The scanner completes after delivering messages; it does not
     ///   continue streaming
-    /// - **Flexible count**: If fewer than `count` events exist in the range, returns all available
+    /// * **Flexible count**: If fewer than `count` events exist in the range, returns all available
     ///   events
-    /// - **Default range**: By default, scans from `Earliest` to `Latest` block
-    /// - **Reorg handling**: Periodically checks the tip to detect reorgs during the scan
+    /// * **Default range**: By default, scans from `Earliest` to `Latest` block
+    /// * **Reorg handling**: Periodically checks the tip to detect reorgs during the scan
     ///
     /// # Notifications
     ///
     /// The scanner emits the following notification before delivering log data:
     ///
-    /// - **[`Notification::NoPastLogsFound`][no_logs]**: Emitted when no matching logs are found in
+    /// * **[`Notification::NoPastLogsFound`][no_logs]**: Emitted when no matching logs are found in
     ///   the scanned range.
     ///
     /// # Arguments
@@ -394,10 +394,10 @@ impl<M> EventScannerBuilder<M> {
     /// # Example
     ///
     /// If scanning events from blocks 1000–1099 (100 blocks total) with `max_block_range(30)`:
-    /// - Batch 1: blocks 1000–1029 (30 blocks)
-    /// - Batch 2: blocks 1030–1059 (30 blocks)
-    /// - Batch 3: blocks 1060–1089 (30 blocks)
-    /// - Batch 4: blocks 1090–1099 (10 blocks)
+    /// * Batch 1: blocks 1000–1029 (30 blocks)
+    /// * Batch 2: blocks 1030–1059 (30 blocks)
+    /// * Batch 3: blocks 1060–1089 (30 blocks)
+    /// * Batch 4: blocks 1090–1099 (10 blocks)
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.block_range_scanner.max_block_range = max_block_range;
