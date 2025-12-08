@@ -476,6 +476,10 @@ impl<N: Network> Service<N> {
 
         // we're iterating in reverse
         let mut batch_from = from;
+        let finalized_number = finalized_block.header().number();
+
+        // only check reorg if this is true
+        let check_reorg = tip.header().number() > finalized_number;
 
         while batch_from >= to {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
@@ -496,62 +500,46 @@ impl<N: Network> Service<N> {
                 break;
             }
 
-            // Skip reorg check if tip is at or below finalized block
-            let tip_number = tip.header().number();
-            if tip_number <= finalized_block.header().number() {
-                batch_from = batch_to - 1;
-                continue;
+            if check_reorg {
+                let reorg = match reorg_handler.check(&tip).await {
+                    Ok(opt) => opt,
+                    Err(e) => {
+                        error!(error = %e, "Terminal RPC call error, shutting down");
+                        _ = sender.try_stream(e).await;
+                        return;
+                    }
+                };
+
+                if let Some(common_ancestor) = reorg &&
+                    !Self::handle_reorg_rescan(
+                        &mut tip,
+                        common_ancestor,
+                        max_block_range,
+                        sender,
+                        provider,
+                    )
+                    .await
+                {
+                    return;
+                }
             }
 
-            let Some(new_batch_from) = Self::handle_reorg_check(
-                &mut tip,
-                max_block_range,
-                batch_to,
-                sender,
-                provider,
-                reorg_handler,
-            )
-            .await
-            else {
-                return;
-            };
-
-            batch_from = new_batch_from;
+            batch_from = batch_to - 1;
         }
 
         info!(batch_count = batch_count, "Rewind completed");
     }
 
-    /// Checks for reorg and handles re-scanning if one is detected.
+    /// Handles re-scanning of reorged blocks.
     ///
-    /// Returns `Some(new_batch_from)` on success:
-    /// * If no reorg: returns `batch_to - 1`
-    /// * If reorg: returns `common_ancestor_block`
-    ///
-    /// Returns `None` if stream closed or terminal error occurred.
-    async fn handle_reorg_check(
+    /// Returns `true` on success, `false` if stream closed or terminal error occurred.
+    async fn handle_reorg_rescan(
         tip: &mut N::BlockResponse,
+        common_ancestor: N::BlockResponse,
         max_block_range: u64,
-        batch_to: BlockNumber,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-        reorg_handler: &mut ReorgHandler<N>,
-    ) -> Option<BlockNumber> {
-        let reorged_opt = match reorg_handler.check(tip).await {
-            Ok(opt) => opt,
-            Err(e) => {
-                error!(error = %e, "Terminal RPC call error, shutting down");
-                _ = sender.try_stream(e).await;
-                return None;
-            }
-        };
-
-        let Some(common_ancestor) = reorged_opt else {
-            // No reorg we can continue normal iteration
-            // `batch_to` is always greater than `to`, so `batch_to - 1` is always valid
-            return Some(batch_to - 1);
-        };
-
+    ) -> bool {
         let tip_number = tip.header().number();
         let common_ancestor_block = common_ancestor.header().number();
         info!(
@@ -562,7 +550,7 @@ impl<N: Network> Service<N> {
         );
 
         if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
-            return None;
+            return false;
         }
 
         // Get the new tip block (same height as original tip, but new hash)
@@ -574,21 +562,20 @@ impl<N: Network> Service<N> {
             Err(e) => {
                 error!(error = %e, "Terminal RPC call error, shutting down");
                 _ = sender.try_stream(e).await;
-                return None;
+                return false;
             }
         };
 
         // Re-scan only the affected range (from tip down to common_ancestor + 1)
-        let rescan_from = tip_number;
         let rescan_to = common_ancestor_block + 1;
 
-        let mut rescan_batch_from = rescan_from;
+        let mut rescan_batch_from = tip_number;
         while rescan_batch_from >= rescan_to {
             let rescan_batch_to =
                 rescan_batch_from.saturating_sub(max_block_range - 1).max(rescan_to);
 
             if !sender.try_stream(rescan_batch_to..=rescan_batch_from).await {
-                return None;
+                return false;
             }
 
             if rescan_batch_to == rescan_to {
@@ -597,8 +584,7 @@ impl<N: Network> Service<N> {
             rescan_batch_from = rescan_batch_to - 1;
         }
 
-        // Continue normal rewind from common_ancestor (which is still valid)
-        Some(common_ancestor_block)
+        true
     }
 }
 
