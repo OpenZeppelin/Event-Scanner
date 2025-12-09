@@ -162,17 +162,18 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                 match range_rx.recv().await {
                     Ok(message) => match message {
                         Ok(ScannerMessage::Data(range)) => {
-                            match get_logs(range.clone(), &filter, &base_filter, &provider).await {
+                            let range_end = *range.end();
+                            match get_logs(range, &filter, &base_filter, &provider).await {
                                 Ok(logs) => {
                                     if logs.is_empty() {
                                         continue;
                                     }
 
                                     // Check if in reorg recovery and past the reorg range
-                                    if reorg_ancestor.is_some_and(|a| *range.start() <= a) {
+                                    if reorg_ancestor.is_some_and(|a| range_end <= a) {
                                         info!(
                                             ancestor = reorg_ancestor,
-                                            range_start = *range.start(),
+                                            range_end = range_end,
                                             "Reorg recovery complete, resuming normal log collection"
                                         );
                                         reorg_ancestor = None;
