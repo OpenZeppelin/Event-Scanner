@@ -1,7 +1,7 @@
 use std::ops::RangeInclusive;
 
 use crate::{
-    Notification, ScannerMessage,
+    Message, Notification, ScannerError, ScannerMessage,
     block_range_scanner::{BlockScannerResult, MAX_BUFFERED_MESSAGES},
     event_scanner::{filter::EventFilter, listener::EventListener},
     robust_provider::{RobustProvider, provider::Error as RobustProviderError},
@@ -11,11 +11,15 @@ use alloy::{
     network::Network,
     rpc::types::{Filter, Log},
 };
+use futures::StreamExt;
 use tokio::{
-    sync::broadcast::{self, Sender, error::RecvError},
+    sync::{
+        broadcast::{self, Sender, error::RecvError},
+        mpsc,
+    },
     task::JoinSet,
 };
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
 #[derive(Copy, Clone, Debug)]
@@ -55,7 +59,9 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResult> + Un
     let (range_tx, _) = broadcast::channel::<BlockScannerResult>(MAX_BUFFERED_MESSAGES);
 
     let consumers = match mode {
-        ConsumerMode::Stream => spawn_log_consumers_in_stream_mode(provider, listeners, &range_tx),
+        ConsumerMode::Stream => {
+            spawn_log_consumers_in_stream_mode(provider, listeners, &range_tx, 10)
+        }
         ConsumerMode::CollectLatest { count } => {
             spawn_log_consumers_in_collection_mode(provider, listeners, &range_tx, count)
         }
@@ -80,6 +86,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockScannerResult>,
+    max_parallel: usize,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
         let EventListener { filter, sender } = listener;
@@ -89,47 +96,57 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
+            let (tx, rx) = mpsc::channel::<BlockScannerResult>(max_parallel);
+
+            let handle = tokio::spawn(async move {
+                let mut stream = ReceiverStream::new(rx)
+                    .map(async |message| {
+                        let message: BlockScannerResult = message.into();
+                        match message {
+                            Ok(ScannerMessage::Data(range)) => {
+                                get_logs(range, &filter, &base_filter, &provider)
+                                    .await
+                                    .map(Message::from)
+                                    .map_err(ScannerError::from)
+                            }
+                            Ok(ScannerMessage::Notification(notification)) => {
+                                Ok(notification.into())
+                            }
+                            Err(e) => Err(e),
+                        }
+                    })
+                    .buffered(max_parallel);
+
+                while let Some(result) = stream.next().await {
+                    if let Ok(ScannerMessage::Data(logs)) = result.as_ref() &&
+                        logs.is_empty()
+                    {
+                        continue;
+                    }
+
+                    if !sender.try_stream(result).await {
+                        return;
+                    }
+                }
+            });
+
             loop {
                 match range_rx.recv().await {
-                    Ok(message) => match message {
-                        Ok(ScannerMessage::Data(range)) => {
-                            match get_logs(range, &filter, &base_filter, &provider).await {
-                                Ok(logs) => {
-                                    if logs.is_empty() {
-                                        continue;
-                                    }
-
-                                    if !sender.try_stream(logs).await {
-                                        return;
-                                    }
-                                }
-                                Err(e) => {
-                                    error!(error = ?e, "Received error message");
-                                    if !sender.try_stream(e).await {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        Ok(ScannerMessage::Notification(notification)) => {
-                            info!(notification = ?notification, "Received notification");
-                            if !sender.try_stream(notification).await {
-                                return;
-                            }
-                        }
-                        Err(e) => {
-                            error!(error = ?e, "Received error message");
-                            if !sender.try_stream(e).await {
-                                return;
-                            }
-                        }
-                    },
+                    Ok(message) => {
+                        tx.send(message).await.expect("receiver dropped only if we exit this loop")
+                    }
                     Err(RecvError::Closed) => {
                         info!("No block ranges to receive, dropping receiver.");
                         break;
                     }
                     Err(RecvError::Lagged(_)) => {}
                 }
+            }
+
+            drop(tx);
+
+            if let Err(e) = handle.await {
+                error!(error = %e, "Error awaiting the log consumer task")
             }
         });
 
