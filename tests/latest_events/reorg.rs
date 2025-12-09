@@ -3,6 +3,13 @@ use alloy::{primitives::U256, providers::ext::AnvilApi, rpc::types::anvil::Reorg
 use crate::common::{TestCounter::CountIncreased, setup_common, setup_latest_scanner};
 use event_scanner::{EventScannerBuilder, assert_closed, assert_next};
 
+// WARN: Currently all tests in this file are ignored. This is because currently
+// there's no way to stop the latest events mode until it collects all events.
+// These will rely on some sort of a "halting" mechanism, where the test can
+// "stop" the scanner to perform a reorg, and then let it continue.
+// These tests can be removed after sufficient time we don't find a way to
+// halt the scanner execution or we don't find the tests useful any longer.
+
 #[tokio::test]
 #[ignore = "Currently relies on a race condition - will be fixed with https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn reorged_logs_are_removed_from_stream() -> anyhow::Result<()> {
