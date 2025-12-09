@@ -60,7 +60,7 @@ pub async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResult> + Un
 
     let consumers = match mode {
         ConsumerMode::Stream => {
-            spawn_log_consumers_in_stream_mode(provider, listeners, &range_tx, 10)
+            spawn_log_consumers_in_stream_mode(provider, listeners, &range_tx, 24)
         }
         ConsumerMode::CollectLatest { count } => {
             spawn_log_consumers_in_collection_mode(provider, listeners, &range_tx, count)
