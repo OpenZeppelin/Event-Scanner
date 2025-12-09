@@ -2053,7 +2053,6 @@ dependencies = [
  "alloy-node-bindings",
  "anyhow",
  "event-scanner",
- "futures",
  "tokio",
  "tokio-stream",
  "tracing",

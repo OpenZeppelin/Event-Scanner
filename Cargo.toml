@@ -25,7 +25,6 @@ all = "warn"
 alloy = { version = "1.1.2", features = ["full"] }
 alloy-node-bindings = "1.1.2"
 tokio = { version = "1.48", features = ["full"] }
-futures = "0.3.31"
 anyhow = "1.0"
 thiserror = "2.0.17"
 tokio-stream = "0.1.17"
