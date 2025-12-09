@@ -25,6 +25,7 @@ all = "warn"
 alloy = { version = "1.1.2", features = ["full"] }
 alloy-node-bindings = "1.1.2"
 tokio = { version = "1.48", features = ["full"] }
+futures = "0.3.31"
 anyhow = "1.0"
 thiserror = "2.0.17"
 tokio-stream = "0.1.17"
@@ -55,7 +56,6 @@ all-features = true
 [dependencies]
 alloy.workspace = true
 tokio.workspace = true
-futures.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 alloy-node-bindings.workspace = true
@@ -63,6 +63,7 @@ tokio-stream.workspace = true
 tracing.workspace = true
 backon.workspace = true
 tokio-util = "0.7.17"
+futures.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true
