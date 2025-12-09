@@ -445,6 +445,11 @@ impl<N: Network> Service<N> {
     ///
     /// The `from` block is assumed to be greater than or equal to the `to` block.
     ///
+    /// # Reorg Handling
+    ///
+    /// Reorg checks are only performed when the tip is above the current finalized
+    /// block height.
+    ///
     /// # Errors
     ///
     /// Returns an error if the stream fails
@@ -478,7 +483,7 @@ impl<N: Network> Service<N> {
         let mut batch_from = from;
         let finalized_number = finalized_block.header().number();
 
-        // only check reorg if this is true
+        // only check reorg if our tip is after the finalized block
         let check_reorg = tip.header().number() > finalized_number;
 
         while batch_from >= to {
