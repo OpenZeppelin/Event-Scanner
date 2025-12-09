@@ -8,7 +8,6 @@ use event_scanner::{
 };
 use futures::future::try_join_all;
 use tokio_stream::StreamExt;
-use tracing::{error, info};
 
 sol! {
     // Built directly with solc 0.8.30+commit.73712a01.Darwin.appleclang
@@ -54,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("sending txs");
     let mut txs = Vec::new();
-    for _ in 0..10_000 {
+    for _ in 0..100_000 {
         txs.push(contract.increase().send().await?);
     }
 
@@ -74,37 +73,48 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    let mut scanner = EventScannerBuilder::historic()
-        .max_block_range(10)
-        .from_block(0)
-        .to_block(BlockNumberOrTag::Latest)
-        .connect(robust_provider)
-        .await?;
-
-    let mut stream = scanner.subscribe(increase_filter);
-
     println!("Measuring...");
 
-    let start = Instant::now();
+    let runs = 100;
+    let mut run_times = Vec::with_capacity(runs);
 
-    scanner.start().await?;
+    for _ in 0..runs {
+        let mut scanner = EventScannerBuilder::historic()
+            .max_block_range(10)
+            .from_block(0)
+            .to_block(BlockNumberOrTag::Latest)
+            .connect(robust_provider.clone())
+            .await?;
 
-    let mut log_count = 0;
-    while let Some(message) = stream.next().await {
-        match message {
-            Ok(Message::Data(logs)) => {
-                log_count += logs.len();
-            }
-            Ok(Message::Notification(info)) => {
-                info!("Received info: {:?}", info);
-            }
-            Err(e) => {
-                error!("Received error: {}", e);
+        let mut stream = scanner.subscribe(increase_filter.clone());
+
+        let start = Instant::now();
+
+        scanner.start().await?;
+
+        let mut log_count = 0;
+        while let Some(message) = stream.next().await {
+            match message {
+                Ok(Message::Data(logs)) => {
+                    log_count += logs.len();
+                }
+                Ok(Message::Notification(notification)) => {
+                    panic!("Received notification: {:?}", notification);
+                }
+                Err(e) => {
+                    panic!("Received error: {}", e);
+                }
             }
         }
+        assert_eq!(100_000, log_count);
+
+        run_times.push(start.elapsed().as_secs_f32());
     }
 
-    println!("Finished historic in: {:?}  --- log count: {log_count}", start.elapsed());
+    let sum: f32 = run_times.iter().sum();
+    let len = run_times.iter().count() as f32;
+
+    println!("Average elapsed time: {:?}", sum / len);
 
     Ok(())
 }
