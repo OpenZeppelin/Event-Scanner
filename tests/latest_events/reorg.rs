@@ -3,7 +3,7 @@ use alloy::{primitives::U256, providers::ext::AnvilApi, rpc::types::anvil::Reorg
 use crate::common::{TestCounter::CountIncreased, setup_common, setup_latest_scanner};
 use event_scanner::{EventScannerBuilder, assert_closed, assert_next};
 
-// NOTE: Currently all tests in this file are ignored. This is because currently
+// WARN: Currently all tests in this file are ignored. This is because currently
 // there's no way to stop the latest events mode until it collects all events.
 // These will rely on some sort of a "halting" mechanism, where the test can
 // "stop" the scanner to perform a reorg, and then let it continue.
