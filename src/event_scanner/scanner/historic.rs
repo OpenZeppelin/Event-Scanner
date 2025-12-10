@@ -12,12 +12,24 @@ use crate::{
 };
 
 impl EventScannerBuilder<Historic> {
+    /// Sets the starting block for the historic scan.
+    ///
+    /// # Note
+    ///
+    /// Although passing `BlockNumberOrTag::Finalized` will compile, the subsequent call to
+    /// `connect` will fail at runtime. See issue <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     #[must_use]
     pub fn from_block(mut self, block_id: impl Into<BlockId>) -> Self {
         self.config.from_block = block_id.into();
         self
     }
 
+    /// Sets the ending block for the historic scan.
+    ///
+    /// # Note
+    ///
+    /// Although passing `BlockNumberOrTag::Finalized` will compile, the subsequent call to
+    /// `connect` will fail at runtime. See issue <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     #[must_use]
     pub fn to_block(mut self, block_id: impl Into<BlockId>) -> Self {
         self.config.to_block = block_id.into();
