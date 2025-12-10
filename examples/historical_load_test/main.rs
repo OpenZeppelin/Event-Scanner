@@ -1,6 +1,11 @@
 use std::time::Instant;
 
-use alloy::{eips::BlockNumberOrTag, providers::ProviderBuilder, sol, sol_types::SolEvent};
+use alloy::{
+    eips::BlockNumberOrTag,
+    providers::{Provider, ProviderBuilder},
+    sol,
+    sol_types::SolEvent,
+};
 use alloy_node_bindings::Anvil;
 
 use event_scanner::{
@@ -37,7 +42,7 @@ sol! {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let anvil = Anvil::new().block_time_f64(0.1).try_spawn()?;
+    let anvil = Anvil::new().block_time_f64(0.01).try_spawn()?;
     let wallet = anvil.wallet();
     let provider = ProviderBuilder::new()
         .wallet(wallet.unwrap())
@@ -65,6 +70,8 @@ async fn main() -> anyhow::Result<()> {
     try_join_all(watch_futures).await?;
 
     println!("Setting up scanner");
+
+    println!("total block count: {}", provider.get_block_number().await?);
 
     let robust_provider = RobustProviderBuilder::new(provider)
         .call_timeout(std::time::Duration::from_secs(30))
