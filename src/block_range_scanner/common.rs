@@ -354,7 +354,10 @@ pub(crate) async fn stream_historical_range<N: Network>(
             return None; // channel closed
         }
     }
-    let batch_start = finalized_batch_end + 1;
+
+    // If start > finalized_batch_end, the loop above was empty and we should
+    // continue from start. Otherwise, continue from after finalized_batch_end.
+    let batch_start = start.max(finalized_batch_end + 1);
 
     // covers case when `end <= finalized`
     if batch_start > end {
