@@ -79,12 +79,15 @@ use alloy::{
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::BlockNumber,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
+mod batch_iterator;
 mod common;
 mod reorg_handler;
 mod ring_buffer;
 mod sync_handler;
+
+pub(crate) use batch_iterator::BatchIterator;
 
 use reorg_handler::ReorgHandler;
 pub use ring_buffer::RingBufferCapacity;
@@ -461,8 +464,6 @@ impl<N: Network> Service<N> {
         provider: &RobustProvider<N>,
         reorg_handler: &mut ReorgHandler<N>,
     ) {
-        let mut batch_count = 0;
-
         // for checking whether reorg occurred
         let mut tip = from;
 
@@ -479,29 +480,17 @@ impl<N: Network> Service<N> {
             }
         };
 
-        // we're iterating in reverse
-        let mut batch_from = from;
         let finalized_number = finalized_block.header().number();
 
         // only check reorg if our tip is after the finalized block
         let check_reorg = tip.header().number() > finalized_number;
 
-        while batch_from >= to {
-            let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
-
+        let mut iter = BatchIterator::reverse(from, to, max_block_range);
+        // Need access to iter.batch_count() after loop
+        #[allow(clippy::while_let_on_iterator)]
+        while let Some(batch) = iter.next() {
             // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(batch_to..=batch_from).await {
-                break;
-            }
-
-            batch_count += 1;
-            if batch_count % 10 == 0 {
-                debug!(batch_count = batch_count, "Processed rewind batches");
-            }
-
-            // check early if end of stream achieved to avoid subtraction overflow when `to
-            // == 0`
-            if batch_to == to {
+            if !sender.try_stream(batch).await {
                 break;
             }
 
@@ -528,11 +517,9 @@ impl<N: Network> Service<N> {
                     return;
                 }
             }
-
-            batch_from = batch_to - 1;
         }
 
-        info!(batch_count = batch_count, "Rewind completed");
+        info!(batch_count = iter.batch_count(), "Rewind completed");
     }
 
     /// Handles re-scanning of reorged blocks.
@@ -574,18 +561,10 @@ impl<N: Network> Service<N> {
         // Re-scan only the affected range (from common_ancestor + 1 up to tip)
         let rescan_from = common_ancestor_block + 1;
 
-        let mut rescan_batch_start = rescan_from;
-        while rescan_batch_start <= tip_number {
-            let rescan_batch_end = (rescan_batch_start + max_block_range - 1).min(tip_number);
-
-            if !sender.try_stream(rescan_batch_start..=rescan_batch_end).await {
+        for batch in BatchIterator::forward(rescan_from, tip_number, max_block_range) {
+            if !sender.try_stream(batch).await {
                 return false;
             }
-
-            if rescan_batch_end == tip_number {
-                break;
-            }
-            rescan_batch_start = rescan_batch_end + 1;
         }
 
         true
