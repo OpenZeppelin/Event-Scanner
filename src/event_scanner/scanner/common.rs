@@ -267,6 +267,12 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
 /// Returns `true` if collection is complete (reached count limit).
 fn collect_logs(collected: &mut Vec<Log>, logs: Vec<Log>, count: usize, prepend: bool) -> bool {
     if prepend {
+        // Reorg rescan ranges are sent in ascending order (oldest → latest), opposite to normal
+        // rewind which sends descending (latest → oldest). This means each successive reorg batch
+        // contains newer blocks, so we always prepend at position 0 to maintain newest-first order.
+        // Example: reorg rescan sends 86..=95 then 96..=100
+        //   - First batch (86..=95): prepend → [95, 94, ..., 86]
+        //   - Second batch (96..=100): prepend → [100, 99, ..., 96, 95, 94, ..., 86]
         let new_logs: Vec<_> = logs.into_iter().rev().take(count).collect();
         let keep = count.saturating_sub(new_logs.len());
         collected.truncate(keep);

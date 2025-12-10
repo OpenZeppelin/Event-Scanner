@@ -571,22 +571,21 @@ impl<N: Network> Service<N> {
             }
         };
 
-        // Re-scan only the affected range (from tip down to common_ancestor + 1)
-        let rescan_to = common_ancestor_block + 1;
+        // Re-scan only the affected range (from common_ancestor + 1 up to tip)
+        let rescan_from = common_ancestor_block + 1;
 
-        let mut rescan_batch_from = tip_number;
-        while rescan_batch_from >= rescan_to {
-            let rescan_batch_to =
-                rescan_batch_from.saturating_sub(max_block_range - 1).max(rescan_to);
+        let mut rescan_batch_start = rescan_from;
+        while rescan_batch_start <= tip_number {
+            let rescan_batch_end = (rescan_batch_start + max_block_range - 1).min(tip_number);
 
-            if !sender.try_stream(rescan_batch_to..=rescan_batch_from).await {
+            if !sender.try_stream(rescan_batch_start..=rescan_batch_end).await {
                 return false;
             }
 
-            if rescan_batch_to == rescan_to {
+            if rescan_batch_end == tip_number {
                 break;
             }
-            rescan_batch_from = rescan_batch_to - 1;
+            rescan_batch_start = rescan_batch_end + 1;
         }
 
         true
