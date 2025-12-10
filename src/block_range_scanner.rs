@@ -442,17 +442,6 @@ impl<N: Network> Service<N> {
     }
 
     /// Streams blocks in reverse order from `from` to `to`.
-    ///
-    /// The `from` block is assumed to be greater than or equal to the `to` block.
-    ///
-    /// # Reorg Handling
-    ///
-    /// Reorg checks are only performed when the tip is above the current finalized
-    /// block height.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the stream fails
     async fn stream_rewind(
         from: N::BlockResponse,
         to: N::BlockResponse,
@@ -700,10 +689,31 @@ impl BlockRangeScannerClient {
 
     /// Streams blocks in reverse order from `start_id` to `end_id`.
     ///
+    /// The `start_id` block is assumed to be greater than or equal to the `end_id` block.
+    /// Blocks are streamed in batches, where each batch is ordered from lower to higher
+    /// block numbers (chronological order within each batch), but batches themselves
+    /// progress from newer to older blocks.
+    ///
     /// # Arguments
     ///
-    /// * `start_id` - The starting block id (defaults to Latest if None).
-    /// * `end_id` - The ending block id (defaults to Earliest if None).
+    /// * `start_id` - The starting block id (higher block number).
+    /// * `end_id` - The ending block id (lower block number).
+    ///
+    /// # Reorg Handling
+    ///
+    /// Reorg checks are only performed when the starting block (`start_id`) is above the
+    /// current finalized block height. When a reorg is detected:
+    ///
+    /// 1. A [`Notification::ReorgDetected`][reorg] is emitted with the common ancestor block
+    /// 2. The scanner fetches the new tip block at the same height
+    /// 3. Reorged blocks are re-streamed in chronological order (from `common_ancestor + 1`
+    ///    up to the new tip)
+    /// 4. The reverse scan continues from where it left off
+    ///
+    /// If the starting block is at or below the finalized block, no reorg checks are
+    /// performed since finalized blocks cannot be reorganized.
+    ///
+    /// [reorg]: crate::Notification::ReorgDetected
     ///
     /// # Errors
     ///
