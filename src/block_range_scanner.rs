@@ -486,9 +486,7 @@ impl<N: Network> Service<N> {
         let check_reorg = tip.header().number() > finalized_number;
 
         let mut iter = BatchIterator::reverse(from, to, max_block_range);
-        // Need access to iter.batch_count() after loop
-        #[allow(clippy::while_let_on_iterator)]
-        while let Some(batch) = iter.next() {
+        for batch in &mut iter {
             // stream the range regularly, i.e. from smaller block number to greater
             if !sender.try_stream(batch).await {
                 break;

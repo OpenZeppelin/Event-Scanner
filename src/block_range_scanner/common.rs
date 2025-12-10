@@ -399,7 +399,6 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
     let mut last_batch_end: Option<N::BlockResponse> = None;
     let mut iter = BatchIterator::forward(next_start_block, end, max_block_range);
 
-    #[allow(clippy::while_let_on_iterator)] // Need access to iter.batch_count() after loop
     while let Some(batch) = iter.next() {
         let batch_end_num = *batch.end();
         let batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
