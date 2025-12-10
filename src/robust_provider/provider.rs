@@ -250,10 +250,7 @@ impl<N: Network> RobustProvider<N> {
         info!("eth_getLogs called");
         let result = self
             .try_operation_with_failover(
-                move |provider| async move {
-                    sleep(Duration::from_millis(100)).await;
-                    provider.get_logs(filter).await
-                },
+                move |provider| async move { provider.get_logs(filter).await },
                 false,
             )
             .await
@@ -325,6 +322,8 @@ impl<N: Network> RobustProvider<N> {
         F: Fn(RootProvider<N>) -> Fut,
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
+        sleep(Duration::from_millis(100)).await;
+
         let primary = self.primary();
         let result = self.try_provider_with_timeout(primary, &operation).await;
 
