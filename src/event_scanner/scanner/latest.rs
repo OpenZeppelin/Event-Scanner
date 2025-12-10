@@ -302,68 +302,86 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_from_block_above_latest_returns_error() {
-        let anvil = Anvil::new().try_spawn().unwrap();
+    async fn test_from_block_above_pending_returns_error() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
-        let latest_block = provider.get_block_number().await.unwrap();
+        provider.anvil_mine(Some(100), None).await?;
+
+        let pending_block = provider
+            .get_block_by_number(BlockNumberOrTag::Pending)
+            .await?
+            .expect("pending block not found")
+            .header
+            .number;
 
         let result = EventScannerBuilder::latest(1)
-            .from_block(latest_block + 100)
-            .to_block(latest_block)
+            .from_block(pending_block + 100)
+            .to_block(pending_block)
             .connect(provider)
             .await;
 
         match result {
-            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
-                assert_eq!(max, latest_block + 100);
-                assert_eq!(latest, latest_block);
-            }
-            _ => panic!("Expected BlockExceedsLatest error"),
+            Err(ScannerError::PendingBlockNotSupported("from_block")) => {}
+            _ => panic!("Expected PendingBlockNotSupported error"),
         }
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_to_block_above_latest_returns_error() {
-        let anvil = Anvil::new().try_spawn().unwrap();
+    async fn test_to_block_above_pending_returns_error() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
-        let latest_block = provider.get_block_number().await.unwrap();
+        provider.anvil_mine(Some(100), None).await?;
+
+        let pending_block = provider
+            .get_block_by_number(BlockNumberOrTag::Pending)
+            .await?
+            .expect("pending block not found")
+            .header
+            .number;
 
         let result = EventScannerBuilder::latest(1)
             .from_block(0)
-            .to_block(latest_block + 100)
+            .to_block(pending_block + 100)
             .connect(provider)
             .await;
 
         match result {
-            Err(ScannerError::BlockExceedsLatest("to_block", max, latest)) => {
-                assert_eq!(max, latest_block + 100);
-                assert_eq!(latest, latest_block);
-            }
-            _ => panic!("Expected BlockExceedsLatest error"),
+            Err(ScannerError::PendingBlockNotSupported("to_block")) => {}
+            _ => panic!("Expected PendingBlockNotSupported error"),
         }
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_to_and_from_block_above_latest_returns_error() {
-        let anvil = Anvil::new().try_spawn().unwrap();
+    async fn test_to_and_from_block_above_pending_returns_error() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
 
-        let latest_block = provider.get_block_number().await.unwrap();
+        provider.anvil_mine(Some(100), None).await?;
+
+        let pending_block = provider
+            .get_block_by_number(BlockNumberOrTag::Pending)
+            .await?
+            .expect("pending block not found")
+            .header
+            .number;
 
         let result = EventScannerBuilder::latest(1)
-            .from_block(latest_block + 50)
-            .to_block(latest_block + 100)
+            .from_block(pending_block + 50)
+            .to_block(pending_block + 100)
             .connect(provider)
             .await;
 
         match result {
-            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
-                assert_eq!(max, latest_block + 50);
-                assert_eq!(latest, latest_block);
-            }
-            _ => panic!("Expected BlockExceedsLatest error for 'from_block'"),
+            Err(ScannerError::PendingBlockNotSupported("from_block")) => {}
+            _ => panic!("Expected PendingBlockNotSupported error for 'from_block'"),
         }
+
+        Ok(())
     }
 }
