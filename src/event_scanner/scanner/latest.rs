@@ -1,6 +1,6 @@
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockId,
     network::{BlockResponse, Network},
 };
 
@@ -50,26 +50,37 @@ impl EventScannerBuilder<LatestEvents> {
 
         let provider = scanner.block_range_scanner.provider();
 
-        if scanner.config.from_block.is_pending() {
+        let pending_block = provider.get_block_number_by_id(BlockId::pending()).await?;
+
+        let from_num = match scanner.config.from_block {
+            BlockId::Number(from_block) => {
+                if from_block.is_pending() {
+                    return Err(ScannerError::PendingBlockNotSupported("from_block"));
+                }
+                from_block.as_number().unwrap_or(0)
+            }
+            BlockId::Hash(from_hash) => {
+                provider.get_block_by_hash(from_hash.into()).await?.header().number()
+            }
+        };
+
+        if from_num >= pending_block {
             return Err(ScannerError::PendingBlockNotSupported("from_block"));
         }
 
-        if scanner.config.to_block.is_pending() {
-            return Err(ScannerError::PendingBlockNotSupported("to_block"));
-        }
+        let to_num = match scanner.config.to_block {
+            BlockId::Number(to_block) => {
+                if to_block.is_pending() {
+                    return Err(ScannerError::PendingBlockNotSupported("to_block"));
+                }
+                to_block.as_number().unwrap_or(0)
+            }
+            BlockId::Hash(to_hash) => {
+                provider.get_block_by_hash(to_hash.into()).await?.header().number()
+            }
+        };
 
-        let pending_block =
-            provider.get_block_by_number(BlockNumberOrTag::Pending).await?.header().number();
-
-        let from_num = provider.get_block_number_by_id(scanner.config.from_block).await?;
-
-        if from_num > pending_block {
-            return Err(ScannerError::PendingBlockNotSupported("from_block"));
-        }
-
-        let to_num = provider.get_block_number_by_id(scanner.config.to_block).await?;
-
-        if to_num > pending_block {
+        if to_num >= pending_block {
             return Err(ScannerError::PendingBlockNotSupported("to_block"));
         }
 
