@@ -1,6 +1,6 @@
 use alloy::{
     consensus::BlockHeader,
-    eips::BlockId,
+    eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network},
 };
 
@@ -42,28 +42,28 @@ impl EventScannerBuilder<Historic> {
         let scanner = self.build(provider).await?;
 
         let provider = scanner.block_range_scanner.provider();
-        let latest_block = provider.get_block_number().await?;
 
-        let from_num = match scanner.config.from_block {
-            BlockId::Number(from_block) => from_block.as_number().unwrap_or(0),
-            BlockId::Hash(from_hash) => {
-                provider.get_block_by_hash(from_hash.into()).await?.header().number()
-            }
-        };
-
-        if from_num > latest_block {
-            Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
+        if scanner.config.from_block.is_pending() {
+            return Err(ScannerError::PendingBlockNotSupported("from_block"));
         }
 
-        let to_num = match scanner.config.to_block {
-            BlockId::Number(to_block) => to_block.as_number().unwrap_or(0),
-            BlockId::Hash(to_hash) => {
-                provider.get_block_by_hash(to_hash.into()).await?.header().number()
-            }
-        };
+        if scanner.config.to_block.is_pending() {
+            return Err(ScannerError::PendingBlockNotSupported("to_block"));
+        }
 
-        if to_num > latest_block {
-            Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
+        let pending_block =
+            provider.get_block_by_number(BlockNumberOrTag::Pending).await?.header().number();
+
+        let from_num = provider.get_block_number_by_id(scanner.config.from_block).await?;
+
+        if from_num > pending_block {
+            return Err(ScannerError::PendingBlockNotSupported("from_block"));
+        }
+
+        let to_num = provider.get_block_number_by_id(scanner.config.to_block).await?;
+
+        if to_num > pending_block {
+            return Err(ScannerError::PendingBlockNotSupported("to_block"));
         }
 
         Ok(scanner)
