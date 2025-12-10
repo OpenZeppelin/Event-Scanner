@@ -561,9 +561,6 @@ impl<N: Network> Service<N> {
         // Get the new tip block (same height as original tip, but new hash)
         *tip = match provider.get_block_by_number(tip_number.into()).await {
             Ok(block) => block,
-            Err(RobustProviderError::BlockNotFound(_)) => {
-                panic!("Block with number '{tip_number}' should exist post-reorg");
-            }
             Err(e) => {
                 error!(error = %e, "Terminal RPC call error, shutting down");
                 _ = sender.try_stream(e).await;
