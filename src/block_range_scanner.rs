@@ -703,16 +703,14 @@ impl BlockRangeScannerClient {
     /// Reorg checks are only performed when the starting block (`start_id`) is above the
     /// current finalized block height. When a reorg is detected:
     ///
-    /// 1. A [`Notification::ReorgDetected`][reorg] is emitted with the common ancestor block
+    /// 1. A [`Notification::ReorgDetected`] is emitted with the common ancestor block
     /// 2. The scanner fetches the new tip block at the same height
-    /// 3. Reorged blocks are re-streamed in chronological order (from `common_ancestor + 1`
-    ///    up to the new tip)
+    /// 3. Reorged blocks are re-streamed in chronological order (from `common_ancestor + 1` up to
+    ///    the new tip)
     /// 4. The reverse scan continues from where it left off
     ///
     /// If the starting block is at or below the finalized block, no reorg checks are
     /// performed since finalized blocks cannot be reorganized.
-    ///
-    /// [reorg]: crate::Notification::ReorgDetected
     ///
     /// # Errors
     ///
