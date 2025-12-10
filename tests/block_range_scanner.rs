@@ -539,6 +539,35 @@ async fn rewind_reorg_emits_notification_and_rescans_affected_range() -> anyhow:
 
 #[tokio::test]
 #[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+async fn rewind_reorg_deep_emits_notification_and_rescans_affected_range() -> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+    provider.anvil_mine(Some(20), None).await?;
+    let client =
+        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+    let mut stream = client.rewind(5, 20).await?;
+    assert_next!(stream, 16..=20);
+    let mut stream = assert_empty!(stream);
+
+    // NOTE: Pause here
+    // Deep reorg: >= max_block_range * 2
+    let depth = 10;
+    _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: 20 - depth });
+
+    // Rescan range from common_ancestor (11) to tip (20)
+    assert_next!(stream, 11..=15);
+    assert_next!(stream, 16..=20);
+
+    // Rewind continues from where it left off (batch_from = 15)
+    assert_next!(stream, 10..=15);
+    assert_next!(stream, 5..=9);
+    assert_closed!(stream);
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn rewind_skips_reorg_check_when_tip_below_finalized() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
