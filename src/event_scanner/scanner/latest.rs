@@ -325,6 +325,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_from_block_equals_pending_returns_error() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        provider.anvil_mine(Some(100), None).await?;
+
+        let pending_block = provider
+            .get_block_by_number(BlockNumberOrTag::Pending)
+            .await?
+            .expect("pending block not found")
+            .header
+            .number;
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(pending_block)
+            .to_block(50)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::PendingBlockNotSupported("from_block")) => {}
+            _ => panic!("Expected PendingBlockNotSupported error"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_to_block_equals_pending_returns_error() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn()?;
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        provider.anvil_mine(Some(100), None).await?;
+
+        let pending_block = provider
+            .get_block_by_number(BlockNumberOrTag::Pending)
+            .await?
+            .expect("pending block not found")
+            .header
+            .number;
+
+        let result = EventScannerBuilder::latest(1)
+            .from_block(0)
+            .to_block(pending_block)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::PendingBlockNotSupported("to_block")) => {}
+            _ => panic!("Expected PendingBlockNotSupported error"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_from_block_above_pending_returns_error() -> anyhow::Result<()> {
         let anvil = Anvil::new().try_spawn()?;
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
