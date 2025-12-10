@@ -10,7 +10,7 @@ use alloy::{
 };
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
-use tokio::time::{error as TokioError, timeout};
+use tokio::time::{error as TokioError, sleep, timeout};
 use tracing::{error, info};
 
 use crate::robust_provider::RobustSubscription;
@@ -250,7 +250,10 @@ impl<N: Network> RobustProvider<N> {
         info!("eth_getLogs called");
         let result = self
             .try_operation_with_failover(
-                move |provider| async move { provider.get_logs(filter).await },
+                move |provider| async move {
+                    sleep(Duration::from_millis(100)).await;
+                    provider.get_logs(filter).await
+                },
                 false,
             )
             .await
