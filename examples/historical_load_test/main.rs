@@ -98,7 +98,6 @@ async fn main() -> anyhow::Result<()> {
             match message {
                 Ok(Message::Data(logs)) => {
                     log_count += logs.len();
-                    println!("total log count: {log_count}");
                 }
                 Ok(Message::Notification(notification)) => {
                     panic!("Received notification: {:?}", notification);
