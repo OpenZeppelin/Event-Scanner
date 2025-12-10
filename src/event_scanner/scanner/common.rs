@@ -203,6 +203,9 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                             // Invalidate logs from reorged blocks
                             // Logs are ordered newest -> oldest, so skip logs with
                             // block_number > common_ancestor at the front
+                            // NOTE: Pending logs are not supported therefore this filter
+                            // works for now (may need to update once they are). Tracked in
+                            // <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
                             let before_count = collected.len();
                             collected = collected
                                 .into_iter()
