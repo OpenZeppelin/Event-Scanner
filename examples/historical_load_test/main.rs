@@ -78,9 +78,10 @@ async fn main() -> anyhow::Result<()> {
     let runs = 100;
     let mut run_times = Vec::with_capacity(runs);
 
-    for _ in 0..runs {
+    for i in 0..runs {
+        println!("---- run {i} ----");
         let mut scanner = EventScannerBuilder::historic()
-            .max_block_range(10)
+            .max_block_range(100)
             .from_block(0)
             .to_block(BlockNumberOrTag::Latest)
             .connect(robust_provider.clone())
@@ -97,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
             match message {
                 Ok(Message::Data(logs)) => {
                     log_count += logs.len();
+                    println!("total log count: {log_count}");
                 }
                 Ok(Message::Notification(notification)) => {
                     panic!("Received notification: {:?}", notification);
