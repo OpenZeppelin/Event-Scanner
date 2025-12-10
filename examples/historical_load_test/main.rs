@@ -1,106 +1,120 @@
-use alloy::{primitives::address, providers::ProviderBuilder, sol, sol_types::SolEvent};
-use tokio::time::Instant;
+use std::time::Instant;
+
+use alloy::{eips::BlockNumberOrTag, providers::ProviderBuilder, sol, sol_types::SolEvent};
+use alloy_node_bindings::Anvil;
+
+use event_scanner::{
+    EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder,
+};
+use futures::future::try_join_all;
 use tokio_stream::StreamExt;
 
-use event_scanner::{EventFilter, EventScannerBuilder, ScannerMessage};
-
 sol! {
-    struct BlockParams {
-        // the max number of transactions in this block. Note that if there are not enough
-        // transactions in calldata or blobs, the block will contains as many transactions as
-        // possible.
-        uint16 numTransactions;
-        // The time difference (in seconds) between the timestamp of this block and
-        // the timestamp of the parent block in the same batch. For the first block in a batch,
-        // there is not parent block in the same batch, so the time shift should be 0.
-        uint8 timeShift;
-        // Signals sent on L1 and need to sync to this L2 block.
-        bytes32[] signalSlots;
-    }
+    // Built directly with solc 0.8.30+commit.73712a01.Darwin.appleclang
+    #[sol(rpc, bytecode="608080604052346015576101b0908161001a8239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c90816306661abd1461016157508063a87d942c14610145578063d732d955146100ad5763e8927fbc14610048575f80fd5b346100a9575f3660031901126100a9575f5460018101809111610095576020817f7ca2ca9527391044455246730762df008a6b47bbdb5d37a890ef78394535c040925f55604051908152a1005b634e487b7160e01b5f52601160045260245ffd5b5f80fd5b346100a9575f3660031901126100a9575f548015610100575f198101908111610095576020817f53a71f16f53e57416424d0d18ccbd98504d42a6f98fe47b09772d8f357c620ce925f55604051908152a1005b60405162461bcd60e51b815260206004820152601860248201527f436f756e742063616e6e6f74206265206e6567617469766500000000000000006044820152606490fd5b346100a9575f3660031901126100a95760205f54604051908152f35b346100a9575f3660031901126100a9576020905f548152f3fea2646970667358221220471585b420a1ad0093820ff10129ec863f6df4bec186546249391fbc3cdbaa7c64736f6c634300081e0033")]
+    contract Counter {
+        uint256 public count;
 
-    struct BatchMetadata {
-        bytes32 infoHash;
-        address proposer;
-        uint64 batchId;
-        uint64 proposedAt; // Used by node/client
-    }
+        event CountIncreased(uint256 newCount);
+        event CountDecreased(uint256 newCount);
 
-    struct BaseFeeConfig {
-        uint8 adjustmentQuotient;
-        uint8 sharingPctg;
-        uint32 gasIssuancePerSecond;
-        uint64 minGasExcess;
-        uint32 maxGasIssuancePerBlock;
-    }
+        function increase() public {
+            count += 1;
+            emit CountIncreased(count);
+        }
 
-    struct BatchInfo {
-        bytes32 txsHash;
-        // Data to build L2 blocks
-        BlockParams[] blocks;
-        bytes32[] blobHashes;
-        bytes32 extraData;
-        address coinbase;
-        uint64 proposedIn; // Used by node/client
-        uint64 blobCreatedIn;
-        uint32 blobByteOffset;
-        uint32 blobByteSize;
-        uint32 gasLimit;
-        uint64 lastBlockId;
-        uint64 lastBlockTimestamp;
-        // Data for the L2 anchor transaction, shared by all blocks in the batch
-        uint64 anchorBlockId;
-        // corresponds to the `_anchorStateRoot` parameter in the anchor transaction.
-        // The batch's validity proof shall verify the integrity of these two values.
-        bytes32 anchorBlockHash;
-        BaseFeeConfig baseFeeConfig;
-    }
+        function decrease() public {
+            require(count > 0, "Count cannot be negative");
+            count -= 1;
+            emit CountDecreased(count);
+        }
 
-    event BatchProposed(BatchInfo info, BatchMetadata meta, bytes txList);
+        function getCount() public view returns (uint256) {
+            return count;
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let anvil = Anvil::new().block_time_f64(0.1).try_spawn()?;
+    let wallet = anvil.wallet();
     let provider = ProviderBuilder::new()
-        .connect("https://mainnet.infura.io/v3/7f91ecc67a254027b28f302a4e813fab")
+        .wallet(wallet.unwrap())
+        .connect(anvil.ws_endpoint_url().as_str())
         .await?;
+    let contract = Counter::deploy(provider.clone()).await?;
 
-    let mut scanner = EventScannerBuilder::historic()
-        .from_block(23_303_089)
-        .to_block(23_932_937)
-        .max_block_range(10000)
-        .connect(provider)
-        .await?;
+    let contract_address = contract.address();
 
-    let filter = EventFilter::new()
-        .event(BatchProposed::SIGNATURE)
-        .contract_address(address!("0x06a9Ab27c7e2255df1815E6CC0168d7755Feb19a"));
-    let mut stream = scanner.subscribe(filter);
+    let increase_filter = EventFilter::new()
+        .contract_address(*contract_address)
+        .event(Counter::CountIncreased::SIGNATURE);
 
-    scanner.start().await?;
-
-    let start = Instant::now();
-
-    let mut log_count = 0;
-    while let Some(msg) = stream.next().await {
-        match msg {
-            Ok(ScannerMessage::Data(logs)) => {
-                println!("count: {:?}", logs.len());
-                log_count += logs.len();
-            }
-            Ok(ScannerMessage::Notification(notification)) => {
-                panic!("notification: {:?}", notification)
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        }
+    println!("sending txs");
+    let mut txs = Vec::new();
+    for _ in 0..100_000 {
+        txs.push(contract.increase().send().await?);
     }
 
-    let elapsed = start.elapsed();
+    println!("setting up watch futures");
 
-    // 3. Print the elapsed time using the debug formatter
-    println!("Time elapsed: {:.2?}", elapsed);
-    println!("Log count: {log_count}");
+    let watch_futures = txs.into_iter().map(|pending| async move { pending.watch().await });
+
+    println!("executing watch futures");
+    try_join_all(watch_futures).await?;
+
+    println!("Setting up scanner");
+
+    let robust_provider = RobustProviderBuilder::new(provider)
+        .call_timeout(std::time::Duration::from_secs(30))
+        .max_retries(5)
+        .min_delay(std::time::Duration::from_millis(500))
+        .build()
+        .await?;
+
+    println!("Measuring...");
+
+    let runs = 100;
+    let mut run_times = Vec::with_capacity(runs);
+
+    for _ in 0..runs {
+        let mut scanner = EventScannerBuilder::historic()
+            .max_block_range(10)
+            .from_block(0)
+            .to_block(BlockNumberOrTag::Latest)
+            .connect(robust_provider.clone())
+            .await?;
+
+        let mut stream = scanner.subscribe(increase_filter.clone());
+
+        let start = Instant::now();
+
+        scanner.start().await?;
+
+        let mut log_count = 0;
+        while let Some(message) = stream.next().await {
+            match message {
+                Ok(Message::Data(logs)) => {
+                    log_count += logs.len();
+                }
+                Ok(Message::Notification(notification)) => {
+                    panic!("Received notification: {:?}", notification);
+                }
+                Err(e) => {
+                    panic!("Received error: {}", e);
+                }
+            }
+        }
+        assert_eq!(100_000, log_count);
+
+        run_times.push(start.elapsed().as_secs_f32());
+    }
+
+    let sum: f32 = run_times.iter().sum();
+    let len = run_times.iter().count() as f32;
+
+    println!("Average elapsed time: {:?}", sum / len);
 
     Ok(())
 }
