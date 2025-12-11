@@ -12,12 +12,24 @@ use crate::{
 };
 
 impl EventScannerBuilder<Historic> {
+    /// Sets the starting block for the historic scan.
+    ///
+    /// # Note
+    ///
+    /// Although passing `BlockNumberOrTag::Pending` will compile, the subsequent call to
+    /// `connect` will fail at runtime. See issue <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     #[must_use]
     pub fn from_block(mut self, block_id: impl Into<BlockId>) -> Self {
         self.config.from_block = block_id.into();
         self
     }
 
+    /// Sets the starting block for the historic scan.
+    ///
+    /// # Note
+    ///
+    /// Although passing `BlockNumberOrTag::Pending` will compile, the subsequent call to
+    /// `connect` will fail at runtime. See issue <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     #[must_use]
     pub fn to_block(mut self, block_id: impl Into<BlockId>) -> Self {
         self.config.to_block = block_id.into();
@@ -45,7 +57,16 @@ impl EventScannerBuilder<Historic> {
         let latest_block = provider.get_block_number().await?;
 
         let from_num = match scanner.config.from_block {
-            BlockId::Number(from_block) => from_block.as_number().unwrap_or(0),
+            BlockId::Number(from_block) => {
+                if from_block.is_pending() {
+                    return Err(ScannerError::BlockExceedsLatest(
+                        "from_block",
+                        latest_block + 1,
+                        latest_block,
+                    ));
+                }
+                from_block.as_number().unwrap_or(0)
+            }
             BlockId::Hash(from_hash) => {
                 provider.get_block_by_hash(from_hash.into()).await?.header().number()
             }
@@ -56,7 +77,16 @@ impl EventScannerBuilder<Historic> {
         }
 
         let to_num = match scanner.config.to_block {
-            BlockId::Number(to_block) => to_block.as_number().unwrap_or(0),
+            BlockId::Number(to_block) => {
+                if to_block.is_pending() {
+                    return Err(ScannerError::BlockExceedsLatest(
+                        "to_block",
+                        latest_block + 1,
+                        latest_block,
+                    ));
+                }
+                to_block.as_number().unwrap_or(0)
+            }
             BlockId::Hash(to_hash) => {
                 provider.get_block_by_hash(to_hash.into()).await?.header().number()
             }
