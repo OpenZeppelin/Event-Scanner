@@ -273,7 +273,7 @@ impl EventScannerBuilder<Unspecified> {
     /// let mut scanner = EventScannerBuilder::latest(5)
     ///     .from_block(1_000_000)
     ///     .to_block(1_100_000)
-    ///     .connect(robust_provider);
+    ///     .connect(robust_provider).await?;
     /// # Ok(())
     /// # }
     /// ```

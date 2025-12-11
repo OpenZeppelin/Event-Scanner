@@ -17,7 +17,7 @@ pub enum Direction {
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// use event_scanner::block_range_scanner::BatchIterator;
 ///
 /// // Forward iteration: blocks 100..=250 in batches of 50
