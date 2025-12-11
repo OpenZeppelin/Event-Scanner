@@ -22,6 +22,12 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
         self
     }
 
+    #[must_use]
+    pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
+        self.config.max_concurrent_fetches = max_concurrent_fetches;
+        self
+    }
+
     /// Connects to an existing provider.
     ///
     /// # Errors
@@ -60,6 +66,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
+        let max_concurrent_fetches = self.config.max_concurrent_fetches;
 
         info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
 
@@ -85,6 +92,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 &provider,
                 &listeners,
                 ConsumerMode::CollectLatest { count },
+                max_concurrent_fetches,
             )
             .await;
 
@@ -104,7 +112,14 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 };
 
             // Start the live (sync) stream.
-            handle_stream(sync_stream, &provider, &listeners, ConsumerMode::Stream).await;
+            handle_stream(
+                sync_stream,
+                &provider,
+                &listeners,
+                ConsumerMode::Stream,
+                max_concurrent_fetches,
+            )
+            .await;
         });
 
         Ok(())

@@ -23,7 +23,7 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
 
 #[derive(Copy, Clone, Debug)]
-pub enum ConsumerMode {
+pub(crate) enum ConsumerMode {
     Stream,
     CollectLatest { count: usize },
 }
@@ -50,18 +50,22 @@ pub enum ConsumerMode {
 /// # Note
 ///
 /// Assumes it is running in a separate tokio task, so as to be non-blocking.
-pub async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResult> + Unpin>(
+pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResult> + Unpin>(
     mut stream: S,
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     mode: ConsumerMode,
+    max_concurrent_fetches: usize,
 ) {
     let (range_tx, _) = broadcast::channel::<BlockScannerResult>(MAX_BUFFERED_MESSAGES);
 
     let consumers = match mode {
-        ConsumerMode::Stream => {
-            spawn_log_consumers_in_stream_mode(provider, listeners, &range_tx, 24)
-        }
+        ConsumerMode::Stream => spawn_log_consumers_in_stream_mode(
+            provider,
+            listeners,
+            &range_tx,
+            max_concurrent_fetches,
+        ),
         ConsumerMode::CollectLatest { count } => {
             spawn_log_consumers_in_collection_mode(provider, listeners, &range_tx, count)
         }
@@ -86,7 +90,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockScannerResult>,
-    max_parallel: usize,
+    max_concurrent_fetches: usize,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
         let EventListener { filter, sender } = listener;
@@ -96,7 +100,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
-            let (tx, rx) = mpsc::channel::<BlockScannerResult>(max_parallel);
+            let (tx, rx) = mpsc::channel::<BlockScannerResult>(max_concurrent_fetches);
 
             let handle = tokio::spawn(async move {
                 let mut stream = ReceiverStream::new(rx)
@@ -115,7 +119,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
                             Err(e) => Err(e),
                         }
                     })
-                    .buffered(max_parallel);
+                    .buffered(max_concurrent_fetches);
 
                 while let Some(result) = stream.next().await {
                     if let Ok(ScannerMessage::Data(logs)) = result.as_ref() &&

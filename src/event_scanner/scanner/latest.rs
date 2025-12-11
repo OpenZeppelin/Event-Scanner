@@ -42,6 +42,12 @@ impl EventScannerBuilder<LatestEvents> {
         self
     }
 
+    #[must_use]
+    pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
+        self.config.max_concurrent_fetches = max_concurrent_fetches;
+        self
+    }
+
     /// Connects to an existing provider.
     ///
     /// # Errors
@@ -56,6 +62,9 @@ impl EventScannerBuilder<LatestEvents> {
     ) -> Result<EventScanner<LatestEvents, N>, ScannerError> {
         if self.config.count == 0 {
             return Err(ScannerError::InvalidEventCount);
+        }
+        if self.config.max_concurrent_fetches == 0 {
+            return Err(ScannerError::InvalidMaxConcurrentFetches);
         }
 
         let scanner = self.build(provider).await?;
@@ -127,6 +136,7 @@ impl<N: Network> EventScanner<LatestEvents, N> {
         let client = self.block_range_scanner.run()?;
         let stream = client.rewind(self.config.from_block, self.config.to_block).await?;
 
+        let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
 
@@ -136,6 +146,7 @@ impl<N: Network> EventScanner<LatestEvents, N> {
                 &provider,
                 &listeners,
                 ConsumerMode::CollectLatest { count: self.config.count },
+                max_concurrent_fetches,
             )
             .await;
         });

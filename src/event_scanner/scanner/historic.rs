@@ -36,6 +36,12 @@ impl EventScannerBuilder<Historic> {
         self
     }
 
+    #[must_use]
+    pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
+        self.config.max_concurrent_fetches = max_concurrent_fetches;
+        self
+    }
+
     /// Connects to an existing provider with block range validation.
     ///
     /// Validates that the maximum of `from_block` and `to_block` does not exceed
@@ -51,6 +57,10 @@ impl EventScannerBuilder<Historic> {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<Historic, N>, ScannerError> {
+        if self.config.max_concurrent_fetches == 0 {
+            return Err(ScannerError::InvalidMaxConcurrentFetches);
+        }
+
         let scanner = self.build(provider).await?;
 
         let provider = scanner.block_range_scanner.provider();
@@ -74,7 +84,7 @@ impl EventScannerBuilder<Historic> {
         };
 
         if from_num > latest_block {
-            Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
+            return Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block));
         }
 
         let to_num = match scanner.config.to_block {
@@ -95,7 +105,7 @@ impl EventScannerBuilder<Historic> {
         };
 
         if to_num > latest_block {
-            Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
+            return Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block));
         }
 
         Ok(scanner)
@@ -120,11 +130,19 @@ impl<N: Network> EventScanner<Historic, N> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;
 
+        let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
 
         tokio::spawn(async move {
-            handle_stream(stream, &provider, &listeners, ConsumerMode::Stream).await;
+            handle_stream(
+                stream,
+                &provider,
+                &listeners,
+                ConsumerMode::Stream,
+                max_concurrent_fetches,
+            )
+            .await;
         });
 
         Ok(())
@@ -133,6 +151,8 @@ impl<N: Network> EventScanner<Historic, N> {
 
 #[cfg(test)]
 mod tests {
+    use crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES;
+
     use super::*;
     use alloy::{
         eips::BlockNumberOrTag,
@@ -145,22 +165,25 @@ mod tests {
 
     #[test]
     fn test_historic_scanner_builder_pattern() {
-        let builder =
-            EventScannerBuilder::historic().to_block(200).max_block_range(50).from_block(100);
+        let builder = EventScannerBuilder::historic()
+            .to_block(200)
+            .max_block_range(50)
+            .max_concurrent_fetches(10)
+            .from_block(100);
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(100).into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Number(200).into());
+        assert_eq!(builder.config.max_concurrent_fetches, 10);
         assert_eq!(builder.block_range_scanner.max_block_range, 50);
     }
 
     #[test]
-    fn test_historic_scanner_builder_with_different_block_types() {
-        let builder = EventScannerBuilder::historic()
-            .from_block(BlockNumberOrTag::Earliest)
-            .to_block(BlockNumberOrTag::Latest);
+    fn test_historic_scanner_builder_default_values() {
+        let builder = EventScannerBuilder::historic();
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Latest.into());
+        assert_eq!(builder.config.max_concurrent_fetches, DEFAULT_MAX_CONCURRENT_FETCHES);
     }
 
     #[test]
@@ -172,11 +195,14 @@ mod tests {
             .from_block(1)
             .from_block(2)
             .to_block(100)
-            .to_block(200);
+            .to_block(200)
+            .max_concurrent_fetches(10)
+            .max_concurrent_fetches(20);
 
         assert_eq!(builder.block_range_scanner.max_block_range, 105);
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Number(2).into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Number(200).into());
+        assert_eq!(builder.config.max_concurrent_fetches, 20);
     }
 
     #[tokio::test]
@@ -254,6 +280,15 @@ mod tests {
             Err(ScannerError::InvalidMaxBlockRange) => {}
             _ => panic!("Expected InvalidMaxBlockRange error"),
         }
+    }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_max_concurrent_fetches() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result =
+            EventScannerBuilder::historic().max_concurrent_fetches(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidMaxConcurrentFetches)));
     }
 
     #[tokio::test]

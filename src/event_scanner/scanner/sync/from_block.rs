@@ -16,6 +16,12 @@ impl EventScannerBuilder<SyncFromBlock> {
         self
     }
 
+    #[must_use]
+    pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
+        self.config.max_concurrent_fetches = max_concurrent_fetches;
+        self
+    }
+
     /// Connects to an existing provider.
     ///
     /// # Errors
@@ -27,6 +33,10 @@ impl EventScannerBuilder<SyncFromBlock> {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<SyncFromBlock, N>, ScannerError> {
+        if self.config.max_concurrent_fetches == 0 {
+            return Err(ScannerError::InvalidMaxConcurrentFetches);
+        }
+
         let scanner = self.build(provider).await?;
 
         let provider = scanner.block_range_scanner.provider();
@@ -58,11 +68,19 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
         let stream =
             client.stream_from(self.config.from_block, self.config.block_confirmations).await?;
 
+        let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
 
         tokio::spawn(async move {
-            handle_stream(stream, &provider, &listeners, ConsumerMode::Stream).await;
+            handle_stream(
+                stream,
+                &provider,
+                &listeners,
+                ConsumerMode::Stream,
+                max_concurrent_fetches,
+            )
+            .await;
         });
 
         Ok(())
