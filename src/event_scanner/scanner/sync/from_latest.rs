@@ -43,6 +43,9 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
         if self.config.count == 0 {
             return Err(ScannerError::InvalidEventCount);
         }
+        if self.config.max_concurrent_fetches == 0 {
+            return Err(ScannerError::InvalidMaxConcurrentFetches);
+        }
         self.build(provider).await
     }
 }
@@ -130,9 +133,10 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
 mod tests {
     use alloy::{
         network::Ethereum,
-        providers::{RootProvider, mock::Asserter},
+        providers::{ProviderBuilder, RootProvider, mock::Asserter},
         rpc::client::RpcClient,
     };
+    use alloy_node_bindings::Anvil;
 
     use crate::{
         block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
@@ -185,7 +189,9 @@ mod tests {
 
     #[tokio::test]
     async fn accepts_zero_confirmations() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
         let scanner = EventScannerBuilder::sync()
             .from_latest(1)
             .block_confirmations(0)

@@ -80,9 +80,10 @@ impl<N: Network> EventScanner<Live, N> {
 mod tests {
     use alloy::{
         network::Ethereum,
-        providers::{RootProvider, mock::Asserter},
+        providers::{ProviderBuilder, RootProvider, mock::Asserter},
         rpc::client::RpcClient,
     };
+    use alloy_node_bindings::Anvil;
 
     use crate::{
         block_range_scanner::DEFAULT_BLOCK_CONFIRMATIONS,
@@ -129,8 +130,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_live_scanner_accepts_zero_confirmations() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+    async fn accepts_zero_confirmations() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
         let scanner = EventScannerBuilder::live().block_confirmations(0).connect(provider).await?;
 
         assert_eq!(scanner.config.block_confirmations, 0);

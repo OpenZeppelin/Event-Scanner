@@ -223,6 +223,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accepts_zero_confirmations() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let scanner =
+            EventScannerBuilder::latest(1).block_confirmations(0).connect(provider).await?;
+
+        assert_eq!(scanner.config.block_confirmations, 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_latest_returns_error_with_zero_count() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
         let result = EventScannerBuilder::latest(0).connect(provider).await;
@@ -330,17 +343,6 @@ mod tests {
             Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
             Ok(_) => panic!("Expected error, but got Ok"),
         }
-    }
-
-    #[tokio::test]
-    async fn accepts_zero_confirmations() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let scanner =
-            EventScannerBuilder::latest(1).block_confirmations(0).connect(provider).await?;
-
-        assert_eq!(scanner.config.block_confirmations, 0);
-
-        Ok(())
     }
 
     #[tokio::test]

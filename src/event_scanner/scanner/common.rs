@@ -104,20 +104,15 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
 
             let handle = tokio::spawn(async move {
                 let mut stream = ReceiverStream::new(rx)
-                    .map(async |message| {
-                        let message: BlockScannerResult = message.into();
-                        match message {
-                            Ok(ScannerMessage::Data(range)) => {
-                                get_logs(range, &filter, &base_filter, &provider)
-                                    .await
-                                    .map(Message::from)
-                                    .map_err(ScannerError::from)
-                            }
-                            Ok(ScannerMessage::Notification(notification)) => {
-                                Ok(notification.into())
-                            }
-                            Err(e) => Err(e),
+                    .map(async |message| match message {
+                        Ok(ScannerMessage::Data(range)) => {
+                            get_logs(range, &filter, &base_filter, &provider)
+                                .await
+                                .map(Message::from)
+                                .map_err(ScannerError::from)
                         }
+                        Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
+                        Err(e) => Err(e),
                     })
                     .buffered(max_concurrent_fetches);
 
@@ -137,7 +132,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
             loop {
                 match range_rx.recv().await {
                     Ok(message) => {
-                        tx.send(message).await.expect("receiver dropped only if we exit this loop")
+                        tx.send(message).await.expect("receiver dropped only if we exit this loop");
                     }
                     Err(RecvError::Closed) => {
                         info!("No block ranges to receive, dropping receiver.");
@@ -150,7 +145,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
             drop(tx);
 
             if let Err(e) = handle.await {
-                error!(error = %e, "Error awaiting the log consumer task")
+                error!(error = %e, "Error awaiting the log consumer task");
             }
         });
 

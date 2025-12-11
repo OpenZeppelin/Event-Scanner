@@ -131,7 +131,9 @@ mod tests {
 
     #[tokio::test]
     async fn accepts_zero_confirmations() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
         let scanner = EventScannerBuilder::sync()
             .from_block(BlockNumberOrTag::Earliest)
             .block_confirmations(0)
