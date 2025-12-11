@@ -276,7 +276,7 @@ fn collect_logs<T>(collected: &mut Vec<T>, logs: Vec<T>, count: usize, prepend: 
         // Example: reorg rescan sends 86..=95 then 96..=100
         //   - First batch (86..=95): prepend → [95, 94, ..., 86]
         //   - Second batch (96..=100): prepend → [100, 99, ..., 96, 95, 94, ..., 86]
-        let new_logs: Vec<_> = logs.into_iter().rev().take(count).collect();
+        let new_logs = logs.into_iter().rev().take(count);
         let keep = count.saturating_sub(new_logs.len());
         collected.truncate(keep);
         collected.splice(..0, new_logs);
