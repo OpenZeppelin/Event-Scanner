@@ -193,21 +193,27 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                             }
                         }
                         Ok(ScannerMessage::Notification(Notification::ReorgDetected {
-                            common_ancestor_block,
+                            common_ancestor,
                         })) => {
                             info!(
-                                common_ancestor_block = common_ancestor_block,
+                                common_ancestor = common_ancestor,
                                 "Received ReorgDetected notification"
                             );
 
                             // Invalidate logs from reorged blocks
                             // Logs are ordered newest -> oldest, so skip logs with
                             // block_number > common_ancestor at the front
+                            // NOTE: Pending logs are not supported therefore this filter
+                            // works for now (may need to update once they are). Tracked in
+                            // <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
                             let before_count = collected.len();
                             collected = collected
                                 .into_iter()
                                 .skip_while(|log| {
-                                    log.block_number.is_some_and(|n| n > common_ancestor_block)
+                                    // Pending blocks aren't supported therefore this filter
+                                    // works for now (may need to update once they are).
+                                    // Tracked in <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
+                                    log.block_number.is_some_and(|n| n > common_ancestor)
                                 })
                                 .collect();
                             let removed_count = before_count - collected.len();
@@ -220,7 +226,7 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                             }
 
                             // Track reorg state for proper log ordering
-                            reorg_ancestor = Some(common_ancestor_block);
+                            reorg_ancestor = Some(common_ancestor);
 
                             // Don't forward the notification to the user in CollectLatest mode
                             // since logs haven't been sent yet
@@ -265,7 +271,7 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
 
 /// Collects logs into the buffer, either prepending (reorg recovery) or appending (normal).
 /// Returns `true` if collection is complete (reached count limit).
-fn collect_logs(collected: &mut Vec<Log>, logs: Vec<Log>, count: usize, prepend: bool) -> bool {
+fn collect_logs<T>(collected: &mut Vec<T>, logs: Vec<T>, count: usize, prepend: bool) -> bool {
     if prepend {
         // Reorg rescan ranges are sent in ascending order (oldest → latest), opposite to normal
         // rewind which sends descending (latest → oldest). This means each successive reorg batch
@@ -273,7 +279,7 @@ fn collect_logs(collected: &mut Vec<Log>, logs: Vec<Log>, count: usize, prepend:
         // Example: reorg rescan sends 86..=95 then 96..=100
         //   - First batch (86..=95): prepend → [95, 94, ..., 86]
         //   - Second batch (96..=100): prepend → [100, 99, ..., 96, 95, 94, ..., 86]
-        let new_logs: Vec<_> = logs.into_iter().rev().take(count).collect();
+        let new_logs = logs.into_iter().rev().take(count);
         let keep = count.saturating_sub(new_logs.len());
         collected.truncate(keep);
         collected.splice(..0, new_logs);
@@ -328,119 +334,102 @@ async fn get_logs<N: Network>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::{Address, B256, Bytes, LogData};
-
-    fn make_log(block_number: u64) -> Log {
-        Log {
-            inner: alloy::primitives::Log {
-                address: Address::ZERO,
-                data: LogData::new(vec![], Bytes::new()).unwrap(),
-            },
-            block_hash: Some(B256::ZERO),
-            block_number: Some(block_number),
-            block_timestamp: None,
-            transaction_hash: Some(B256::ZERO),
-            transaction_index: Some(0),
-            log_index: Some(0),
-            removed: false,
-        }
-    }
-
-    fn block_numbers(logs: &[Log]) -> Vec<u64> {
-        logs.iter().filter_map(|l| l.block_number).collect()
-    }
 
     #[test]
     fn collect_logs_appends_in_reverse_order() {
         let mut collected = vec![];
-        let new_logs = vec![make_log(10), make_log(11), make_log(12)];
+        let new_logs = vec![10, 11, 12];
 
         let done = collect_logs(&mut collected, new_logs, 5, false);
 
         assert!(!done);
-
         // logs are reversed (newest first): 12, 11, 10
-        assert_eq!(block_numbers(&collected), vec![12, 11, 10]);
+        assert_eq!(collected, vec![12, 11, 10]);
+    }
+
+    #[test]
+    fn collect_logs_prepends_in_reverse_order() {
+        let mut collected = vec![];
+        let new_logs = vec![10, 11, 12];
+
+        let done = collect_logs(&mut collected, new_logs, 5, true);
+
+        assert!(!done);
+        // logs are reversed (newest first): 12, 11, 10
+        assert_eq!(collected, vec![12, 11, 10]);
     }
 
     #[test]
     fn collect_logs_stops_at_count() {
-        let mut collected = vec![make_log(15), make_log(14)];
-        let new_logs = vec![make_log(10), make_log(11), make_log(12), make_log(13)];
+        let mut collected = vec![15, 14];
+        let new_logs = vec![10, 11, 12, 13];
 
         let done = collect_logs(&mut collected, new_logs, 5, false);
 
         assert!(done);
-
         // takes only 3 more (count=5, had 2), reversed: 13, 12, 11
-        assert_eq!(block_numbers(&collected), vec![15, 14, 13, 12, 11]);
+        assert_eq!(collected, vec![15, 14, 13, 12, 11]);
     }
 
     #[test]
     fn collect_logs_prepends_during_reorg_recovery() {
         // Had logs from blocks 75, 70
         // Reorg at block 80, now getting replacement logs for 85, 90
-        let mut collected = vec![make_log(75), make_log(70)];
-        let new_logs = vec![make_log(85), make_log(90)];
+        let mut collected = vec![75, 70];
+        let new_logs = vec![85, 90];
 
         let done = collect_logs(&mut collected, new_logs, 5, true);
 
         assert!(!done);
-
         // prepended (reversed): 90, 85, then existing: 75, 70
-        assert_eq!(block_numbers(&collected), vec![90, 85, 75, 70]);
+        assert_eq!(collected, vec![90, 85, 75, 70]);
     }
 
     #[test]
-    fn collect_logs_prepend_takes_all_and_truncates() {
+    fn collect_logs_prioritizes_prepended_logs_when_truncating() {
         // Had 4 logs, count=5, prepending 3 new logs
-        let mut collected = vec![make_log(75), make_log(70), make_log(65), make_log(60)];
-        let new_logs = vec![make_log(85), make_log(90), make_log(95)];
+        let mut collected = vec![75, 70, 65, 60];
+        let new_logs = vec![85, 90, 95];
 
         let done = collect_logs(&mut collected, new_logs, 5, true);
 
         assert!(done);
         // All 3 new logs prepended (reversed: 95,90,85)
         // [95, 90, 85, 75, 70] (60 dropped as oldest)
-        assert_eq!(block_numbers(&collected), vec![95, 90, 85, 75, 70]);
-    }
+        assert_eq!(collected, vec![95, 90, 85, 75, 70]);
 
-    #[test]
-    fn reorg_scenario_remove_3_add_4() {
-        // count=5, had 5 logs, reorg removes 3, leaving 2
-        // Then 4 replacement logs arrive
-        let mut collected = vec![make_log(85), make_log(80)];
-        let new_logs = vec![make_log(88), make_log(92), make_log(96), make_log(100)];
+        // edge case: more incoming logs than collected
+        let mut collected = vec![75, 70, 65, 60];
+        let new_logs = vec![85, 90, 95, 100, 105];
 
         let done = collect_logs(&mut collected, new_logs, 5, true);
 
         assert!(done);
-        // [100, 96, 92, 88, 85] (80 dropped)
-        assert_eq!(block_numbers(&collected), vec![100, 96, 92, 88, 85]);
+        // [105, 100, 95, 90, 85] (all old collected logs dropped)
+        assert_eq!(collected, vec![105, 100, 95, 90, 85]);
     }
 
     #[test]
-    fn collect_logs_returns_true_when_already_at_count() {
-        let mut collected = vec![make_log(100), make_log(99), make_log(98)];
-        let new_logs = vec![make_log(90)];
+    fn collect_logs_ignores_new_logs_for_appending_when_already_at_count() {
+        let mut collected = vec![100, 99, 98];
+        let new_logs = vec![90];
 
         let done = collect_logs(&mut collected, new_logs, 3, false);
 
         assert!(done);
-        // no change since already at count
-        assert_eq!(block_numbers(&collected), vec![100, 99, 98]);
+        assert_eq!(collected, vec![100, 99, 98]);
     }
 
     #[test]
     fn collect_logs_prepend_respects_count_limit() {
         // count=3, have 1, prepending 4 logs
-        let mut collected = vec![make_log(70)];
-        let new_logs = vec![make_log(80), make_log(85), make_log(90), make_log(95)];
+        let mut collected = vec![70];
+        let new_logs = vec![80, 85, 90, 95];
 
         let done = collect_logs(&mut collected, new_logs, 3, true);
 
         assert!(done);
 
-        assert_eq!(block_numbers(&collected), vec![95, 90, 85]);
+        assert_eq!(collected, vec![95, 90, 85]);
     }
 }

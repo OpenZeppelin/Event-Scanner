@@ -253,8 +253,7 @@ async fn handle_reorg_detected<N: Network>(
 ) -> bool {
     let ancestor_num = common_ancestor.header().number();
 
-    if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block: ancestor_num }).await
-    {
+    if !sender.try_stream(Notification::ReorgDetected { common_ancestor: ancestor_num }).await {
         return false;
     }
 
@@ -427,11 +426,11 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         };
 
         if let Some(common_ancestor) = reorged_opt {
-            let common_ancestor_block = common_ancestor.header().number();
-            if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
+            let common_ancestor = common_ancestor.header().number();
+            if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
                 return None;
             }
-            iter.reset_to((common_ancestor_block + 1).max(min_common_ancestor));
+            iter.reset_to((common_ancestor + 1).max(min_common_ancestor));
         }
 
         last_batch_end = Some(batch_end);
