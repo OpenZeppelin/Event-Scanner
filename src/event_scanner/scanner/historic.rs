@@ -65,6 +65,7 @@ impl EventScannerBuilder<Historic> {
                         latest_block,
                     ));
                 }
+                // can safely unwrap to 0 because any other tag < latest block
                 from_block.as_number().unwrap_or(0)
             }
             BlockId::Hash(from_hash) => {
@@ -85,6 +86,7 @@ impl EventScannerBuilder<Historic> {
                         latest_block,
                     ));
                 }
+                // can safely unwrap to 0 because any other tag < latest block
                 to_block.as_number().unwrap_or(0)
             }
             BlockId::Hash(to_hash) => {
@@ -361,5 +363,72 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_from_block_pending_returns_error() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let result = EventScannerBuilder::historic()
+            .from_block(BlockNumberOrTag::Pending)
+            .to_block(latest_block)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
+                assert_eq!(max, latest_block + 1);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error for 'from_block'"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_to_block_pending_returns_error() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let result = EventScannerBuilder::historic()
+            .from_block(0)
+            .to_block(BlockNumberOrTag::Pending)
+            .connect(provider)
+            .await;
+
+        match result {
+            Err(ScannerError::BlockExceedsLatest("to_block", max, latest)) => {
+                assert_eq!(max, latest_block + 1);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error for 'to_block'"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_from_and_to_block_pending_returns_error() {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let latest_block = provider.get_block_number().await.unwrap();
+
+        let result = EventScannerBuilder::historic()
+            .from_block(BlockNumberOrTag::Pending)
+            .to_block(BlockNumberOrTag::Pending)
+            .connect(provider)
+            .await;
+
+        // from_block is checked first
+        match result {
+            Err(ScannerError::BlockExceedsLatest("from_block", max, latest)) => {
+                assert_eq!(max, latest_block + 1);
+                assert_eq!(latest, latest_block);
+            }
+            _ => panic!("Expected BlockExceedsLatest error for 'from_block'"),
+        }
     }
 }
