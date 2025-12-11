@@ -210,6 +210,9 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                             collected = collected
                                 .into_iter()
                                 .skip_while(|log| {
+                                    // Pending blocks aren't supported therefore this filter
+                                    // works for now (may need to update once they are).
+                                    // Tracked in <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
                                     log.block_number.is_some_and(|n| n > common_ancestor_block)
                                 })
                                 .collect();
