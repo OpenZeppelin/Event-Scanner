@@ -41,10 +41,11 @@ async fn rescans_events_within_same_block() -> anyhow::Result<()> {
         (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
     ];
 
+    let latest = provider.get_block_number().await?;
     provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
-    // assert expected messages post-reorg
-    assert_next!(stream, Notification::ReorgDetected);
+    // assert expected message post reorg
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - 4 });
     // assert the reorged events are emitted
     assert_next!(
         stream,
@@ -90,10 +91,10 @@ async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
         (TransactionData::JSON(contract.increase().into_transaction_request()), 2),
     ];
 
+    let latest = provider.get_block_number().await?;
     provider.primary().anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
 
-    // assert expected messages post-reorg
-    assert_next!(stream, Notification::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - 4 });
     // assert the reorged events are emitted
     assert_event_sequence_final!(
         stream,
@@ -134,10 +135,11 @@ async fn depth_one() -> anyhow::Result<()> {
     let tx_block_pairs =
         vec![(TransactionData::JSON(contract.increase().into_transaction_request()), 0)];
 
+    let latest = provider.get_block_number().await?;
     provider.primary().anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs }).await?;
 
-    // assert expected messages post-reorg
-    assert_next!(stream, Notification::ReorgDetected);
+    // assert expected message post reorg
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - 1 });
     assert_next!(stream, &[CountIncreased { newCount: U256::from(4) }]);
     assert_empty!(stream);
 
@@ -171,10 +173,11 @@ async fn depth_two() -> anyhow::Result<()> {
     let tx_block_pairs =
         vec![(TransactionData::JSON(contract.increase().into_transaction_request()), 0)];
 
+    let latest = provider.get_block_number().await?;
     provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
 
-    // assert expected messages post-reorg
-    assert_next!(stream, Notification::ReorgDetected);
+    // assert expected message post reorg
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - 2 });
     assert_next!(stream, &[CountIncreased { newCount: U256::from(3) }]);
     assert_empty!(stream);
 
