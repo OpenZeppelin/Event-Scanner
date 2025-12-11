@@ -1,6 +1,6 @@
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
-    providers::{ProviderBuilder, ext::AnvilApi},
+    providers::{Provider, ProviderBuilder, ext::AnvilApi},
     rpc::types::anvil::ReorgOptions,
 };
 use alloy_node_bindings::Anvil;
@@ -154,13 +154,14 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     let mut stream = assert_empty!(stream);
 
     // reorg more blocks than the block_confirmation config
+    let latest = provider.get_block_number().await?;
     provider.anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
 
     // mint 1 block to allow the scanner to process reorged blocks (previously streamed + the block
     // confirmed now)
     provider.anvil_mine(Some(1), None).await?;
 
-    assert_next!(stream, Notification::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - 8 });
     assert_range_coverage!(stream, 3..=8);
     let mut stream = assert_empty!(stream);
 
@@ -194,9 +195,11 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
     assert_next!(stream, 87..=110);
     let mut stream = assert_empty!(stream);
 
-    _ = provider.anvil_reorg(ReorgOptions { depth: 15, tx_block_pairs: vec![] }).await;
+    let latest = provider.get_block_number().await?;
+    let depth = 15;
+    _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
 
-    assert_next!(stream, Notification::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - depth });
     assert_next!(stream, 106..=110);
     assert_closed!(stream);
 
@@ -224,9 +227,11 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
     assert_next!(stream, 117..=120);
     let mut stream = assert_empty!(stream);
 
-    _ = provider.anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs: vec![] }).await;
+    let latest = provider.get_block_number().await?;
+    let depth = 1;
+    _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
 
-    assert_next!(stream, Notification::ReorgDetected);
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - depth });
     assert_next!(stream, 120..=120);
     assert_closed!(stream);
 
@@ -490,6 +495,134 @@ async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()>
         stream,
         Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(999))))
     ));
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+async fn rewind_reorg_emits_notification_and_rescans_affected_range() -> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+    provider.anvil_mine(Some(20), None).await?;
+
+    let client =
+        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+
+    let mut stream = client.rewind(5, 20).await?;
+
+    assert_next!(stream, 16..=20);
+    assert_next!(stream, 11..=15);
+
+    // NOTE: Pause scanner
+    _ = provider.anvil_reorg(ReorgOptions { depth: 3, tx_block_pairs: vec![] }).await;
+
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: 17 });
+    // Rescan range from common_ancestor + 1 to tip
+    assert_next!(stream, 18..=20);
+    //Rewind continues from where it left off
+    assert_next!(stream, 6..=10);
+    assert_next!(stream, 5..=5);
+    assert_closed!(stream);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+async fn deep_rewind_reorg_streams_affected_range_in_chronologi() -> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
+
+    provider.anvil_mine(Some(20), None).await?;
+
+    let client =
+        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+
+    let mut stream = client.rewind(5, 20).await?;
+
+    assert_next!(stream, 16..=20);
+
+    // TODO: Pause scanning
+    // Deep reorg: >= max_block_range * 2
+    _ = provider.anvil_reorg(ReorgOptions { depth: 10, tx_block_pairs: vec![] }).await;
+
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: 10 });
+    // Rescan range from common_ancestor (11) to tip (20)
+    assert_next!(stream, 11..=15);
+    assert_next!(stream, 16..=20);
+    // Rewind continues from where it left off (batch_from = 15)
+    assert_next!(stream, 10..=15);
+    assert_next!(stream, 5..=9);
+    assert_closed!(stream);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+async fn rewind_skips_reorg_check_when_tip_below_finalized() -> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+    provider.anvil_mine(Some(100), None).await?;
+
+    let finalized = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?.unwrap();
+
+    let client =
+        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+
+    // Rewind with tip < finalized
+    let mut stream = client.rewind(0, finalized.header.number - 1).await?;
+
+    assert_next!(stream, 31..=35);
+    assert_next!(stream, 26..=30);
+    assert_next!(stream, 21..=25);
+
+    // TODO: pause scanning
+    _ = provider.anvil_reorg(ReorgOptions { depth: 5, tx_block_pairs: vec![] }).await;
+
+    // no ReorgDetected should be emitted
+    assert_next!(stream, 16..=20);
+    assert_next!(stream, 11..=15);
+    assert_next!(stream, 6..=10);
+    assert_next!(stream, 1..=5);
+    assert_next!(stream, 0..=0);
+    assert_closed!(stream);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+async fn rewind_skips_reorg_when_tip_is_at_finalized() -> anyhow::Result<()> {
+    let anvil = Anvil::new().try_spawn()?;
+    let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
+
+    provider.anvil_mine(Some(100), None).await?;
+
+    let finalized = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?.unwrap();
+    let client =
+        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+
+    // Rewind with tip == finalized
+    let mut stream = client.rewind(0, finalized.header.number).await?;
+
+    assert_next!(stream, 32..=36);
+    assert_next!(stream, 27..=31);
+    assert_next!(stream, 22..=26);
+
+    // TODO: pause scanning
+    _ = provider.anvil_reorg(ReorgOptions { depth: 5, tx_block_pairs: vec![] }).await;
+
+    // no ReorgDetected should be emitted
+    assert_next!(stream, 17..=21);
+    assert_next!(stream, 12..=16);
+    assert_next!(stream, 7..=11);
+    assert_next!(stream, 2..=6);
+    assert_next!(stream, 0..=1);
+    assert_closed!(stream);
 
     Ok(())
 }

@@ -303,10 +303,11 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Notifications
     ///
-    /// The scanner emits the following notification before delivering log data:
+    /// The scanner can emit the following notifications:
     ///
-    /// * **[`Notification::NoPastLogsFound`][no_logs]**: Emitted when no matching logs are found in
-    ///   the scanned range.
+    /// * [`Notification::NoPastLogsFound`][no_logs]: Emitted when no matching logs are found in the
+    ///   scanned range.
+    /// * [`Notification::ReorgDetected`][reorg]: Emitted when a reorg is detected during the scan.
     ///
     /// # Arguments
     ///
@@ -314,11 +315,14 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// # Reorg behavior
     ///
-    /// During the scan, the scanner periodically checks the tip to detect reorgs. On reorg
-    /// detection:
+    /// The scanner can detect reorgs during the scan by periodically checking that the range tip
+    /// has not changed. This is done only when the specified range tip is not a finalized
+    /// block.
+    ///
+    /// On reorg detection:
     /// 1. Emits [`Notification::ReorgDetected`][reorg] to all listeners
     /// 2. Resets to the updated tip
-    /// 3. Restarts the scan from the new tip
+    /// 3. Reloads logs from the block range affected by the reorg
     /// 4. Continues until `count` events are collected
     ///
     /// Final delivery to log listeners preserves chronological order regardless of reorgs.

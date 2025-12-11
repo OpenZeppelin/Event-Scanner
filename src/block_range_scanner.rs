@@ -69,13 +69,13 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     ScannerError, ScannerMessage,
     block_range_scanner::sync_handler::SyncHandler,
-    robust_provider::{IntoRobustProvider, RobustProvider, provider::Error as RobustProviderError},
+    robust_provider::{IntoRobustProvider, RobustProvider},
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 
 use alloy::{
     consensus::BlockHeader,
-    eips::BlockId,
+    eips::{BlockId, BlockNumberOrTag},
     network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::BlockNumber,
 };
@@ -442,12 +442,6 @@ impl<N: Network> Service<N> {
     }
 
     /// Streams blocks in reverse order from `from` to `to`.
-    ///
-    /// The `from` block is assumed to be greater than or equal to the `to` block.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the stream fails
     async fn stream_rewind(
         from: N::BlockResponse,
         to: N::BlockResponse,
@@ -464,8 +458,22 @@ impl<N: Network> Service<N> {
         let from = tip.header().number();
         let to = to.header().number();
 
+        let finalized_block = match provider.get_block_by_number(BlockNumberOrTag::Finalized).await
+        {
+            Ok(block) => block,
+            Err(e) => {
+                error!(error = %e, "Failed to get finalized block");
+                _ = sender.try_stream(e).await;
+                return;
+            }
+        };
+
         // we're iterating in reverse
         let mut batch_from = from;
+        let finalized_number = finalized_block.header().number();
+
+        // only check reorg if our tip is after the finalized block
+        let check_reorg = tip.header().number() > finalized_number;
 
         while batch_from >= to {
             let batch_to = batch_from.saturating_sub(max_block_range - 1).max(to);
@@ -486,50 +494,91 @@ impl<N: Network> Service<N> {
                 break;
             }
 
-            let reorged_opt = match reorg_handler.check(&tip).await {
-                Ok(opt) => {
-                    info!(block_number = %from, hash = %tip.header().hash(), "Reorg detected");
-                    opt
-                }
-                Err(e) => {
-                    error!(error = %e, "Terminal RPC call error, shutting down");
-                    _ = sender.try_stream(e).await;
-                    return;
-                }
-            };
-
-            // For now we only care if a reorg occurred, not which block it was.
-            // Once we optimize 'latest' mode to update only the reorged logs, we will need the
-            // exact common ancestor.
-            if reorged_opt.is_some() {
-                info!(block_number = %from, hash = %tip.header().hash(), "Reorg detected");
-
-                if !sender.try_stream(Notification::ReorgDetected).await {
-                    break;
-                }
-
-                // restart rewind
-                batch_from = from;
-                // store the updated end block hash
-                tip = match provider.get_block_by_number(from.into()).await {
-                    Ok(block) => block,
-                    Err(RobustProviderError::BlockNotFound(_)) => {
-                        panic!("Block with number '{from}' should exist post-reorg");
-                    }
+            if check_reorg {
+                let reorg = match reorg_handler.check(&tip).await {
+                    Ok(opt) => opt,
                     Err(e) => {
                         error!(error = %e, "Terminal RPC call error, shutting down");
                         _ = sender.try_stream(e).await;
                         return;
                     }
                 };
-            } else {
-                // `batch_to` is always greater than `to`, so `batch_to - 1` is always a valid
-                // unsigned integer
-                batch_from = batch_to - 1;
+
+                if let Some(common_ancestor) = reorg &&
+                    !Self::handle_reorg_rescan(
+                        &mut tip,
+                        common_ancestor,
+                        max_block_range,
+                        sender,
+                        provider,
+                    )
+                    .await
+                {
+                    return;
+                }
             }
+
+            batch_from = batch_to - 1;
         }
 
         info!(batch_count = batch_count, "Rewind completed");
+    }
+
+    /// Handles re-scanning of reorged blocks.
+    ///
+    /// Returns `true` on success, `false` if stream closed or terminal error occurred.
+    async fn handle_reorg_rescan(
+        tip: &mut N::BlockResponse,
+        common_ancestor: N::BlockResponse,
+        max_block_range: u64,
+        sender: &mpsc::Sender<BlockScannerResult>,
+        provider: &RobustProvider<N>,
+    ) -> bool {
+        let tip_number = tip.header().number();
+        let common_ancestor = common_ancestor.header().number();
+        info!(
+            block_number = %tip_number,
+            hash = %tip.header().hash(),
+            common_ancestor = %common_ancestor,
+            "Reorg detected"
+        );
+
+        if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
+            return false;
+        }
+
+        // Get the new tip block (same height as original tip, but new hash)
+        *tip = match provider.get_block_by_number(tip_number.into()).await {
+            Ok(block) => block,
+            Err(e) => {
+                if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
+                    error!("Unexpected error: pre-reorg chain tip should exist on a reorged chain");
+                } else {
+                    error!(error = %e, "Terminal RPC call error, shutting down");
+                }
+                _ = sender.try_stream(e).await;
+                return false;
+            }
+        };
+
+        // Re-scan only the affected range (from common_ancestor + 1 up to tip)
+        let rescan_from = common_ancestor + 1;
+
+        let mut rescan_batch_start = rescan_from;
+        while rescan_batch_start <= tip_number {
+            let rescan_batch_end = (rescan_batch_start + max_block_range - 1).min(tip_number);
+
+            if !sender.try_stream(rescan_batch_start..=rescan_batch_end).await {
+                return false;
+            }
+
+            if rescan_batch_end == tip_number {
+                break;
+            }
+            rescan_batch_start = rescan_batch_end + 1;
+        }
+
+        true
     }
 }
 
@@ -643,14 +692,41 @@ impl BlockRangeScannerClient {
 
     /// Streams blocks in reverse order from `start_id` to `end_id`.
     ///
+    /// The `start_id` block is assumed to be greater than or equal to the `end_id` block.
+    /// Blocks are streamed in batches, where each batch is ordered from lower to higher
+    /// block numbers (chronological order within each batch), but batches themselves
+    /// progress from newer to older blocks.
+    ///
     /// # Arguments
     ///
-    /// * `start_id` - The starting block id (defaults to Latest if None).
-    /// * `end_id` - The ending block id (defaults to Earliest if None).
+    /// * `start_id` - The starting block id (higher block number).
+    /// * `end_id` - The ending block id (lower block number).
+    ///
+    /// # Reorg Handling
+    ///
+    /// Reorg checks are only performed when the specified block range tip is above the
+    /// current finalized block height. When a reorg is detected:
+    ///
+    /// 1. A [`Notification::ReorgDetected`] is emitted with the common ancestor block
+    /// 2. The scanner fetches the new tip block at the same height
+    /// 3. Reorged blocks are re-streamed in chronological order (from `common_ancestor + 1` up to
+    ///    the new tip)
+    /// 4. The reverse scan continues from where it left off
+    ///
+    /// If the range tip is at or below the finalized block, no reorg checks are
+    /// performed since finalized blocks cannot be reorganized.
+    ///
+    /// # Note
+    ///
+    /// The reason reorged blocks are streamed in chronological order is to make it easier to handle
+    /// reorgs in [`EventScannerBuilder::latest`][latest mode] mode, i.e. to prepend reorged blocks
+    /// to the result collection, which must maintain chronological order.
     ///
     /// # Errors
     ///
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
+    ///
+    /// [latest mode]: crate::EventScannerBuilder::latest
     pub async fn rewind(
         &self,
         start_id: impl Into<BlockId>,
