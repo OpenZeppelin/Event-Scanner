@@ -84,7 +84,7 @@ impl EventScannerBuilder<Historic> {
         };
 
         if from_num > latest_block {
-            return Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block));
+            Err(ScannerError::BlockExceedsLatest("from_block", from_num, latest_block))?;
         }
 
         let to_num = match scanner.config.to_block {
@@ -105,7 +105,7 @@ impl EventScannerBuilder<Historic> {
         };
 
         if to_num > latest_block {
-            return Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block));
+            Err(ScannerError::BlockExceedsLatest("to_block", to_num, latest_block))?;
         }
 
         Ok(scanner)
