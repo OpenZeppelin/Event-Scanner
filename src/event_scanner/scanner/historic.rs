@@ -16,7 +16,7 @@ impl EventScannerBuilder<Historic> {
     ///
     /// # Note
     ///
-    /// Although passing `BlockNumberOrTag::Finalized` will compile, the subsequent call to
+    /// Although passing `BlockNumberOrTag::Pending` will compile, the subsequent call to
     /// `connect` will fail at runtime. See issue <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     #[must_use]
     pub fn from_block(mut self, block_id: impl Into<BlockId>) -> Self {
@@ -28,7 +28,7 @@ impl EventScannerBuilder<Historic> {
     ///
     /// # Note
     ///
-    /// Although passing `BlockNumberOrTag::Finalized` will compile, the subsequent call to
+    /// Although passing `BlockNumberOrTag::Pending` will compile, the subsequent call to
     /// `connect` will fail at runtime. See issue <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     #[must_use]
     pub fn to_block(mut self, block_id: impl Into<BlockId>) -> Self {
