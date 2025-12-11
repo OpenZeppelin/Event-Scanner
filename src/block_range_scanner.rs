@@ -504,59 +504,9 @@ impl<N: Network> Service<N> {
                     return;
                 }
             }
-
-            batch_from = batch_to - 1;
         }
 
         info!(batch_count = iter.batch_count(), "Rewind completed");
-    }
-
-    /// Handles re-scanning of reorged blocks.
-    ///
-    /// Returns `true` on success, `false` if stream closed or terminal error occurred.
-    async fn handle_reorg_rescan(
-        tip: &mut N::BlockResponse,
-        common_ancestor: N::BlockResponse,
-        max_block_range: u64,
-        sender: &mpsc::Sender<BlockScannerResult>,
-        provider: &RobustProvider<N>,
-    ) -> bool {
-        let tip_number = tip.header().number();
-        let common_ancestor_block = common_ancestor.header().number();
-        info!(
-            block_number = %tip_number,
-            hash = %tip.header().hash(),
-            common_ancestor_block = %common_ancestor_block,
-            "Reorg detected"
-        );
-
-        if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
-            return false;
-        }
-
-        // Get the new tip block (same height as original tip, but new hash)
-        *tip = match provider.get_block_by_number(tip_number.into()).await {
-            Ok(block) => block,
-            Err(RobustProviderError::BlockNotFound(_)) => {
-                panic!("Block with number '{tip_number}' should exist post-reorg");
-            }
-            Err(e) => {
-                error!(error = %e, "Terminal RPC call error, shutting down");
-                _ = sender.try_stream(e).await;
-                return false;
-            }
-        };
-
-        // Re-scan only the affected range (from common_ancestor + 1 up to tip)
-        let rescan_from = common_ancestor_block + 1;
-
-        for batch in BatchIterator::forward(rescan_from, tip_number, max_block_range) {
-            if !sender.try_stream(batch).await {
-                return false;
-            }
-        }
-
-        true
     }
 
     /// Handles re-scanning of reorged blocks.
@@ -599,18 +549,10 @@ impl<N: Network> Service<N> {
         // Re-scan only the affected range (from common_ancestor + 1 up to tip)
         let rescan_from = common_ancestor + 1;
 
-        let mut rescan_batch_start = rescan_from;
-        while rescan_batch_start <= tip_number {
-            let rescan_batch_end = (rescan_batch_start + max_block_range - 1).min(tip_number);
-
-            if !sender.try_stream(rescan_batch_start..=rescan_batch_end).await {
+        for batch in BatchIterator::forward(rescan_from, tip_number, max_block_range) {
+            if !sender.try_stream(batch).await {
                 return false;
             }
-
-            if rescan_batch_end == tip_number {
-                break;
-            }
-            rescan_batch_start = rescan_batch_end + 1;
         }
 
         true
