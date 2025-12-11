@@ -557,22 +557,21 @@ impl<N: Network> Service<N> {
             }
         };
 
-        // Re-scan only the affected range (from tip down to common_ancestor + 1)
-        let rescan_to = common_ancestor_block + 1;
+        // Re-scan only the affected range (from common_ancestor + 1 up to tip)
+        let rescan_from = common_ancestor_block + 1;
 
-        let mut rescan_batch_from = tip_number;
-        while rescan_batch_from >= rescan_to {
-            let rescan_batch_to =
-                rescan_batch_from.saturating_sub(max_block_range - 1).max(rescan_to);
+        let mut rescan_batch_start = rescan_from;
+        while rescan_batch_start <= tip_number {
+            let rescan_batch_end = (rescan_batch_start + max_block_range - 1).min(tip_number);
 
-            if !sender.try_stream(rescan_batch_to..=rescan_batch_from).await {
+            if !sender.try_stream(rescan_batch_start..=rescan_batch_end).await {
                 return false;
             }
 
-            if rescan_batch_to == rescan_to {
+            if rescan_batch_end == tip_number {
                 break;
             }
-            rescan_batch_from = rescan_batch_to - 1;
+            rescan_batch_start = rescan_batch_end + 1;
         }
 
         true
@@ -701,7 +700,7 @@ impl BlockRangeScannerClient {
     ///
     /// # Reorg Handling
     ///
-    /// Reorg checks are only performed when the starting block (`start_id`) is above the
+    /// Reorg checks are only performed when the specified block range tip is above the
     /// current finalized block height. When a reorg is detected:
     ///
     /// 1. A [`Notification::ReorgDetected`] is emitted with the common ancestor block
@@ -710,12 +709,20 @@ impl BlockRangeScannerClient {
     ///    the new tip)
     /// 4. The reverse scan continues from where it left off
     ///
-    /// If the starting block is at or below the finalized block, no reorg checks are
+    /// If the range tip is at or below the finalized block, no reorg checks are
     /// performed since finalized blocks cannot be reorganized.
+    ///
+    /// # Note
+    ///
+    /// The reason reorged blocks are streamed in chronological order is to make it easier to handle
+    /// reorgs in [`EventScannerBuilder::latest`][latest mode] mode, i.e. to prepend reorged blocks
+    /// to the result collection, which must maintain chronological order.
     ///
     /// # Errors
     ///
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
+    ///
+    /// [latest mode]: crate::EventScannerBuilder::latest
     pub async fn rewind(
         &self,
         start_id: impl Into<BlockId>,
