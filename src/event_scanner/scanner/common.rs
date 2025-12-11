@@ -268,7 +268,7 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
 
 /// Collects logs into the buffer, either prepending (reorg recovery) or appending (normal).
 /// Returns `true` if collection is complete (reached count limit).
-fn collect_logs(collected: &mut Vec<Log>, logs: Vec<Log>, count: usize, prepend: bool) -> bool {
+fn collect_logs<T>(collected: &mut Vec<T>, logs: Vec<T>, count: usize, prepend: bool) -> bool {
     if prepend {
         // Reorg rescan ranges are sent in ascending order (oldest → latest), opposite to normal
         // rewind which sends descending (latest → oldest). This means each successive reorg batch
