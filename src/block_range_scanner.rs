@@ -700,7 +700,7 @@ impl BlockRangeScannerClient {
     ///
     /// # Reorg Handling
     ///
-    /// Reorg checks are only performed when the starting block (`start_id`) is above the
+    /// Reorg checks are only performed when the specified block range tip is above the
     /// current finalized block height. When a reorg is detected:
     ///
     /// 1. A [`Notification::ReorgDetected`] is emitted with the common ancestor block
@@ -709,12 +709,20 @@ impl BlockRangeScannerClient {
     ///    the new tip)
     /// 4. The reverse scan continues from where it left off
     ///
-    /// If the starting block is at or below the finalized block, no reorg checks are
+    /// If the range tip is at or below the finalized block, no reorg checks are
     /// performed since finalized blocks cannot be reorganized.
+    ///
+    /// # Note
+    ///
+    /// The reason reorged blocks are streamed in chronological order is to make it easier to handle
+    /// reorgs in [`EventScannerBuilder::latest`][latest mode] mode, i.e. to prepend reorged blocks
+    /// to the result collection, which must maintain chronological order.
     ///
     /// # Errors
     ///
     /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
+    ///
+    /// [latest mode]: crate::EventScannerBuilder::latest
     pub async fn rewind(
         &self,
         start_id: impl Into<BlockId>,
