@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn test_historic_scanner_builder_default_values() {
+    fn test_historic_scanner_builder_with_default_values() {
         let builder = EventScannerBuilder::historic();
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());

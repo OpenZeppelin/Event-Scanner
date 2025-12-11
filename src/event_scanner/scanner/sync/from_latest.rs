@@ -134,7 +134,80 @@ mod tests {
         rpc::client::RpcClient,
     };
 
+    use crate::{
+        block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
+        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+    };
+
     use super::*;
+
+    #[test]
+    fn builder_pattern() {
+        let builder = EventScannerBuilder::sync()
+            .from_latest(1)
+            .block_confirmations(2)
+            .max_block_range(50)
+            .max_concurrent_fetches(10);
+
+        assert_eq!(builder.config.count, 1);
+        assert_eq!(builder.config.block_confirmations, 2);
+        assert_eq!(builder.block_range_scanner.max_block_range, 50);
+        assert_eq!(builder.config.max_concurrent_fetches, 10);
+    }
+
+    #[test]
+    fn builder_with_default_values() {
+        let builder = EventScannerBuilder::sync().from_latest(1);
+
+        assert_eq!(builder.config.count, 1);
+        assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert_eq!(builder.block_range_scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
+        assert_eq!(builder.config.max_concurrent_fetches, DEFAULT_MAX_CONCURRENT_FETCHES);
+    }
+
+    #[test]
+    fn builder_last_call_wins() {
+        let builder = EventScannerBuilder::sync()
+            .from_latest(1)
+            .max_block_range(25)
+            .max_block_range(55)
+            .max_block_range(105)
+            .block_confirmations(2)
+            .block_confirmations(3)
+            .max_concurrent_fetches(10)
+            .max_concurrent_fetches(20);
+
+        assert_eq!(builder.config.count, 1);
+        assert_eq!(builder.block_range_scanner.max_block_range, 105);
+        assert_eq!(builder.config.block_confirmations, 3);
+        assert_eq!(builder.config.max_concurrent_fetches, 20);
+    }
+
+    #[tokio::test]
+    async fn accepts_zero_confirmations() -> anyhow::Result<()> {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let scanner = EventScannerBuilder::sync()
+            .from_latest(1)
+            .block_confirmations(0)
+            .connect(provider)
+            .await?;
+
+        assert_eq!(scanner.config.block_confirmations, 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_max_concurrent_fetches() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::sync()
+            .from_latest(1)
+            .max_concurrent_fetches(0)
+            .connect(provider)
+            .await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidMaxConcurrentFetches)));
+    }
 
     #[tokio::test]
     async fn test_sync_from_latest_returns_error_with_zero_count() {
