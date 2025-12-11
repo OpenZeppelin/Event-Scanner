@@ -535,15 +535,15 @@ impl<N: Network> Service<N> {
         provider: &RobustProvider<N>,
     ) -> bool {
         let tip_number = tip.header().number();
-        let common_ancestor_block = common_ancestor.header().number();
+        let common_ancestor = common_ancestor.header().number();
         info!(
             block_number = %tip_number,
             hash = %tip.header().hash(),
-            common_ancestor_block = %common_ancestor_block,
+            common_ancestor = %common_ancestor,
             "Reorg detected"
         );
 
-        if !sender.try_stream(Notification::ReorgDetected { common_ancestor_block }).await {
+        if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
             return false;
         }
 
@@ -562,7 +562,7 @@ impl<N: Network> Service<N> {
         };
 
         // Re-scan only the affected range (from common_ancestor + 1 up to tip)
-        let rescan_from = common_ancestor_block + 1;
+        let rescan_from = common_ancestor + 1;
 
         let mut rescan_batch_start = rescan_from;
         while rescan_batch_start <= tip_number {

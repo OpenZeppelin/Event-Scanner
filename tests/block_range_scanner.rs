@@ -161,7 +161,7 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     // confirmed now)
     provider.anvil_mine(Some(1), None).await?;
 
-    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: latest - 8 });
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - 8 });
     assert_range_coverage!(stream, 3..=8);
     let mut stream = assert_empty!(stream);
 
@@ -199,7 +199,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
     let depth = 15;
     _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
 
-    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: latest - depth });
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - depth });
     assert_next!(stream, 106..=110);
     assert_closed!(stream);
 
@@ -231,7 +231,7 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
     let depth = 1;
     _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
 
-    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: latest - depth });
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: latest - depth });
     assert_next!(stream, 120..=120);
     assert_closed!(stream);
 
@@ -518,7 +518,7 @@ async fn rewind_reorg_emits_notification_and_rescans_affected_range() -> anyhow:
     // NOTE: Pause scanner
     _ = provider.anvil_reorg(ReorgOptions { depth: 3, tx_block_pairs: vec![] }).await;
 
-    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: 17 });
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: 17 });
     // Rescan range from common_ancestor + 1 to tip
     assert_next!(stream, 18..=20);
     //Rewind continues from where it left off
@@ -548,7 +548,7 @@ async fn deep_rewind_reorg_streams_affected_range_in_chronologi() -> anyhow::Res
     // Deep reorg: >= max_block_range * 2
     _ = provider.anvil_reorg(ReorgOptions { depth: 10, tx_block_pairs: vec![] }).await;
 
-    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: 10 });
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor: 10 });
     // Rescan range from common_ancestor (11) to tip (20)
     assert_next!(stream, 11..=15);
     assert_next!(stream, 16..=20);

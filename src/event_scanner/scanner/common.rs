@@ -193,10 +193,10 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                             }
                         }
                         Ok(ScannerMessage::Notification(Notification::ReorgDetected {
-                            common_ancestor_block,
+                            common_ancestor,
                         })) => {
                             info!(
-                                common_ancestor_block = common_ancestor_block,
+                                common_ancestor = common_ancestor,
                                 "Received ReorgDetected notification"
                             );
 
@@ -213,7 +213,7 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                                     // Pending blocks aren't supported therefore this filter
                                     // works for now (may need to update once they are).
                                     // Tracked in <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
-                                    log.block_number.is_some_and(|n| n > common_ancestor_block)
+                                    log.block_number.is_some_and(|n| n > common_ancestor)
                                 })
                                 .collect();
                             let removed_count = before_count - collected.len();
@@ -226,7 +226,7 @@ pub fn spawn_log_consumers_in_collection_mode<N: Network>(
                             }
 
                             // Track reorg state for proper log ordering
-                            reorg_ancestor = Some(common_ancestor_block);
+                            reorg_ancestor = Some(common_ancestor);
 
                             // Don't forward the notification to the user in CollectLatest mode
                             // since logs haven't been sent yet
