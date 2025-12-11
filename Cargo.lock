@@ -2046,21 +2046,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "historical_load_test"
-version = "0.7.0-alpha"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "event-scanner",
- "futures",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "historical_scanning"
 version = "0.8.0-alpha"
 dependencies = [
