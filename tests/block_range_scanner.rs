@@ -499,10 +499,6 @@ async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()>
     Ok(())
 }
 
-/// WARN: These tests require special timing to catch the reorg between batch
-/// streaming and reorg check. This is why the test is ignored
-/// until ack-channels allow controlled pausing of the scanner.
-
 #[tokio::test]
 #[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn rewind_reorg_emits_notification_and_rescans_affected_range() -> anyhow::Result<()> {
@@ -518,18 +514,14 @@ async fn rewind_reorg_emits_notification_and_rescans_affected_range() -> anyhow:
 
     assert_next!(stream, 16..=20);
     assert_next!(stream, 11..=15);
-    let mut stream = assert_empty!(stream);
 
-    // NOTE: Pause here
-    let depth = 3;
-    _ = provider.anvil_reorg(ReorgOptions { depth, tx_block_pairs: vec![] }).await;
+    // NOTE: Pause scanner
+    _ = provider.anvil_reorg(ReorgOptions { depth: 3, tx_block_pairs: vec![] }).await;
 
-    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: 20 - depth });
-
-    // Rescan range from tip (20) down to common_ancestor + 1 (18)
+    assert_next!(stream, Notification::ReorgDetected { common_ancestor_block: 17 });
+    // Rescan range from common_ancestor + 1 to tip
     assert_next!(stream, 18..=20);
-
-    //Rewind continues from where it left off (batch_from = 10)
+    //Rewind continues from where it left off
     assert_next!(stream, 6..=10);
     assert_next!(stream, 5..=5);
     assert_closed!(stream);
@@ -560,7 +552,6 @@ async fn deep_rewind_reorg_streams_affected_range_in_chronologi() -> anyhow::Res
     // Rescan range from common_ancestor (11) to tip (20)
     assert_next!(stream, 11..=15);
     assert_next!(stream, 16..=20);
-
     // Rewind continues from where it left off (batch_from = 15)
     assert_next!(stream, 10..=15);
     assert_next!(stream, 5..=9);
