@@ -551,7 +551,11 @@ impl<N: Network> Service<N> {
         *tip = match provider.get_block_by_number(tip_number.into()).await {
             Ok(block) => block,
             Err(e) => {
-                error!(error = %e, "Terminal RPC call error, shutting down");
+                if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
+                    error!("Unexpected error: pre-reorg chain tip should exist on a reorged chain");
+                } else {
+                    error!(error = %e, "Terminal RPC call error, shutting down");
+                }
                 _ = sender.try_stream(e).await;
                 return false;
             }
