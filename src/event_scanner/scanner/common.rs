@@ -20,7 +20,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -228,7 +228,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 .expect("pending blocks not supported");
                             // Check if in reorg recovery and past the reorg range
                             if reorg_ancestor.is_some_and(|a| last_log_block_num <= a) {
-                                info!(
+                                debug!(
                                     ancestor = reorg_ancestor,
                                     "Reorg recovery complete, resuming normal log collection"
                                 );
@@ -244,7 +244,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         Ok(ScannerMessage::Notification(Notification::ReorgDetected {
                             common_ancestor,
                         })) => {
-                            info!(
+                            debug!(
                                 common_ancestor = common_ancestor,
                                 "Received ReorgDetected notification"
                             );
@@ -267,7 +267,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 .collect();
                             let removed_count = before_count - collected.len();
                             if removed_count > 0 {
-                                info!(
+                                debug!(
                                     removed_count = removed_count,
                                     remaining_count = collected.len(),
                                     "Invalidated logs from reorged blocks"
@@ -281,13 +281,12 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                             // since logs haven't been sent yet
                         }
                         Ok(ScannerMessage::Notification(notification)) => {
-                            info!(notification = ?notification, "Received notification");
+                            debug!(notification = ?notification, "Received notification");
                             if !sender.try_stream(notification).await {
                                 return;
                             }
                         }
                         Err(e) => {
-                            error!(error = ?e, "Received error message");
                             if !sender.try_stream(e).await {
                                 return;
                             }
@@ -296,15 +295,15 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 }
 
                 if collected.is_empty() {
-                    info!("No logs found");
+                    debug!("No logs found");
                     _ = sender.try_stream(Notification::NoPastLogsFound).await;
                     return;
                 }
 
-                info!(count = collected.len(), "Logs found");
+                trace!(count = collected.len(), "Logs found");
                 collected.reverse(); // restore chronological order
 
-                info!("Sending collected logs to consumer");
+                trace!("Sending collected logs to consumer");
                 _ = sender.try_stream(collected).await;
             });
 
@@ -313,7 +312,11 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
             loop {
                 match range_rx.recv().await {
                     Ok(message) => {
-                        tx.send(message).await.expect("receiver dropped only if we exit this loop");
+                        if tx.send(message).await.is_err() {
+                            // range processor has streamed the expected number of logs, stop
+                            // sending ranges
+                            break;
+                        }
                     }
                     Err(RecvError::Closed) => {
                         debug!("No more block ranges to receive");
