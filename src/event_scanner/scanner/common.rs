@@ -20,7 +20,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -100,8 +100,14 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
+            // We use a channel and convert the receiver to a stream because it already has a
+            // convenience function `buffered` for concurrently handling block ranges, while
+            // outputting results in the same order as they were received.
             let (tx, rx) = mpsc::channel::<BlockScannerResult>(max_concurrent_fetches);
 
+            // Process block ranges concurrently in a separate thread so that the current thread can
+            // continue receiving and buffering subsequent block ranges while the previous ones are
+            // being processed.
             let handle = tokio::spawn(async move {
                 let mut stream = ReceiverStream::new(rx)
                     .map(async |message| match message {
@@ -112,10 +118,13 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
                                 .map_err(ScannerError::from)
                         }
                         Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
+                        // No need to stop the stream on an error, because that decision is up to
+                        // the caller.
                         Err(e) => Err(e),
                     })
                     .buffered(max_concurrent_fetches);
 
+                // process all of the buffered results
                 while let Some(result) = stream.next().await {
                     if let Ok(ScannerMessage::Data(logs)) = result.as_ref() &&
                         logs.is_empty()
@@ -129,19 +138,26 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
                 }
             });
 
+            // Receive block ranges from the broadcast channel and send them to the range processor
+            // for parallel processing.
             loop {
                 match range_rx.recv().await {
                     Ok(message) => {
                         tx.send(message).await.expect("receiver dropped only if we exit this loop");
                     }
                     Err(RecvError::Closed) => {
-                        info!("No block ranges to receive, dropping receiver.");
+                        debug!("No more block ranges to receive");
                         break;
                     }
-                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Lagged(skipped)) => {
+                        debug!("Channel lagged, skipped {skipped} messages");
+                        continue;
+                    }
                 }
             }
 
+            // Drop the local channel sender to signal to the range processor that streaming is
+            // done.
             drop(tx);
 
             if let Err(e) = handle.await {
