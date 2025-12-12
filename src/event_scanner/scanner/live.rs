@@ -14,7 +14,6 @@ impl EventScannerBuilder<Live> {
         self
     }
 
-    #[must_use]
     /// Sets the maximum number of block-range fetches to process concurrently for
     /// live streaming.
     ///
@@ -29,6 +28,7 @@ impl EventScannerBuilder<Live> {
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
     /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
         self
