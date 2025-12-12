@@ -66,9 +66,13 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
             &range_tx,
             max_concurrent_fetches,
         ),
-        ConsumerMode::CollectLatest { count } => {
-            spawn_log_consumers_in_collection_mode(provider, listeners, &range_tx, count)
-        }
+        ConsumerMode::CollectLatest { count } => spawn_log_consumers_in_collection_mode(
+            provider,
+            listeners,
+            &range_tx,
+            count,
+            max_concurrent_fetches,
+        ),
     };
 
     while let Some(message) = stream.next().await {
@@ -170,6 +174,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
     listeners: &[EventListener],
     range_tx: &Sender<BlockScannerResult>,
     count: usize,
+    max_concurrent_fetches: usize,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
         let EventListener { filter, sender } = listener;
@@ -179,46 +184,63 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
-            // Only used for CollectLatest
-            let mut collected = Vec::with_capacity(count);
+            // We use a channel and convert the receiver to a stream because it already has a
+            // convenience function `buffered` for concurrently handling block ranges, while
+            // outputting results in the same order as they were received.
+            let (tx, rx) = mpsc::channel::<BlockScannerResult>(max_concurrent_fetches);
 
-            // Tracks common ancestor block during reorg recovery for proper log ordering
-            let mut reorg_ancestor: Option<u64> = None;
-
-            loop {
-                match range_rx.recv().await {
-                    Ok(message) => match message {
+            // Process block ranges concurrently in a separate thread so that the current thread can
+            // continue receiving and buffering subsequent block ranges while the previous ones are
+            // being processed.
+            tokio::spawn(async move {
+                let mut stream = ReceiverStream::new(rx)
+                    .map(async |message| match message {
                         Ok(ScannerMessage::Data(range)) => {
-                            let range_end = *range.end();
-                            match get_logs(range, &filter, &base_filter, &provider).await {
-                                Ok(logs) => {
-                                    if logs.is_empty() {
-                                        continue;
-                                    }
+                            get_logs(range, &filter, &base_filter, &provider)
+                                .await
+                                .map(Message::from)
+                                .map_err(ScannerError::from)
+                        }
+                        Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
+                        // No need to stop the stream on an error, because that decision is up to
+                        // the caller.
+                        Err(e) => Err(e),
+                    })
+                    .buffered(max_concurrent_fetches);
 
-                                    // Check if in reorg recovery and past the reorg range
-                                    if reorg_ancestor.is_some_and(|a| range_end <= a) {
-                                        info!(
-                                            ancestor = reorg_ancestor,
-                                            range_end = range_end,
-                                            "Reorg recovery complete, resuming normal log collection"
-                                        );
-                                        reorg_ancestor = None;
-                                    }
+                let mut collected = Vec::with_capacity(count);
 
-                                    let should_prepend = reorg_ancestor.is_some();
-                                    if collect_logs(&mut collected, logs, count, should_prepend) {
-                                        break;
-                                    }
-                                }
-                                Err(e) => {
-                                    error!(error = ?e, "Received error message");
-                                    if !sender.try_stream(e).await {
-                                        return; // channel closed
-                                    }
-                                }
+                // Tracks common ancestor block during reorg recovery for proper log ordering
+                let mut reorg_ancestor: Option<u64> = None;
+
+                // process all of the buffered results
+                while let Some(result) = stream.next().await {
+                    match result {
+                        Ok(ScannerMessage::Data(logs)) => {
+                            if logs.is_empty() {
+                                continue;
+                            }
+
+                            let last_log_block_num = logs
+                                .last()
+                                .expect("logs is not empty")
+                                .block_number
+                                .expect("pending blocks not supported");
+                            // Check if in reorg recovery and past the reorg range
+                            if reorg_ancestor.is_some_and(|a| last_log_block_num <= a) {
+                                info!(
+                                    ancestor = reorg_ancestor,
+                                    "Reorg recovery complete, resuming normal log collection"
+                                );
+                                reorg_ancestor = None;
+                            }
+
+                            let should_prepend = reorg_ancestor.is_some();
+                            if collect_logs(&mut collected, logs, count, should_prepend) {
+                                break;
                             }
                         }
+
                         Ok(ScannerMessage::Notification(Notification::ReorgDetected {
                             common_ancestor,
                         })) => {
@@ -270,26 +292,42 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 return;
                             }
                         }
-                    },
+                    }
+                }
+
+                if collected.is_empty() {
+                    info!("No logs found");
+                    _ = sender.try_stream(Notification::NoPastLogsFound).await;
+                    return;
+                }
+
+                info!(count = collected.len(), "Logs found");
+                collected.reverse(); // restore chronological order
+
+                info!("Sending collected logs to consumer");
+                _ = sender.try_stream(collected).await;
+            });
+
+            // Receive block ranges from the broadcast channel and send them to the range processor
+            // for parallel processing.
+            loop {
+                match range_rx.recv().await {
+                    Ok(message) => {
+                        tx.send(message).await.expect("receiver dropped only if we exit this loop");
+                    }
                     Err(RecvError::Closed) => {
-                        info!("No block ranges to receive, dropping receiver.");
+                        debug!("No more block ranges to receive");
                         break;
                     }
-                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Lagged(skipped)) => {
+                        debug!("Channel lagged, skipped {skipped} messages");
+                    }
                 }
             }
 
-            if collected.is_empty() {
-                info!("No logs found");
-                _ = sender.try_stream(Notification::NoPastLogsFound).await;
-                return;
-            }
-
-            info!(count = collected.len(), "Logs found");
-            collected.reverse(); // restore chronological order
-
-            info!("Sending collected logs to consumer");
-            _ = sender.try_stream(collected).await;
+            // Drop the local channel sender to signal to the range processor that streaming is
+            // done.
+            drop(tx);
         });
 
         set
