@@ -15,6 +15,20 @@ impl EventScannerBuilder<Live> {
     }
 
     #[must_use]
+    /// Sets the maximum number of block-range fetches to process concurrently for
+    /// live streaming.
+    ///
+    /// This knob primarily exists to handle an edge case: when the scanner
+    /// falls significantly behind the head of the chain (for example due to a
+    /// temporary outage or slow consumer), it can catch up faster by
+    /// processing multiple block ranges in parallel. Increasing the value
+    /// improves throughput at the expense of higher load on the provider.
+    ///
+    /// Must be greater than 0.
+    ///
+    /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
+    ///
+    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
         self

@@ -36,6 +36,17 @@ impl EventScannerBuilder<Historic> {
         self
     }
 
+    /// Sets the maximum number of block-range fetches to process concurrently when
+    /// scanning a historical block range.
+    ///
+    /// Increasing this value can improve throughput by issuing multiple RPC
+    /// requests concurrently, at the cost of higher load on the provider.
+    ///
+    /// Must be greater than 0.
+    ///
+    /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
+    ///
+    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
