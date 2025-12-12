@@ -86,7 +86,7 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
 }
 
 #[must_use]
-pub fn spawn_log_consumers_in_stream_mode<N: Network>(
+fn spawn_log_consumers_in_stream_mode<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockScannerResult>,
@@ -166,7 +166,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
 }
 
 #[must_use]
-pub fn spawn_log_consumers_in_collection_mode<N: Network>(
+fn spawn_log_consumers_in_collection_mode<N: Network>(
     provider: &RobustProvider<N>,
     listeners: &[EventListener],
     range_tx: &Sender<BlockScannerResult>,
