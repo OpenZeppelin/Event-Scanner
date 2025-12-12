@@ -248,34 +248,11 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 common_ancestor = common_ancestor,
                                 "Received ReorgDetected notification"
                             );
-
-                            // Invalidate logs from reorged blocks
-                            // Logs are ordered newest -> oldest, so skip logs with
-                            // block_number > common_ancestor at the front
-                            // NOTE: Pending logs are not supported therefore this filter
-                            // works for now (may need to update once they are). Tracked in
-                            // <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
-                            let before_count = collected.len();
-                            collected = collected
-                                .into_iter()
-                                .skip_while(|log| {
-                                    // Pending blocks aren't supported therefore this filter
-                                    // works for now (may need to update once they are).
-                                    // Tracked in <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
-                                    log.block_number.is_some_and(|n| n > common_ancestor)
-                                })
-                                .collect();
-                            let removed_count = before_count - collected.len();
-                            if removed_count > 0 {
-                                debug!(
-                                    removed_count = removed_count,
-                                    remaining_count = collected.len(),
-                                    "Invalidated logs from reorged blocks"
-                                );
-                            }
-
                             // Track reorg state for proper log ordering
                             reorg_ancestor = Some(common_ancestor);
+
+                            collected =
+                                discard_logs_from_orphaned_blocks(collected, common_ancestor);
 
                             // Don't forward the notification to the user in CollectLatest mode
                             // since logs haven't been sent yet
@@ -335,6 +312,34 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
 
         set
     })
+}
+
+fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) -> Vec<Log> {
+    // Invalidate logs from reorged blocks
+    // Logs are ordered newest -> oldest, so skip logs with
+    // block_number > common_ancestor at the front
+    // NOTE: Pending logs are not supported therefore this filter
+    // works for now (may need to update once they are). Tracked in
+    // <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
+    let before_count = collected.len();
+    let collected = collected
+        .into_iter()
+        .skip_while(|log| {
+            // Pending blocks aren't supported therefore this filter
+            // works for now (may need to update once they are).
+            // Tracked in <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
+            log.block_number.is_some_and(|n| n > common_ancestor)
+        })
+        .collect::<Vec<_>>();
+    let removed_count = before_count - collected.len();
+    if removed_count > 0 {
+        debug!(
+            removed_count = removed_count,
+            remaining_count = collected.len(),
+            "Invalidated logs from reorged blocks"
+        );
+    }
+    collected
 }
 
 /// Collects logs into the buffer, either prepending (reorg recovery) or appending (normal).
