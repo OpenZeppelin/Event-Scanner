@@ -147,7 +147,10 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
             loop {
                 match range_rx.recv().await {
                     Ok(message) => {
-                        tx.send(message).await.expect("receiver dropped only if we exit this loop");
+                        if tx.send(message).await.is_err() {
+                            debug!("Range processor dropped, stopping range reception");
+                            break;
+                        }
                     }
                     Err(RecvError::Closed) => {
                         debug!("No more block ranges to receive");
