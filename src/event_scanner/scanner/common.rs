@@ -108,7 +108,7 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
             // Process block ranges concurrently in a separate thread so that the current thread can
             // continue receiving and buffering subsequent block ranges while the previous ones are
             // being processed.
-            let handle = tokio::spawn(async move {
+            tokio::spawn(async move {
                 let mut stream = ReceiverStream::new(rx)
                     .map(async |message| match message {
                         Ok(ScannerMessage::Data(range)) => {
@@ -159,10 +159,6 @@ pub fn spawn_log_consumers_in_stream_mode<N: Network>(
             // Drop the local channel sender to signal to the range processor that streaming is
             // done.
             drop(tx);
-
-            if let Err(e) = handle.await {
-                error!(error = %e, "Error awaiting the log consumer task");
-            }
         });
 
         set
