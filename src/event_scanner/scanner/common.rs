@@ -151,7 +151,6 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                     }
                     Err(RecvError::Lagged(skipped)) => {
                         debug!("Channel lagged, skipped {skipped} messages");
-                        continue;
                     }
                 }
             }
