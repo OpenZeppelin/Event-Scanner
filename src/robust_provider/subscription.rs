@@ -1015,6 +1015,10 @@ mod tests {
         // Mine more blocks than channel can hold without consuming
         provider.anvil_mine(Some(MAX_CHANNEL_SIZE as u64 + 1), None).await?;
 
+        // Allow time for block notifications to propagate through WebSocket
+        // and fill the subscription channel
+        sleep(BUFFER_TIME).await;
+
         // First recv should return Lagged error (skipped some blocks)
         let result = subscription.recv().await;
         assert!(matches!(result, Err(Error::Lagged(_))));
