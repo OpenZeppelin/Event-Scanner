@@ -354,6 +354,7 @@ impl<N: Network> RobustProvider<N> {
                     return Ok((value, fallback_idx));
                 }
                 Err(e) => {
+                    warn!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
                     last_error = e;
                 }
             }
