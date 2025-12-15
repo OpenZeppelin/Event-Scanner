@@ -21,7 +21,7 @@ mod latest;
 mod live;
 mod sync;
 
-/// Maximum number of concurrent fetches for block ranges in the current scanner mode.
+/// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
 
 #[derive(Default)]
