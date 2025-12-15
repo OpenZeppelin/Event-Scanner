@@ -15,6 +15,6 @@ pub use types::{Notification, ScannerMessage};
 
 pub use event_scanner::{
     DEFAULT_MAX_CONCURRENT_FETCHES, EventFilter, EventScanner, EventScannerBuilder,
-    EventScannerResult, EventSubscription, Historic, LatestEvents, Live, Message, SyncFromBlock,
-    SyncFromLatestEvents,
+    EventScannerResult, EventSubscription, Historic, LatestEvents, Live, Message, ScannerToken,
+    SyncFromBlock, SyncFromLatestEvents,
 };
