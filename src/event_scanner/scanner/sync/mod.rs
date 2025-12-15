@@ -73,6 +73,9 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// * **No duplicates**: Events are not delivered twice across the phase transition
     /// * **Flexible count**: If fewer than `count` events exist, returns all available events
+    /// * **Concurrent log fetching**: Logs are fetched concurrently to reduce the sync phase
+    ///   execution time. The maximum number of concurrent RPC calls is controlled by
+    ///   [`max_concurrent_fetches`][max_concurrent_fetches]
     /// * **Reorg handling**: Both phases handle reorgs appropriately:
     ///   - Latest events phase: resets and rescans on reorg detection
     ///   - Live phase: resets stream to the first post-reorg block that satisfies the configured
@@ -114,6 +117,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [reorg]: crate::types::Notification::ReorgDetected
     /// [switch_to_live]: crate::types::Notification::SwitchingToLive
     /// [no_logs]: crate::types::Notification::NoPastLogsFound
+    /// [max_concurrent_fetches]: crate::EventScannerBuilder#method.block_confirmations-4
     #[must_use]
     pub fn from_latest(self, count: usize) -> EventScannerBuilder<SyncFromLatestEvents> {
         EventScannerBuilder::<SyncFromLatestEvents>::new(count)
@@ -199,6 +203,9 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// * **No duplicates**: Events are not delivered twice across the phase transition
     /// * **Chronological order**: Historical events are delivered oldest to newest
+    /// * **Concurrent log fetching**: Logs are fetched concurrently to reduce the sync phase
+    ///   execution time. The maximum number of concurrent RPC calls is controlled by
+    ///   [`max_concurrent_fetches`][max_concurrent_fetches]
     /// * **Seamless transition**: Automatically switches to live mode when caught up
     /// * **Continuous operation**: Live phase continues indefinitely until the scanner is dropped
     /// * **Reorg detection**: When a reorg is detected, [`Notification::ReorgDetected`][reorg] is
@@ -217,6 +224,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::Notification::ReorgDetected
     /// [switch_to_live]: crate::types::Notification::SwitchingToLive
+    /// [max_concurrent_fetches]: crate::EventScannerBuilder#method.block_confirmations-3
     #[must_use]
     pub fn from_block(self, block_id: impl Into<BlockId>) -> EventScannerBuilder<SyncFromBlock> {
         EventScannerBuilder::<SyncFromBlock>::new(block_id.into())
