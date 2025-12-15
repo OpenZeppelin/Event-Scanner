@@ -29,10 +29,12 @@ pub struct Unspecified;
 pub struct Historic {
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
+    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
 pub struct Live {
     pub(crate) block_confirmations: u64,
+    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
 pub struct LatestEvents {
@@ -40,6 +42,7 @@ pub struct LatestEvents {
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
     pub(crate) block_confirmations: u64,
+    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
 #[derive(Default)]
@@ -47,11 +50,13 @@ pub struct Synchronize;
 pub struct SyncFromLatestEvents {
     pub(crate) count: usize,
     pub(crate) block_confirmations: u64,
+    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
     pub(crate) block_confirmations: u64,
+    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
 
