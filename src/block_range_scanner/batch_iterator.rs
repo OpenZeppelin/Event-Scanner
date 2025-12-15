@@ -12,30 +12,6 @@ pub enum Direction {
 }
 
 /// An iterator that yields block ranges in batches of a configurable size.
-///
-/// Automatically logs progress every 10 batches at debug level.
-///
-/// # Example
-///
-/// ```ignore
-/// use event_scanner::block_range_scanner::BatchIterator;
-///
-/// // Forward iteration: blocks 100..=250 in batches of 50
-/// let mut iter = BatchIterator::forward(100, 250, 50);
-/// assert_eq!(iter.next(), Some(100..=149));
-/// assert_eq!(iter.next(), Some(150..=199));
-/// assert_eq!(iter.next(), Some(200..=249));
-/// assert_eq!(iter.next(), Some(250..=250));
-/// assert_eq!(iter.next(), None);
-///
-/// // Reverse iteration: blocks 250..=100 in batches of 50
-/// let mut iter = BatchIterator::reverse(250, 100, 50);
-/// assert_eq!(iter.next(), Some(201..=250)); // ranges always low..=high
-/// assert_eq!(iter.next(), Some(151..=200));
-/// assert_eq!(iter.next(), Some(101..=150));
-/// assert_eq!(iter.next(), Some(100..=100));
-/// assert_eq!(iter.next(), None);
-/// ```
 #[derive(Debug, Clone)]
 pub struct BatchIterator {
     /// Current position in the iteration.
