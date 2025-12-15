@@ -22,6 +22,23 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
         self
     }
 
+    /// Sets the maximum number of block-range fetches to process concurrently when
+    /// fetching the latest events before switching to live streaming.
+    ///
+    /// Increasing this value can improve catch-up throughput by issuing multiple
+    /// RPC requests concurrently, at the cost of additional load on the provider.
+    ///
+    /// Must be greater than 0.
+    ///
+    /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
+    ///
+    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    #[must_use]
+    pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
+        self.config.max_concurrent_fetches = max_concurrent_fetches;
+        self
+    }
+
     /// Connects to an existing provider.
     ///
     /// # Errors
@@ -36,6 +53,9 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
     ) -> Result<EventScanner<SyncFromLatestEvents, N>, ScannerError> {
         if self.config.count == 0 {
             return Err(ScannerError::InvalidEventCount);
+        }
+        if self.config.max_concurrent_fetches == 0 {
+            return Err(ScannerError::InvalidMaxConcurrentFetches);
         }
         self.build(provider).await
     }
@@ -60,6 +80,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
+        let max_concurrent_fetches = self.config.max_concurrent_fetches;
 
         info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
 
@@ -85,6 +106,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 &provider,
                 &listeners,
                 ConsumerMode::CollectLatest { count },
+                max_concurrent_fetches,
             )
             .await;
 
@@ -104,7 +126,14 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 };
 
             // Start the live (sync) stream.
-            handle_stream(sync_stream, &provider, &listeners, ConsumerMode::Stream).await;
+            handle_stream(
+                sync_stream,
+                &provider,
+                &listeners,
+                ConsumerMode::Stream,
+                max_concurrent_fetches,
+            )
+            .await;
         });
 
         Ok(())
@@ -115,11 +144,87 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
 mod tests {
     use alloy::{
         network::Ethereum,
-        providers::{RootProvider, mock::Asserter},
+        providers::{ProviderBuilder, RootProvider, mock::Asserter},
         rpc::client::RpcClient,
+    };
+    use alloy_node_bindings::Anvil;
+
+    use crate::{
+        block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
+        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;
+
+    #[test]
+    fn builder_pattern() {
+        let builder = EventScannerBuilder::sync()
+            .from_latest(1)
+            .block_confirmations(2)
+            .max_block_range(50)
+            .max_concurrent_fetches(10);
+
+        assert_eq!(builder.config.count, 1);
+        assert_eq!(builder.config.block_confirmations, 2);
+        assert_eq!(builder.block_range_scanner.max_block_range, 50);
+        assert_eq!(builder.config.max_concurrent_fetches, 10);
+    }
+
+    #[test]
+    fn builder_with_default_values() {
+        let builder = EventScannerBuilder::sync().from_latest(1);
+
+        assert_eq!(builder.config.count, 1);
+        assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert_eq!(builder.block_range_scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
+        assert_eq!(builder.config.max_concurrent_fetches, DEFAULT_MAX_CONCURRENT_FETCHES);
+    }
+
+    #[test]
+    fn builder_last_call_wins() {
+        let builder = EventScannerBuilder::sync()
+            .from_latest(1)
+            .max_block_range(25)
+            .max_block_range(55)
+            .max_block_range(105)
+            .block_confirmations(2)
+            .block_confirmations(3)
+            .max_concurrent_fetches(10)
+            .max_concurrent_fetches(20);
+
+        assert_eq!(builder.config.count, 1);
+        assert_eq!(builder.block_range_scanner.max_block_range, 105);
+        assert_eq!(builder.config.block_confirmations, 3);
+        assert_eq!(builder.config.max_concurrent_fetches, 20);
+    }
+
+    #[tokio::test]
+    async fn accepts_zero_confirmations() -> anyhow::Result<()> {
+        let anvil = Anvil::new().try_spawn().unwrap();
+        let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());
+
+        let scanner = EventScannerBuilder::sync()
+            .from_latest(1)
+            .block_confirmations(0)
+            .connect(provider)
+            .await?;
+
+        assert_eq!(scanner.config.block_confirmations, 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_max_concurrent_fetches() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::sync()
+            .from_latest(1)
+            .max_concurrent_fetches(0)
+            .connect(provider)
+            .await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidMaxConcurrentFetches)));
+    }
 
     #[tokio::test]
     async fn test_sync_from_latest_returns_error_with_zero_count() {

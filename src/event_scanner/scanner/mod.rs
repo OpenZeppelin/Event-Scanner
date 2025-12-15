@@ -21,30 +21,38 @@ mod latest;
 mod live;
 mod sync;
 
+/// Maximum number of concurrent fetches for block ranges in the current scanner mode.
+pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
+
 #[derive(Default)]
 pub struct Unspecified;
 pub struct Historic {
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
+    pub(crate) max_concurrent_fetches: usize,
 }
 pub struct Live {
     pub(crate) block_confirmations: u64,
+    pub(crate) max_concurrent_fetches: usize,
 }
 pub struct LatestEvents {
     pub(crate) count: usize,
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
     pub(crate) block_confirmations: u64,
+    pub(crate) max_concurrent_fetches: usize,
 }
 #[derive(Default)]
 pub struct Synchronize;
 pub struct SyncFromLatestEvents {
     pub(crate) count: usize,
     pub(crate) block_confirmations: u64,
+    pub(crate) max_concurrent_fetches: usize,
 }
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
     pub(crate) block_confirmations: u64,
+    pub(crate) max_concurrent_fetches: usize,
 }
 
 impl Default for Historic {
@@ -52,13 +60,17 @@ impl Default for Historic {
         Self {
             from_block: BlockNumberOrTag::Earliest.into(),
             to_block: BlockNumberOrTag::Latest.into(),
+            max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
         }
     }
 }
 
 impl Default for Live {
     fn default() -> Self {
-        Self { block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS }
+        Self {
+            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+            max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
+        }
     }
 }
 
@@ -353,6 +365,7 @@ impl EventScannerBuilder<LatestEvents> {
                 from_block: BlockNumberOrTag::Latest.into(),
                 to_block: BlockNumberOrTag::Earliest.into(),
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+                max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
             block_range_scanner: BlockRangeScanner::default(),
         }
@@ -366,6 +379,7 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
             config: SyncFromLatestEvents {
                 count,
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+                max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
             block_range_scanner: BlockRangeScanner::default(),
         }
@@ -379,6 +393,7 @@ impl EventScannerBuilder<SyncFromBlock> {
             config: SyncFromBlock {
                 from_block: from_block.into(),
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
+                max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
             block_range_scanner: BlockRangeScanner::default(),
         }

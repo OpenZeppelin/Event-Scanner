@@ -31,6 +31,9 @@ pub enum ScannerError {
     #[error("Max block range must be greater than 0")]
     InvalidMaxBlockRange,
 
+    #[error("Max concurrent fetches must be greater than 0")]
+    InvalidMaxConcurrentFetches,
+
     #[error("Subscription closed")]
     SubscriptionClosed,
 }
