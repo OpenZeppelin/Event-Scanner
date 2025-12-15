@@ -76,21 +76,18 @@ impl BatchIterator<Reverse> {
 impl<D> BatchIterator<D> {
     /// Returns the number of batches yielded so far.
     #[must_use]
-    #[allow(dead_code)]
     pub fn batch_count(&self) -> u64 {
         self.batch_count
     }
 
     /// Returns the current position, or `None` if exhausted.
     #[must_use]
-    #[allow(dead_code)]
     pub fn current(&self) -> Option<BlockNumber> {
         self.current
     }
 
     /// Returns the end boundary.
     #[must_use]
-    #[allow(dead_code)]
     pub fn end(&self) -> BlockNumber {
         self.end
     }
