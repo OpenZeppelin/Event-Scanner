@@ -11,7 +11,7 @@ use alloy::{
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument, trace, warn};
 
 use crate::robust_provider::RobustSubscription;
 
@@ -337,7 +337,7 @@ impl<N: Network> RobustProvider<N> {
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                warn!(
+                trace!(
                     provider_num = fallback_idx + 1,
                     "Fallback provider doesn't support pubsub, skipping"
                 );
