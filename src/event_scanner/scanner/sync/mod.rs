@@ -117,7 +117,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [reorg]: crate::types::Notification::ReorgDetected
     /// [switch_to_live]: crate::types::Notification::SwitchingToLive
     /// [no_logs]: crate::types::Notification::NoPastLogsFound
-    /// [max_concurrent_fetches]: SyncFromLatestEvents::max_concurrent_fetches
+    /// [max_concurrent_fetches]: crate::EventScannerBuilder#method.block_confirmations-4
     #[must_use]
     pub fn from_latest(self, count: usize) -> EventScannerBuilder<SyncFromLatestEvents> {
         EventScannerBuilder::<SyncFromLatestEvents>::new(count)
@@ -224,7 +224,7 @@ impl EventScannerBuilder<Synchronize> {
     /// [start]: crate::event_scanner::EventScanner::start
     /// [reorg]: crate::types::Notification::ReorgDetected
     /// [switch_to_live]: crate::types::Notification::SwitchingToLive
-    /// [max_concurrent_fetches]: SyncFromBlock::max_concurrent_fetches
+    /// [max_concurrent_fetches]: crate::EventScannerBuilder#method.block_confirmations-3
     #[must_use]
     pub fn from_block(self, block_id: impl Into<BlockId>) -> EventScannerBuilder<SyncFromBlock> {
         EventScannerBuilder::<SyncFromBlock>::new(block_id.into())

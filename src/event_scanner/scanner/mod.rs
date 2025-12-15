@@ -143,7 +143,7 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// The scanner streams events in chronological order (oldest to newest) within the specified
     /// block range. Events are delivered in batches as they are fetched from the provider, with
-    /// batch sizes controlled by the `max_block_range` configuration.
+    /// batch sizes controlled by the [`max_block_range`][max_block_range] configuration.
     ///
     /// # Key behaviors
     ///
@@ -153,13 +153,14 @@ impl EventScannerBuilder<Unspecified> {
     ///   The maximum number of concurrent RPC calls is controlled by
     ///   [`max_concurrent_fetches`][max_concurrent_fetches]
     /// * **Default range**: By default, scans from `Earliest` to `Latest` block
-    /// * **Batch control**: Use `.max_block_range(n)` to control how many blocks are queried per
-    ///   RPC call
+    /// * **Batch control**: Use [`max_block_range`][max_block_range] to control how many blocks are
+    ///   queried per RPC call
     /// * **Reorg handling**: Performs reorg checks when streaming events from non-finalized blocks;
     ///   if a reorg is detected, streams events from the reorged blocks
     /// * **Completion**: The scanner completes when the entire range has been processed.
     ///
-    /// [max_concurrent_fetches]: Historic::max_concurrent_fetches
+    /// [max_block_range]: crate::EventScannerBuilder::max_block_range
+    /// [max_concurrent_fetches]: crate::EventScannerBuilder::max_concurrent_fetches
     #[must_use]
     pub fn historic() -> EventScannerBuilder<Historic> {
         EventScannerBuilder::default()
@@ -362,7 +363,7 @@ impl EventScannerBuilder<Unspecified> {
     /// [sync_from_latest]: EventScannerBuilder::from_latest
     /// [reorg]: crate::Notification::ReorgDetected
     /// [no_logs]: crate::Notification::NoPastLogsFound
-    /// [max_concurrent_fetches]: LatestEvents::max_concurrent_fetches
+    /// [max_concurrent_fetches]: crate::EventScannerBuilder#method.max_concurrent_fetches-1
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
         EventScannerBuilder::<LatestEvents>::new(count)
