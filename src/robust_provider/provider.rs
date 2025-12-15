@@ -337,7 +337,10 @@ impl<N: Network> RobustProvider<N> {
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                warn!(provider_num = fallback_idx + 1, "Fallback provider doesn't support pubsub, skipping");
+                warn!(
+                    provider_num = fallback_idx + 1,
+                    "Fallback provider doesn't support pubsub, skipping"
+                );
                 continue;
             }
 
