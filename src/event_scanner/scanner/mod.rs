@@ -144,12 +144,17 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// * **Continuous streaming**: Events are delivered in multiple messages as they are fetched
     /// * **Chronological order**: Events are always delivered oldest to newest
+    /// * **Concurrent log fetching**: Logs are fetched concurrently to reduce the execution time.
+    ///   The maximum number of concurrent RPC calls is controlled by
+    ///   [`max_concurrent_fetches`][max_concurrent_fetches]
     /// * **Default range**: By default, scans from `Earliest` to `Latest` block
     /// * **Batch control**: Use `.max_block_range(n)` to control how many blocks are queried per
     ///   RPC call
     /// * **Reorg handling**: Performs reorg checks when streaming events from non-finalized blocks;
     ///   if a reorg is detected, streams events from the reorged blocks
     /// * **Completion**: The scanner completes when the entire range has been processed.
+    ///
+    /// [max_concurrent_fetches]: Historic::max_concurrent_fetches
     #[must_use]
     pub fn historic() -> EventScannerBuilder<Historic> {
         EventScannerBuilder::default()
@@ -308,6 +313,9 @@ impl EventScannerBuilder<Unspecified> {
     ///   message, chronologically ordered
     /// * **One-shot operation**: The scanner completes after delivering messages; it does not
     ///   continue streaming
+    /// * **Concurrent log fetching**: Logs are fetched concurrently to reduce the execution time.
+    ///   The maximum number of concurrent RPC calls is controlled by
+    ///   [`max_concurrent_fetches`][max_concurrent_fetches]
     /// * **Flexible count**: If fewer than `count` events exist in the range, returns all available
     ///   events
     /// * **Default range**: By default, scans from `Earliest` to `Latest` block
@@ -349,6 +357,7 @@ impl EventScannerBuilder<Unspecified> {
     /// [sync_from_latest]: EventScannerBuilder::from_latest
     /// [reorg]: crate::Notification::ReorgDetected
     /// [no_logs]: crate::Notification::NoPastLogsFound
+    /// [max_concurrent_fetches]: LatestEvents::max_concurrent_fetches
     #[must_use]
     pub fn latest(count: usize) -> EventScannerBuilder<LatestEvents> {
         EventScannerBuilder::<LatestEvents>::new(count)
