@@ -1,3 +1,35 @@
+//! Scanner builders and mode marker types.
+//!
+//! This module defines [`EventScannerBuilder`] and the mode marker types used to configure an
+//! [`EventScanner`]. Calling [`EventScannerBuilder::historic`], [`EventScannerBuilder::live`],
+//! [`EventScannerBuilder::latest`] or [`EventScannerBuilder::sync`] selects a mode and exposes the
+//! mode-specific configuration methods.
+//!
+//! # Streams
+//!
+//! Consumers register event subscriptions via [`EventScanner::subscribe`]. Each subscription
+//! produces an independent stream of [`EventScannerResult`].
+//!
+//! ## Ordering
+//!
+//! Ordering is preserved *per subscription stream*. There is no global ordering guarantee across
+//! different subscriptions.
+//!
+//! ## Backpressure and lag
+//!
+//! Subscription streams are buffered. If a consumer cannot keep up and the internal broadcast
+//! channel drops messages, the corresponding subscription yields [`ScannerError::Lagged`].
+//!
+//! # Reorgs and finality
+//!
+//! When scanning non-finalized blocks, the scanner may detect reorganizations and emit
+//! [`Notification::ReorgDetected`]. Consumers should assume at-least-once delivery around reorgs
+//! (benign duplicates are possible).
+//!
+//! In live mode, `block_confirmations` delays emission so that shallow reorganizations that do not
+//! affect the confirmed boundary do not trigger reorg notifications.
+//!
+//! [`Notification::ReorgDetected`]: crate::Notification::ReorgDetected
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
     network::{Ethereum, Network},
@@ -24,8 +56,13 @@ mod sync;
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
 
+/// Marker indicating that a scanner mode has not been selected yet.
 #[derive(Default, Debug)]
 pub struct Unspecified;
+
+/// Mode marker for historical range scanning.
+///
+/// Constructed via [`EventScannerBuilder::historic`].
 #[derive(Debug)]
 pub struct Historic {
     pub(crate) from_block: BlockId,
@@ -33,12 +70,20 @@ pub struct Historic {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+
+/// Mode marker for live streaming.
+///
+/// Constructed via [`EventScannerBuilder::live`].
 #[derive(Debug)]
 pub struct Live {
     pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+
+/// Mode marker for latest-events collection.
+///
+/// Constructed via [`EventScannerBuilder::latest`].
 #[derive(Debug)]
 pub struct LatestEvents {
     pub(crate) count: usize,
@@ -47,8 +92,16 @@ pub struct LatestEvents {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+
 #[derive(Default, Debug)]
+/// Marker indicating that a sync mode must be selected.
 pub struct Synchronize;
+
+/// Mode marker for scanning by syncing from the specified count of latest events and then switching
+/// to live mode.
+///
+/// Constructed via [`EventScannerBuilder::sync`] followed by
+/// [`EventScannerBuilder::from_latest`](crate::EventScannerBuilder::from_latest).
 #[derive(Debug)]
 pub struct SyncFromLatestEvents {
     pub(crate) count: usize,
@@ -56,6 +109,11 @@ pub struct SyncFromLatestEvents {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+
+/// Mode marker for scanning by syncing from the specified block and then switching to live mode.
+///
+/// Constructed via [`EventScannerBuilder::sync`] followed by
+/// [`EventScannerBuilder::from_block`](crate::EventScannerBuilder#method.from_block-2).
 #[derive(Debug)]
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
@@ -83,6 +141,10 @@ impl Default for Live {
     }
 }
 
+/// An event scanner configured in mode `M` and bound to network `N`.
+///
+/// Create an instance via [`EventScannerBuilder`], register subscriptions with
+/// [`EventScanner::subscribe`], then start the scanner with the mode-specific `start()` method.
 #[derive(Debug)]
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     config: M,
@@ -90,6 +152,7 @@ pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     listeners: Vec<EventListener>,
 }
 
+/// Builder for constructing an [`EventScanner`] in a particular mode.
 #[derive(Default, Debug)]
 pub struct EventScannerBuilder<M> {
     pub(crate) config: M,
@@ -474,6 +537,23 @@ impl<M> EventScannerBuilder<M> {
 }
 
 impl<M, N: Network> EventScanner<M, N> {
+    /// Registers an event subscription and returns its stream.
+    ///
+    /// Each call creates a separate subscription stream with its own buffer.
+    ///
+    /// # Ordering
+    ///
+    /// Ordering is guaranteed only within a single returned stream. There is no ordering
+    /// guarantee across streams created by multiple calls to this method.
+    ///
+    /// # Errors
+    ///
+    /// The stream yields [`ScannerError`] values on failures. In particular, if a consumer cannot
+    /// keep up and internal buffers lag, the stream yields [`ScannerError::Lagged`].
+    ///
+    /// # Notes
+    ///
+    /// For scanner to properly stream events, register all subscriptions before calling `start()`.
     #[must_use]
     pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<EventScannerResult> {
         let (sender, receiver) = mpsc::channel::<EventScannerResult>(MAX_BUFFERED_MESSAGES);
