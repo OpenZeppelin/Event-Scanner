@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use alloy::primitives::BlockNumber;
 use std::{marker::PhantomData, ops::RangeInclusive};
 use tracing::debug;
@@ -28,11 +27,7 @@ impl BatchIterator<Forward> {
     #[must_use]
     pub fn forward(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
         assert!(max_block_range >= 1, "max_block_range must be at least 1");
-        let total_batches = if start > end {
-            0
-        } else {
-            (end - start) / max_block_range + 1
-        };
+        let total_batches = if start > end { 0 } else { (end - start) / max_block_range + 1 };
         Self {
             current: start,
             end,
@@ -68,11 +63,7 @@ impl BatchIterator<Reverse> {
     #[must_use]
     pub fn reverse(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
         assert!(max_block_range >= 1, "max_block_range must be at least 1");
-        let total_batches = if start < end {
-            0
-        } else {
-            (start - end) / max_block_range + 1
-        };
+        let total_batches = if start < end { 0 } else { (start - end) / max_block_range + 1 };
         Self {
             current: start,
             end,
@@ -82,7 +73,6 @@ impl BatchIterator<Reverse> {
             _direction: PhantomData,
         }
     }
-
 }
 
 impl<D> BatchIterator<D> {
@@ -90,18 +80,6 @@ impl<D> BatchIterator<D> {
     #[must_use]
     pub fn batch_count(&self) -> u64 {
         self.batch_count
-    }
-
-    /// Returns the current position, or `None` if exhausted.
-    #[must_use]
-    pub fn current(&self) -> BlockNumber {
-        self.current
-    }
-
-    /// Returns the end boundary.
-    #[must_use]
-    pub fn end(&self) -> BlockNumber {
-        self.end
     }
 }
 
@@ -281,24 +259,6 @@ mod tests {
         iter.reset_to(250);
 
         assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn current_returns_position() {
-        let mut iter = BatchIterator::forward(100, 300, 50);
-        assert_eq!(iter.current(), 100);
-
-        iter.next();
-        assert_eq!(iter.current(), 150);
-
-        iter.next();
-        assert_eq!(iter.current(), 200);
-    }
-
-    #[test]
-    fn end_returns_boundary() {
-        let iter = BatchIterator::forward(100, 300, 50);
-        assert_eq!(iter.end(), 300);
     }
 
     #[test]
