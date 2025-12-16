@@ -10,7 +10,16 @@ use alloy::{
 
 use crate::robust_provider::{RobustProvider, RobustProviderBuilder, provider::Error};
 
+/// Conversion trait for types that can be turned into an Alloy [`RootProvider`].
+///
+/// This is primarily used by [`RobustProviderBuilder`] to accept different provider types and
+/// connection strings.
 pub trait IntoRootProvider<N: Network = Ethereum> {
+    /// Convert `self` into a [`RootProvider`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying provider cannot be constructed or connected.
     fn into_root_provider(self) -> impl Future<Output = Result<RootProvider<N>, Error>> + Send;
 }
 
@@ -78,7 +87,13 @@ where
     }
 }
 
+/// Conversion trait for types that can be turned into a [`RobustProvider`].
 pub trait IntoRobustProvider<N: Network = Ethereum> {
+    /// Convert `self` into a [`RobustProvider`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the primary or any fallback provider fails to connect.
     fn into_robust_provider(self) -> impl Future<Output = Result<RobustProvider<N>, Error>> + Send;
 }
 

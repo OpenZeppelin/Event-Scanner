@@ -8,6 +8,11 @@ use crate::{
 };
 
 impl EventScannerBuilder<Live> {
+    /// Sets the number of confirmations required before a block is considered stable enough to
+    /// scan in live mode.
+    ///
+    /// Higher values reduce the likelihood of emitting logs from blocks that are later reorged,
+    /// at the cost of increased event delivery latency.
     #[must_use]
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;
