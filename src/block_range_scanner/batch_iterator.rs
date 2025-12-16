@@ -25,7 +25,7 @@ impl BatchIterator<Forward> {
     ///
     /// Panics if `max_block_range` is 0.
     #[must_use]
-    pub fn forward(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
+    pub const fn forward(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
         assert!(max_block_range >= 1, "max_block_range must be at least 1");
         let total_batches = if start > end { 0 } else { (end - start) / max_block_range + 1 };
         Self {
@@ -61,7 +61,7 @@ impl BatchIterator<Reverse> {
     ///
     /// Panics if `max_block_range` is 0.
     #[must_use]
-    pub fn reverse(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
+    pub const fn reverse(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
         assert!(max_block_range >= 1, "max_block_range must be at least 1");
         let total_batches = if start < end { 0 } else { (start - end) / max_block_range + 1 };
         Self {
