@@ -122,8 +122,8 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                                 .map_err(ScannerError::from)
                         }
                         Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
-                        // No need to stop the stream on an error, because that decision is up to
-                        // the caller.
+                        // No need to stop the stream on an error, because there will be no more
+                        // values received from the range stream.
                         Err(e) => Err(e),
                     })
                     .buffered(max_concurrent_fetches);
@@ -204,8 +204,8 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 .map_err(ScannerError::from)
                         }
                         Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
-                        // No need to stop the stream on an error, because that decision is up to
-                        // the caller.
+                        // No need to stop the stream on an error, because there will be no more
+                        // values received from the range stream.
                         Err(e) => Err(e),
                     })
                     .buffered(max_concurrent_fetches);
