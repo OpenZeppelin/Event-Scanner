@@ -156,9 +156,7 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
-                        tx.send(Err(ScannerError::Lagged(skipped)))
-                            .await
-                            .expect("receiver dropped only if we exit this loop");
+                        debug!("Channel lagged, skipped {skipped} messages");
                     }
                 }
             }
@@ -302,9 +300,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
-                        tx.send(Err(ScannerError::Lagged(skipped)))
-                            .await
-                            .expect("receiver dropped only if we exit this loop");
+                        debug!("Channel lagged, skipped {skipped} messages");
                     }
                 }
             }
@@ -410,14 +406,6 @@ async fn get_logs<N: Network>(
 
 #[cfg(test)]
 mod tests {
-    use alloy::{
-        network::Ethereum,
-        providers::{RootProvider, mock::Asserter},
-        rpc::client::RpcClient,
-    };
-
-    use crate::robust_provider::RobustProviderBuilder;
-
     use super::*;
 
     #[test]
@@ -516,59 +504,5 @@ mod tests {
         assert!(done);
 
         assert_eq!(collected, vec![95, 90, 85]);
-    }
-
-    #[tokio::test]
-    async fn spawn_log_consumers_in_stream_mode_streams_lagged_error() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let provider = RobustProviderBuilder::fragile(provider).build().await?;
-
-        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(1);
-        let (sender, mut receiver) = mpsc::channel(1);
-        let listeners = &[EventListener { filter: EventFilter::new(), sender }];
-        let max_concurrent_fetches = 1;
-
-        let _set = spawn_log_consumers_in_stream_mode(
-            &provider,
-            listeners,
-            &range_tx,
-            max_concurrent_fetches,
-        );
-
-        range_tx.send(Ok(ScannerMessage::Data(0..=1)))?;
-        // the next range "overfills" the channel, causing a lag
-        range_tx.send(Ok(ScannerMessage::Data(2..=3)))?;
-
-        assert!(matches!(receiver.recv().await.unwrap(), Err(ScannerError::Lagged(1))));
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn spawn_log_consumers_in_collection_mode_streams_lagged_error() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let provider = RobustProviderBuilder::fragile(provider).build().await?;
-
-        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(1);
-        let (sender, mut receiver) = mpsc::channel(1);
-        let listeners = &[EventListener { filter: EventFilter::new(), sender }];
-        let count = 5;
-        let max_concurrent_fetches = 1;
-
-        let _set = spawn_log_consumers_in_collection_mode(
-            &provider,
-            listeners,
-            &range_tx,
-            count,
-            max_concurrent_fetches,
-        );
-
-        range_tx.send(Ok(ScannerMessage::Data(2..=3)))?;
-        // the next range "overfills" the channel, causing a lag
-        range_tx.send(Ok(ScannerMessage::Data(0..=1)))?;
-
-        assert!(matches!(receiver.recv().await.unwrap(), Err(ScannerError::Lagged(1))));
-
-        Ok(())
     }
 }
