@@ -85,7 +85,9 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     // Close the channel sender to signal to the log consumers that streaming is done.
     drop(range_tx);
 
-    // ensure all consumers finish before they're dropped
+    // ensure all consumers finish before they're dropped - this is to ensure that this consumer set
+    // finishes its log processing before the next consumer set can be spawned in a subsequent
+    // `handle_stream` invocation.
     consumers.join_all().await;
 }
 
