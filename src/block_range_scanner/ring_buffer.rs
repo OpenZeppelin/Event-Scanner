@@ -1,8 +1,19 @@
 use std::collections::VecDeque;
 
+/// Configuration for how many past block hashes to retain for reorg detection.
+///
+/// This type is re-exported as `PastBlocksStorageCapacity` from the crate root.
 #[derive(Copy, Clone, Debug)]
 pub enum RingBufferCapacity {
+    /// Keep at most `n` items.
+    ///
+    /// A value of `0` disables storing past block hashes and effectively disables reorg
+    /// detection.
     Limited(usize),
+    /// Keep an unbounded number of items.
+    ///
+    /// WARNING: This can lead to unbounded memory growth over long-running processes.
+    /// Avoid using this in production deployments without an external bound.
     Infinite,
 }
 
@@ -56,14 +67,17 @@ impl<T> RingBuffer<T> {
         }
     }
 
+    /// Removes and returns the newest element from the buffer.
     pub fn pop_back(&mut self) -> Option<T> {
         self.inner.pop_back()
     }
 
+    /// Returns a reference to the newest element in the buffer.
     pub fn back(&self) -> Option<&T> {
         self.inner.back()
     }
 
+    /// Clears all elements currently stored in the buffer.
     pub fn clear(&mut self) {
         self.inner.clear();
     }

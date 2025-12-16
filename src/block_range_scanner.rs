@@ -1,4 +1,28 @@
-//! Example usage:
+//! Block-range streaming service.
+//!
+//! This module provides a lower-level primitive used by [`crate::EventScanner`]: it streams
+//! contiguous block number ranges (inclusive) and emits [`crate::Notification`] values for
+//! certain state transitions (e.g. reorg detection).
+//!
+//! [`BlockRangeScanner`] is useful when you want to build your own log-fetching pipeline on top of
+//! range streaming, or when you need direct access to the scanner's batching and reorg-detection
+//! behavior.
+//!
+//! # Output stream
+//!
+//! Streams returned by [`BlockRangeScannerClient`] yield [`BlockScannerResult`] items:
+//!
+//! - `Ok(ScannerMessage::Data(range))` for a block range to process.
+//! - `Ok(ScannerMessage::Notification(_))` for scanner notifications.
+//! - `Err(ScannerError)` for errors.
+//!
+//! # Ordering
+//!
+//! Range messages are streamed in chronological order within a single stream (lower block number
+//! to higher block number). On reorgs, the scanner may re-emit previously-seen ranges for the
+//! affected blocks.
+//!
+//! # Example usage:
 //!
 //! ```rust,no_run
 //! use alloy::{eips::BlockNumberOrTag, network::Ethereum, primitives::BlockNumber};
@@ -89,18 +113,23 @@ mod sync_handler;
 use reorg_handler::ReorgHandler;
 pub use ring_buffer::RingBufferCapacity;
 
+/// Default maximum number of blocks per streamed range.
 pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
-// copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
+
+/// Default confirmation depth used by scanners that accept a `block_confirmations` setting.
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 
+/// Default per-stream buffer size used by scanners.
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 
 // Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
 // is considered final)
 pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
 
+/// The result type yielded by block-range streams.
 pub type BlockScannerResult = ScannerResult<RangeInclusive<BlockNumber>>;
 
+/// Convenience alias for a streamed block-range message.
 pub type Message = ScannerMessage<RangeInclusive<BlockNumber>>;
 
 impl From<RangeInclusive<BlockNumber>> for Message {
@@ -121,9 +150,14 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     }
 }
 
+/// Builder/configuration for the block-range streaming service.
 #[derive(Clone)]
 pub struct BlockRangeScanner {
+    /// Maximum number of blocks per streamed range.
     pub max_block_range: u64,
+    /// How many past block hashes to keep in memory for reorg detection.
+    ///
+    /// If set to `RingBufferCapacity::Limited(0)`, reorg detection is disabled.
     pub past_blocks_storage_capacity: RingBufferCapacity,
 }
 
@@ -134,6 +168,7 @@ impl Default for BlockRangeScanner {
 }
 
 impl BlockRangeScanner {
+    /// Creates a scanner with default configuration.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -142,12 +177,18 @@ impl BlockRangeScanner {
         }
     }
 
+    /// Sets the maximum number of blocks per streamed range.
+    ///
+    /// This controls batching for historical scans and for catch-up in live/sync scanners.
     #[must_use]
     pub fn max_block_range(mut self, max_block_range: u64) -> Self {
         self.max_block_range = max_block_range;
         self
     }
 
+    /// Sets how many past block hashes to keep in memory for reorg detection.
+    ///
+    /// If set to `RingBufferCapacity::Limited(0)`, reorg detection is disabled.
     #[must_use]
     pub fn past_blocks_storage_capacity(
         mut self,
@@ -157,7 +198,7 @@ impl BlockRangeScanner {
         self
     }
 
-    /// Connects to an existing provider
+    /// Connects to an existing provider.
     ///
     /// # Errors
     ///
@@ -175,6 +216,10 @@ impl BlockRangeScanner {
     }
 }
 
+/// A [`BlockRangeScanner`] connected to a provider.
+///
+/// Use [`ConnectedBlockRangeScanner::run`] to start the background service and obtain a
+/// [`BlockRangeScannerClient`].
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
@@ -182,7 +227,7 @@ pub struct ConnectedBlockRangeScanner<N: Network> {
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
-    /// Returns the `RobustProvider`
+    /// Returns the underlying [`RobustProvider`].
     #[must_use]
     pub fn provider(&self) -> &RobustProvider<N> {
         &self.provider
@@ -206,25 +251,30 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     }
 }
 
+/// Commands accepted by the internal block-range service.
 #[derive(Debug)]
-pub enum Command {
+enum Command {
+    /// Start a live stream.
     StreamLive {
         sender: mpsc::Sender<BlockScannerResult>,
         block_confirmations: u64,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
+    /// Start a historical range stream.
     StreamHistorical {
         sender: mpsc::Sender<BlockScannerResult>,
         start_id: BlockId,
         end_id: BlockId,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
+    /// Start a stream that catches up from `start_id` and then transitions to live streaming.
     StreamFrom {
         sender: mpsc::Sender<BlockScannerResult>,
         start_id: BlockId,
         block_confirmations: u64,
         response: oneshot::Sender<Result<(), ScannerError>>,
     },
+    /// Start a reverse stream (newer to older), in batches.
     Rewind {
         sender: mpsc::Sender<BlockScannerResult>,
         start_id: BlockId,
@@ -243,6 +293,7 @@ struct Service<N: Network> {
 }
 
 impl<N: Network> Service<N> {
+    /// Creates a new background service instance and its command channel.
     pub fn new(
         provider: RobustProvider<N>,
         max_block_range: u64,
@@ -582,6 +633,9 @@ impl<N: Network> Service<N> {
     }
 }
 
+/// Client for requesting block-range streams from the background service.
+///
+/// Each method returns a new stream whose items are [`BlockScannerResult`] values.
 pub struct BlockRangeScannerClient {
     command_sender: mpsc::Sender<Command>,
 }
@@ -593,7 +647,7 @@ impl BlockRangeScannerClient {
     ///
     /// * `command_sender` - The sender for sending commands to the subscription service.
     #[must_use]
-    pub fn new(command_sender: mpsc::Sender<Command>) -> Self {
+    fn new(command_sender: mpsc::Sender<Command>) -> Self {
         Self { command_sender }
     }
 
