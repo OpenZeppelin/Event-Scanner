@@ -52,13 +52,6 @@ pub enum ScannerError {
     /// A block subscription ended (for example, the underlying WebSocket subscription closed).
     #[error("Subscription closed")]
     SubscriptionClosed,
-
-    /// A subscription consumer could not keep up and some internal messages were skipped.
-    ///
-    /// The contained value is the number of skipped messages reported by the underlying channel.
-    /// After emitting this error, the subscription stream may continue with newer items.
-    #[error("Subscription lagged")]
-    Lagged(u64),
 }
 
 impl From<RobustProviderError> for ScannerError {
