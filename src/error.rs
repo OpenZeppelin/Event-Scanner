@@ -36,6 +36,9 @@ pub enum ScannerError {
 
     #[error("Subscription closed")]
     SubscriptionClosed,
+
+    #[error("Subscription lagged")]
+    Lagged(u64),
 }
 
 impl From<RobustProviderError> for ScannerError {
