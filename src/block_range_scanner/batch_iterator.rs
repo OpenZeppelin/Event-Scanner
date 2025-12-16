@@ -9,10 +9,11 @@ pub struct Reverse;
 /// An iterator that yields block ranges in batches of a configurable size.
 #[derive(Debug, Clone)]
 pub struct BatchIterator<D> {
-    current: Option<BlockNumber>,
+    current: BlockNumber,
     end: BlockNumber,
     batch_size: u64,
     batch_count: u64,
+    total_batches: u64,
     _direction: PhantomData<D>,
 }
 
@@ -27,11 +28,17 @@ impl BatchIterator<Forward> {
     #[must_use]
     pub fn forward(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
         assert!(max_block_range >= 1, "max_block_range must be at least 1");
+        let total_batches = if start > end {
+            0
+        } else {
+            (end - start) / max_block_range + 1
+        };
         Self {
-            current: if start > end { None } else { Some(start) },
+            current: start,
             end,
             batch_size: max_block_range,
             batch_count: 0,
+            total_batches,
             _direction: PhantomData,
         }
     }
@@ -40,7 +47,12 @@ impl BatchIterator<Forward> {
     ///
     /// Useful after detecting a reorg to rescan from a common ancestor.
     pub fn reset_to(&mut self, block: BlockNumber) {
-        self.current = if block > self.end { None } else { Some(block) };
+        self.current = block;
+        self.total_batches = if block > self.end {
+            self.batch_count + (block - self.end) / self.batch_size + 1
+        } else {
+            self.batch_count
+        };
     }
 }
 
@@ -56,21 +68,21 @@ impl BatchIterator<Reverse> {
     #[must_use]
     pub fn reverse(start: BlockNumber, end: BlockNumber, max_block_range: u64) -> Self {
         assert!(max_block_range >= 1, "max_block_range must be at least 1");
+        let total_batches = if start < end {
+            0
+        } else {
+            (start - end) / max_block_range + 1
+        };
         Self {
-            current: if start < end { None } else { Some(start) },
+            current: start,
             end,
             batch_size: max_block_range,
             batch_count: 0,
+            total_batches,
             _direction: PhantomData,
         }
     }
 
-    /// Resets the iterator to continue from a new position.
-    ///
-    /// Useful after detecting a reorg to rescan from a common ancestor.
-    pub fn reset_to(&mut self, block: BlockNumber) {
-        self.current = if block < self.end { None } else { Some(block) };
-    }
 }
 
 impl<D> BatchIterator<D> {
@@ -82,7 +94,7 @@ impl<D> BatchIterator<D> {
 
     /// Returns the current position, or `None` if exhausted.
     #[must_use]
-    pub fn current(&self) -> Option<BlockNumber> {
+    pub fn current(&self) -> BlockNumber {
         self.current
     }
 
@@ -97,16 +109,18 @@ impl Iterator for BatchIterator<Forward> {
     type Item = RangeInclusive<BlockNumber>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let batch_start = self.current?;
+        if self.current > self.end {
+            return None;
+        }
 
         self.batch_count += 1;
         if self.batch_count % 10 == 0 {
             debug!(batch_count = self.batch_count, "Processed batches");
         }
 
+        let batch_start = self.current;
         let batch_end = batch_start.saturating_add(self.batch_size - 1).min(self.end);
-
-        self.current = if batch_end >= self.end { None } else { Some(batch_end + 1) };
+        self.current = batch_end + 1;
 
         Some(batch_start..=batch_end)
     }
@@ -116,16 +130,18 @@ impl Iterator for BatchIterator<Reverse> {
     type Item = RangeInclusive<BlockNumber>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let batch_high = self.current?;
+        if self.batch_count >= self.total_batches {
+            return None;
+        }
 
         self.batch_count += 1;
         if self.batch_count % 10 == 0 {
             debug!(batch_count = self.batch_count, "Processed batches");
         }
 
+        let batch_high = self.current;
         let batch_low = batch_high.saturating_sub(self.batch_size - 1).max(self.end);
-
-        self.current = if batch_low <= self.end { None } else { Some(batch_low - 1) };
+        self.current = batch_low.saturating_sub(1);
 
         Some(batch_low..=batch_high)
     }
@@ -246,22 +262,6 @@ mod tests {
     }
 
     #[test]
-    fn reset_to_rewinds_reverse_iteration() {
-        let mut iter = BatchIterator::reverse(300, 100, 50);
-        assert_eq!(iter.next(), Some(251..=300));
-        assert_eq!(iter.next(), Some(201..=250));
-
-        // Reset to re-scan from a higher block (simulating reorg detection)
-        iter.reset_to(280);
-
-        assert_eq!(iter.next(), Some(231..=280));
-        assert_eq!(iter.next(), Some(181..=230));
-        assert_eq!(iter.next(), Some(131..=180));
-        assert_eq!(iter.next(), Some(100..=130));
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
     fn reset_to_after_exhausted() {
         let mut iter = BatchIterator::forward(100, 120, 50);
         assert_eq!(iter.next(), Some(100..=120));
@@ -296,13 +296,13 @@ mod tests {
     #[test]
     fn current_returns_position() {
         let mut iter = BatchIterator::forward(100, 300, 50);
-        assert_eq!(iter.current(), Some(100));
+        assert_eq!(iter.current(), 100);
 
         iter.next();
-        assert_eq!(iter.current(), Some(150));
+        assert_eq!(iter.current(), 150);
 
         iter.next();
-        assert_eq!(iter.current(), Some(200));
+        assert_eq!(iter.current(), 200);
     }
 
     #[test]
