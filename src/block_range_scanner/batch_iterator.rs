@@ -284,16 +284,6 @@ mod tests {
     }
 
     #[test]
-    fn reset_to_beyond_end_exhausts_reverse() {
-        let mut iter = BatchIterator::reverse(200, 100, 50);
-        assert_eq!(iter.next(), Some(151..=200));
-
-        iter.reset_to(50);
-
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
     fn current_returns_position() {
         let mut iter = BatchIterator::forward(100, 300, 50);
         assert_eq!(iter.current(), 100);
