@@ -57,6 +57,18 @@ mod sync;
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
 
 /// Marker trait for scanner operating modes.
+///
+/// This trait is sealed and cannot be implemented outside this crate.
+///
+/// # Available modes
+///
+/// | Mode | Description |
+/// |------|-------------|
+/// | [`Historic`] | Scans a fixed block range from start to end |
+/// | [`Live`] | Streams new events as blocks are produced |
+/// | [`LatestEvents`] | Collects the N most recent matching events |
+/// | [`SyncFromBlock`] | Syncs from a block, then switches to live |
+/// | [`SyncFromLatestEvents`] | Syncs from latest N events, then switches to live |
 pub trait Mode: Sealed {}
 
 mod sealed {
