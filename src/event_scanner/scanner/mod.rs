@@ -43,7 +43,7 @@ use crate::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
         MAX_BUFFERED_MESSAGES, RingBufferCapacity,
     },
-    event_scanner::{EventScannerResult, listener::EventListener},
+    event_scanner::{EventScannerResult, listener::EventListener, scanner::sealed::Sealed},
     robust_provider::IntoRobustProvider,
 };
 
@@ -56,9 +56,24 @@ mod sync;
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
 
+/// Marker trait for scanner operating modes.
+pub trait Mode: Sealed {}
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::Unspecified {}
+    impl Sealed for super::Historic {}
+    impl Sealed for super::Live {}
+    impl Sealed for super::LatestEvents {}
+    impl Sealed for super::Synchronize {}
+    impl Sealed for super::SyncFromLatestEvents {}
+    impl Sealed for super::SyncFromBlock {}
+}
+
 /// Typestate marker indicating that a scanner mode has not been selected yet.
 #[derive(Default)]
 pub struct Unspecified;
+impl Mode for Unspecified {}
 
 /// Mode marker for historical range scanning.
 ///
@@ -69,6 +84,7 @@ pub struct Historic {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+impl Mode for Historic {}
 
 /// Mode marker for live streaming.
 ///
@@ -78,6 +94,7 @@ pub struct Live {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+impl Mode for Live {}
 
 /// Mode marker for latest-events collection.
 ///
@@ -90,10 +107,12 @@ pub struct LatestEvents {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+impl Mode for LatestEvents {}
 
 #[derive(Default)]
 /// Typestate marker indicating that a sync mode must be selected.
 pub struct Synchronize;
+impl Mode for Synchronize {}
 
 /// Mode marker for scanning by syncing from the specified count of latest events and then switching
 /// to live mode.
@@ -106,6 +125,7 @@ pub struct SyncFromLatestEvents {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+impl Mode for SyncFromLatestEvents {}
 
 /// Mode marker for scanning by syncing from the specified block and then switching to live mode.
 ///
@@ -117,6 +137,7 @@ pub struct SyncFromBlock {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+impl Mode for SyncFromBlock {}
 
 impl Default for Historic {
     fn default() -> Self {
@@ -141,7 +162,7 @@ impl Default for Live {
 ///
 /// Create an instance via [`EventScannerBuilder`], register subscriptions with
 /// [`EventScanner::subscribe`], then start the scanner with the mode-specific `start()` method.
-pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
+pub struct EventScanner<M: Mode = Unspecified, N: Network = Ethereum> {
     config: M,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
@@ -477,7 +498,7 @@ impl EventScannerBuilder<SyncFromBlock> {
     }
 }
 
-impl<M> EventScannerBuilder<M> {
+impl<M: Mode> EventScannerBuilder<M> {
     /// Sets the maximum block range per event batch.
     ///
     /// Controls how the scanner splits a large block range into smaller batches for processing.
@@ -532,7 +553,7 @@ impl<M> EventScannerBuilder<M> {
     }
 }
 
-impl<M, N: Network> EventScanner<M, N> {
+impl<M: Mode, N: Network> EventScanner<M, N> {
     /// Registers an event subscription and returns its stream.
     ///
     /// Each call creates a separate subscription stream with its own buffer.
