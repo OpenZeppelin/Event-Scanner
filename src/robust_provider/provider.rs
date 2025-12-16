@@ -321,6 +321,7 @@ impl<N: Network> RobustProvider<N> {
             .map(|(value, _idx)| value)
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub(crate) async fn try_fallback_providers_from<T: Debug, F, Fut>(
         &self,
         operation: F,
@@ -343,6 +344,8 @@ impl<N: Network> RobustProvider<N> {
                 );
                 continue;
             }
+
+            trace!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
