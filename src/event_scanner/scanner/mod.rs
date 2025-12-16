@@ -41,7 +41,6 @@ pub struct LatestEvents {
     pub(crate) count: usize,
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
-    pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
@@ -378,7 +377,6 @@ impl EventScannerBuilder<LatestEvents> {
                 count,
                 from_block: BlockNumberOrTag::Latest.into(),
                 to_block: BlockNumberOrTag::Earliest.into(),
-                block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
                 max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
             block_range_scanner: BlockRangeScanner::default(),
@@ -510,7 +508,6 @@ mod tests {
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Latest.into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Earliest.into());
-        assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
     }
 
     #[test]
