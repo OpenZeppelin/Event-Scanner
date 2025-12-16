@@ -47,10 +47,10 @@ pub enum Notification {
     /// handle duplicate logs idempotently (e.g., using transaction hashes or log indices as
     /// deduplication keys). The scanner prioritizes correctness by ensuring all logs from the
     /// canonical chain are delivered, even if it means occasional duplicates during reorgs.
-    ///
-    /// The `common_ancestor` field contains the block number of the last block
-    /// that is still valid on the canonical chain.
-    ReorgDetected { common_ancestor: u64 },
+    ReorgDetected {
+        /// The block number of the last block that is still valid on the canonical chain.
+        common_ancestor: u64,
+    },
 
     /// Emitted during the latest events phase when no matching logs are found in the
     /// scanned range.
