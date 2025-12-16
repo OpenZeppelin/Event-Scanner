@@ -181,10 +181,8 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
     max_concurrent_fetches: usize,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
-        let EventListener { filter, sender } = listener;
-
         let provider = provider.clone();
-        let base_filter = Filter::from(&filter);
+        let base_filter = Filter::from(&listener.filter);
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
@@ -200,7 +198,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 let mut stream = ReceiverStream::new(rx)
                     .map(async |message| match message {
                         Ok(ScannerMessage::Data(range)) => {
-                            get_logs(range, &filter, &base_filter, &provider)
+                            get_logs(range, &listener.filter, &base_filter, &provider)
                                 .await
                                 .map(Message::from)
                                 .map_err(ScannerError::from)
@@ -263,12 +261,12 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         }
                         Ok(ScannerMessage::Notification(notification)) => {
                             debug!(notification = ?notification, "Received notification");
-                            if !sender.try_stream(notification).await {
+                            if !listener.sender.try_stream(notification).await {
                                 return;
                             }
                         }
                         Err(e) => {
-                            if !sender.try_stream(e).await {
+                            if !listener.sender.try_stream(e).await {
                                 return;
                             }
                         }
@@ -277,7 +275,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
 
                 if collected.is_empty() {
                     debug!("No logs found");
-                    _ = sender.try_stream(Notification::NoPastLogsFound).await;
+                    _ = listener.sender.try_stream(Notification::NoPastLogsFound).await;
                     return;
                 }
 
@@ -285,7 +283,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 collected.reverse(); // restore chronological order
 
                 trace!("Sending collected logs to consumer");
-                _ = sender.try_stream(collected).await;
+                _ = listener.sender.try_stream(collected).await;
             });
 
             // Receive block ranges from the broadcast channel and send them to the range processor
