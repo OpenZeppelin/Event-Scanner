@@ -1,6 +1,6 @@
 use alloy::{eips::BlockNumberOrTag, network::Network};
 
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{
     EventScannerBuilder, ScannerError,
@@ -117,7 +117,6 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 match client.stream_from(latest_block + 1, self.config.block_confirmations).await {
                     Ok(stream) => stream,
                     Err(e) => {
-                        error!(error = %e, "Error during sync mode setup");
                         for listener in listeners {
                             _ = listener.sender.try_stream(e.clone()).await;
                         }
