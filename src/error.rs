@@ -13,11 +13,7 @@ use crate::{robust_provider::provider::Error as RobustProviderError, types::Scan
 /// `ScannerError` values can be returned by builder `connect()` methods and are also yielded by
 /// subscription streams (as `Err(ScannerError)` items).
 ///
-/// Whether an error is terminal depends on where it is produced.
-///
-/// For example, some errors are yielded while scanning continues (such as per-range log fetching
-/// errors), while others terminate a particular background task or stream (such as a closed
-/// subscription).
+/// All errors except [`ScannerError::Lagged`] are terminal and will halt further stream processing.
 #[derive(Error, Debug, Clone)]
 pub enum ScannerError {
     /// The underlying RPC transport returned an error.

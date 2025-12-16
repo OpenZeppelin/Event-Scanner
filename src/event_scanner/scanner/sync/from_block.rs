@@ -10,6 +10,11 @@ use crate::{
 };
 
 impl EventScannerBuilder<SyncFromBlock> {
+    /// Sets the number of confirmations required before a block is considered stable enough to
+    /// scan in the live phase.
+    ///
+    /// This affects the post-sync live streaming phase; higher values reduce reorg risk at the
+    /// cost of increased event delivery latency.
     #[must_use]
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;

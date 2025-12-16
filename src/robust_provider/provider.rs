@@ -80,6 +80,10 @@ impl From<super::subscription::Error> for Error {
     }
 }
 
+/// The default channel size used for underlying pubsub subscriptions.
+///
+/// This value is used to configure the channel size for subscriptions created
+/// by the `RobustProvider`.
 pub const MAX_CHANNEL_SIZE: usize = 128;
 
 /// Provider wrapper with built-in retry and timeout mechanisms.

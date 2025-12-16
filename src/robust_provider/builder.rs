@@ -18,6 +18,9 @@ pub const DEFAULT_MAX_RETRIES: usize = 3;
 /// Default base delay between retries.
 pub const DEFAULT_MIN_DELAY: Duration = Duration::from_secs(1);
 
+/// Builder for constructing a [`RobustProvider`].
+///
+/// Use this to configure timeouts, retry/backoff, and one or more fallback providers.
 pub struct RobustProviderBuilder<N: Network, P: IntoRootProvider<N>> {
     primary_provider: P,
     fallback_providers: Vec<BoxedProviderFuture<N>>,

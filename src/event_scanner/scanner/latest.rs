@@ -12,6 +12,11 @@ use crate::{
 };
 
 impl EventScannerBuilder<LatestEvents> {
+    /// Sets the number of confirmations required before a block is considered stable enough to
+    /// include when collecting the latest events.
+    ///
+    /// Higher values reduce the likelihood of emitting logs from blocks that are later reorged,
+    /// at the cost of potentially excluding very recent events.
     #[must_use]
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;
