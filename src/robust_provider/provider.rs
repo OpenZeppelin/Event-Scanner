@@ -306,6 +306,7 @@ impl<N: Network> RobustProvider<N> {
         self.try_fallback_providers(&operation, require_pubsub, last_error).await
     }
 
+    #[instrument(level = "trace", skip(self, operation, last_error))]
     pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
         &self,
         operation: F,
@@ -321,7 +322,7 @@ impl<N: Network> RobustProvider<N> {
             .map(|(value, _idx)| value)
     }
 
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self, operation, last_error))]
     pub(crate) async fn try_fallback_providers_from<T: Debug, F, Fut>(
         &self,
         operation: F,
