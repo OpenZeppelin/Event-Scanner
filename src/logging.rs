@@ -1,7 +1,7 @@
 #[cfg(feature = "tracing")]
 macro_rules! opt_error {
     ($($arg:tt)*) => {
-        tracing::opt_error!($($arg)*)
+        tracing::error!($($arg)*)
     };
 }
 
@@ -67,9 +67,3 @@ macro_rules! opt_trace {
         ()
     };
 }
-
-pub(crate) use opt_debug;
-pub(crate) use opt_error;
-pub(crate) use opt_info;
-pub(crate) use opt_trace;
-pub(crate) use opt_warn;

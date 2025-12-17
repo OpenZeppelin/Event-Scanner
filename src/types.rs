@@ -2,10 +2,7 @@ use std::fmt::Debug;
 
 use tokio::sync::mpsc;
 
-use crate::{
-    ScannerError,
-    logging::{opt_info, opt_warn},
-};
+use crate::ScannerError;
 
 /// Messages streamed by the scanner to subscribers.
 ///
