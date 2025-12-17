@@ -8,7 +8,7 @@ macro_rules! trace_error {
 #[cfg(not(feature = "tracing"))]
 macro_rules! trace_error {
     ($($arg:tt)*) => {
-        ()
+        let _ = ($(&stringify!($arg)),*);
     };
 }
 
