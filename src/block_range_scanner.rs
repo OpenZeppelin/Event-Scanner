@@ -79,7 +79,6 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::warn;
 
 mod common;
 mod reorg_handler;
@@ -274,7 +273,7 @@ impl<N: Network> Service<N> {
                             self.error_count += 1;
                         }
                     } else {
-                        warn!("Command channel closed, shutting down");
+                        opt_warn!("Command channel closed, shutting down");
                         break;
                     }
                 }
