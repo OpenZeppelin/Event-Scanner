@@ -80,10 +80,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let listeners = self.listeners.clone();
         let max_concurrent_fetches = self.config.max_concurrent_fetches;
 
-        opt_info!(
-            count = count,
-            "Starting scanner, mode: fetch latest events and switch to live"
-        );
+        opt_info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
 
         let client = self.block_range_scanner.run()?;
 
