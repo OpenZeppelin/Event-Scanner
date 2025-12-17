@@ -67,19 +67,15 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
 }
 
 impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
-    /// Starts the scanner.
+    /// Starts the scanner in [`SyncFromLatestEvents`] mode.
     ///
-    /// # Important notes
-    ///
-    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
-    ///   this function.
-    /// * The method returns immediately; events are delivered asynchronously.
+    /// See [`EventScanner`] for general startup notes.
     ///
     /// # Errors
     ///
-    /// Can error out if the service fails to start.
-    ///
-    /// [subscribe]: EventScanner::subscribe
+    /// * [`ScannerError::ServiceShutdown`] - if the internal block-range service cannot be started.
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     #[allow(clippy::missing_panics_doc)]
     pub async fn start(self) -> Result<(), ScannerError> {
         let count = self.config.count;

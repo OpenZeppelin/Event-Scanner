@@ -147,6 +147,18 @@ impl Default for Live {
 ///
 /// Create an instance via [`EventScannerBuilder`], register subscriptions with
 /// [`EventScanner::subscribe`], then start the scanner with the mode-specific `start()` method.
+///
+/// # Starting the scanner
+///
+/// All scanner modes follow the same general startup pattern:
+///
+/// - **Register subscriptions first**: call [`EventScanner::subscribe`] before starting the scanner
+///   with `start()`. The scanner sends events only to subscriptions that have already been
+///   registered.
+/// - **Non-blocking start**: `start()` returns immediately after spawning background tasks.
+///   Subscription streams yield events asynchronously.
+/// - **Errors after startup**: most runtime failures are delivered through subscription streams as
+///   [`ScannerError`] items, rather than being returned from `start()`.
 #[derive(Debug)]
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     config: M,
