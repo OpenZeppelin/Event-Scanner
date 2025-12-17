@@ -143,7 +143,7 @@ impl Default for Live {
     }
 }
 
-/// An event scanner configured in mode `M` and bound to network `N`.
+/// An event scanner configured in mode `Mode` and bound to network `N`.
 ///
 /// Create an instance via [`EventScannerBuilder`], register subscriptions with
 /// [`EventScanner::subscribe`], then start the scanner with the mode-specific `start()` method.
@@ -160,16 +160,16 @@ impl Default for Live {
 /// - **Errors after startup**: most runtime failures are delivered through subscription streams as
 ///   [`ScannerError`] items, rather than being returned from `start()`.
 #[derive(Debug)]
-pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
-    config: M,
+pub struct EventScanner<Mode = Unspecified, N: Network = Ethereum> {
+    config: Mode,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
 /// Builder for constructing an [`EventScanner`] in a particular mode.
 #[derive(Default, Debug)]
-pub struct EventScannerBuilder<M> {
-    pub(crate) config: M,
+pub struct EventScannerBuilder<Mode> {
+    pub(crate) config: Mode,
     pub(crate) block_range_scanner: BlockRangeScanner,
 }
 
@@ -496,7 +496,7 @@ impl EventScannerBuilder<SyncFromBlock> {
     }
 }
 
-impl<M> EventScannerBuilder<M> {
+impl<Mode> EventScannerBuilder<Mode> {
     /// Sets the maximum block range per event batch.
     ///
     /// Controls how the scanner splits a large block range into smaller batches for processing.
@@ -542,7 +542,7 @@ impl<M> EventScannerBuilder<M> {
     async fn build<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
-    ) -> Result<EventScanner<M, N>, ScannerError> {
+    ) -> Result<EventScanner<Mode, N>, ScannerError> {
         if self.block_range_scanner.max_block_range == 0 {
             return Err(ScannerError::InvalidMaxBlockRange);
         }
@@ -551,7 +551,7 @@ impl<M> EventScannerBuilder<M> {
     }
 }
 
-impl<M, N: Network> EventScanner<M, N> {
+impl<Mode, N: Network> EventScanner<Mode, N> {
     /// Registers an event subscription and returns its stream.
     ///
     /// Each call creates a separate subscription stream with its own buffer.
