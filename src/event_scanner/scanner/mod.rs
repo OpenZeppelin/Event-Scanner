@@ -63,7 +63,7 @@ pub struct Unspecified;
 
 /// Mode marker for historical range scanning.
 ///
-/// Constructed via [`EventScannerBuilder::historic`].
+/// For more details on this scanner mode, see [`EventScannerBuilder::historic`].
 #[derive(Debug)]
 pub struct Historic {
     pub(crate) from_block: BlockId,
@@ -74,7 +74,7 @@ pub struct Historic {
 
 /// Mode marker for live streaming.
 ///
-/// Constructed via [`EventScannerBuilder::live`].
+/// For more details on this scanner mode, see [`EventScannerBuilder::live`].
 #[derive(Debug)]
 pub struct Live {
     pub(crate) block_confirmations: u64,
@@ -84,7 +84,7 @@ pub struct Live {
 
 /// Mode marker for latest-events collection.
 ///
-/// Constructed via [`EventScannerBuilder::latest`].
+/// For more details on this scanner mode, see [`EventScannerBuilder::latest`].
 #[derive(Debug)]
 pub struct LatestEvents {
     pub(crate) count: usize,
@@ -102,8 +102,8 @@ pub struct Synchronize;
 /// Mode marker for scanning by syncing from the specified count of latest events and then switching
 /// to live mode.
 ///
-/// Constructed via [`EventScannerBuilder::sync`] followed by
-/// [`EventScannerBuilder::from_latest`](crate::EventScannerBuilder::from_latest).
+/// For more details on this scanner mode, see
+/// [`EventScannerBuilder::sync().from_latest(count)`](crate::EventScannerBuilder::from_latest).
 #[derive(Debug)]
 pub struct SyncFromLatestEvents {
     pub(crate) count: usize,
@@ -114,8 +114,9 @@ pub struct SyncFromLatestEvents {
 
 /// Mode marker for scanning by syncing from the specified block and then switching to live mode.
 ///
-/// Constructed via [`EventScannerBuilder::sync`] followed by
-/// [`EventScannerBuilder::from_block`](crate::EventScannerBuilder#method.from_block-2).
+/// For more details on this scanner mode, see
+/// [`EventScannerBuilder::sync().from_block(block_id)`](crate::EventScannerBuilder#method.
+/// from_block-2).
 #[derive(Debug)]
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
