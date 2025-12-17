@@ -79,7 +79,7 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::{debug, warn};
+use tracing::warn;
 
 mod common;
 mod range_iterator;
