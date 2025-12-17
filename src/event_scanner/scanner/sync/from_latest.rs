@@ -1,7 +1,5 @@
 use alloy::{eips::BlockNumberOrTag, network::Network};
 
-use tracing::error;
-
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{

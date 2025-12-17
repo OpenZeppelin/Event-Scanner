@@ -20,7 +20,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -371,7 +371,7 @@ fn collect_logs<T>(collected: &mut Vec<T>, logs: Vec<T>, count: usize, prepend: 
 
 async fn get_logs<N: Network>(
     range: RangeInclusive<u64>,
-    event_filter: &EventFilter,
+    _event_filter: &EventFilter,
     log_filter: &Filter,
     provider: &RobustProvider<N>,
 ) -> Result<Vec<Log>, RobustProviderError> {
@@ -384,7 +384,7 @@ async fn get_logs<N: Network>(
             }
 
             trace_info!(
-                filter = %event_filter,
+                filter = %_event_filter,
                 log_count = logs.len(),
                 block_range = ?range,
                 "found logs for event in block range"

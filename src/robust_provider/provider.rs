@@ -121,8 +121,8 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
-        if let Err(e) = &result {
-            trace_error!(error = %e, "eth_getByBlockNumber failed");
+        if let Err(_e) = &result {
+            trace_error!(error = %_e, "eth_getByBlockNumber failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(number.into()))
@@ -143,8 +143,8 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
-        if let Err(e) = &result {
-            trace_error!(error = %e, "eth_getByBlockNumber failed");
+        if let Err(_e) = &result {
+            trace_error!(error = %_e, "eth_getByBlockNumber failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(id))
     }
@@ -165,8 +165,8 @@ impl<N: Network> RobustProvider<N> {
             )
             .await
             .map_err(Error::from);
-        if let Err(e) = &result {
-            trace_error!(error = %e, "eth_getBlockNumber failed");
+        if let Err(_e) = &result {
+            trace_error!(error = %_e, "eth_getBlockNumber failed");
         }
         result
     }
@@ -190,8 +190,8 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
-        if let Err(e) = &result {
-            trace_error!(error = %e, "get_block_number_by_id failed");
+        if let Err(_e) = &result {
+            trace_error!(error = %_e, "get_block_number_by_id failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(block_id))
     }
@@ -231,8 +231,8 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
-        if let Err(e) = &result {
-            trace_error!(error = %e, "eth_getBlockByHash failed");
+        if let Err(_e) = &result {
+            trace_error!(error = %_e, "eth_getBlockByHash failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(hash.into()))
@@ -254,8 +254,8 @@ impl<N: Network> RobustProvider<N> {
             )
             .await
             .map_err(Error::from);
-        if let Err(e) = &result {
-            trace_error!(error = %e, "eth_getLogs failed");
+        if let Err(_e) = &result {
+            trace_error!(error = %_e, "eth_getLogs failed");
         }
         result
     }
@@ -390,7 +390,9 @@ impl<N: Network> RobustProvider<N> {
             }
         }
         // All fallbacks failed / skipped, return the last error
-        trace_error!("All providers failed or timed out - returning the last providers attempt's error");
+        trace_error!(
+            "All providers failed or timed out - returning the last providers attempt's error"
+        );
         Err(last_error)
     }
 

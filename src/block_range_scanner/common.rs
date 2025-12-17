@@ -13,7 +13,7 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::{debug, error};
+use tracing::debug;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_live_blocks<N: Network>(
