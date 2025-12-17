@@ -23,9 +23,9 @@
 //!
 //! # Reorgs and finality
 //!
-//! When scanning non-finalized blocks, the scanner may detect reorganizations and emit
-//! [`Notification::ReorgDetected`]. Consumers should assume at-least-once delivery around reorgs
-//! (benign duplicates are possible).
+//! When scanning non-finalized blocks, the scanner may detect chain reorganizations and will emit
+//! [`Notification::ReorgDetected`]. Consumers should assume the same events might be delivered more
+//! than once around reorgs (i.e. benign duplicates are possible).
 //!
 //! In live mode, `block_confirmations` delays emission so that shallow reorganizations that do not
 //! affect the confirmed boundary do not trigger reorg notifications.

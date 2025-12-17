@@ -238,7 +238,7 @@ Always handle all message types in your stream processing loop to ensure robust 
 Notes:
 
 - Ordering is guaranteed only within a single subscription stream. There is no global ordering guarantee across multiple subscriptions.
-- When the scanner detects a reorg, it emits `Notification::ReorgDetected`. Applications should assume at-least-once delivery around reorgs (benign duplicates are possible). Depending on your needs, handle this via idempotency/deduplication or by rolling back application state on reorg notifications.
+- When the scanner detects a reorg, it emits `Notification::ReorgDetected`. Consumers should assume the same events might be delivered more than once around reorgs (i.e. benign duplicates are possible). Depending on the application's needs, this could be handled via idempotency/deduplication or by rolling back application state on reorg notifications.
 
 ### Scanning Modes
 
