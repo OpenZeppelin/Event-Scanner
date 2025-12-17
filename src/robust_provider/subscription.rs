@@ -128,6 +128,7 @@ impl<N: Network> RobustSubscription<N> {
                             RecvError::Closed => {
                                 opt_error!("Provider closed the subscription channel");
                             }
+                            #[allow(clippy::used_underscore_binding)]
                             RecvError::Lagged(_count) => {
                                 opt_error!(skipped = _count, "Receiver lagged");
                             }
@@ -180,6 +181,7 @@ impl<N: Network> RobustSubscription<N> {
                 self.last_reconnect_attempt = None;
                 true
             }
+            #[allow(clippy::used_underscore_binding)]
             Err(_e) => {
                 self.last_reconnect_attempt = Some(Instant::now());
                 opt_warn!(error = %_e, "Failed to reconnect to primary provider");

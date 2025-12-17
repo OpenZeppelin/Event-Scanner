@@ -269,6 +269,7 @@ impl<N: Network> Service<N> {
             tokio::select! {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
+                        #[allow(clippy::used_underscore_binding)]
                         if let Err(_e) = self.handle_command(command).await {
                             opt_error!("Command handling error: {}", _e);
                             self.error_count += 1;

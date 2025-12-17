@@ -106,6 +106,7 @@ pub(crate) trait TryStream<T: Clone> {
     async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool;
 }
 
+#[allow(clippy::used_underscore_binding)]
 impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<ScannerResult<T>> {
     async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool {
         let item = msg.into_scanner_message_result();
