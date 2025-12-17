@@ -80,8 +80,6 @@ impl From<super::subscription::Error> for Error {
     }
 }
 
-pub const MAX_CHANNEL_SIZE: usize = 128;
-
 /// Provider wrapper with built-in retry and timeout mechanisms.
 ///
 /// This wrapper around Alloy providers automatically handles retries,
@@ -95,6 +93,7 @@ pub struct RobustProvider<N: Network = Ethereum> {
     pub(crate) max_retries: usize,
     pub(crate) min_delay: Duration,
     pub(crate) reconnect_interval: Duration,
+    pub(crate) subscription_buffer_capacity: usize,
 }
 
 impl<N: Network> RobustProvider<N> {
@@ -278,7 +277,10 @@ impl<N: Network> RobustProvider<N> {
         let subscription = self
             .try_operation_with_failover(
                 move |provider| async move {
-                    provider.subscribe_blocks().channel_size(MAX_CHANNEL_SIZE).await
+                    provider
+                        .subscribe_blocks()
+                        .channel_size(self.subscription_buffer_capacity)
+                        .await
                 },
                 true,
             )
@@ -427,8 +429,8 @@ impl<N: Network> RobustProvider<N> {
 mod tests {
     use super::*;
     use crate::robust_provider::{
-        RobustProviderBuilder, builder::DEFAULT_SUBSCRIPTION_TIMEOUT,
-        subscription::DEFAULT_RECONNECT_INTERVAL,
+        DEFAULT_SUBSCRIPTION_BUFFER_CAPACITY, RobustProviderBuilder,
+        builder::DEFAULT_SUBSCRIPTION_TIMEOUT, subscription::DEFAULT_RECONNECT_INTERVAL,
     };
     use alloy::providers::{ProviderBuilder, WsConnect, ext::AnvilApi};
     use alloy_node_bindings::{Anvil, AnvilInstance};
@@ -464,6 +466,7 @@ mod tests {
             max_retries,
             min_delay: Duration::from_millis(min_delay),
             reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
+            subscription_buffer_capacity: DEFAULT_SUBSCRIPTION_BUFFER_CAPACITY,
         }
     }
 
