@@ -114,7 +114,7 @@ impl<N: Network> RobustProvider<N> {
         &self,
         number: BlockNumberOrTag,
     ) -> Result<N::BlockResponse, Error> {
-        trace_info!("eth_getBlockByNumber called");
+        opt_info!("eth_getBlockByNumber called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_number(number).await },
@@ -122,7 +122,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(_e) = &result {
-            trace_error!(error = %_e, "eth_getByBlockNumber failed");
+            opt_error!(error = %_e, "eth_getByBlockNumber failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(number.into()))
@@ -136,7 +136,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block(&self, id: BlockId) -> Result<N::BlockResponse, Error> {
-        trace_info!("eth_getBlock called");
+        opt_info!("eth_getBlock called");
         let result = self
             .try_operation_with_failover(
                 |provider| async move { provider.get_block(id).await },
@@ -144,7 +144,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(_e) = &result {
-            trace_error!(error = %_e, "eth_getByBlockNumber failed");
+            opt_error!(error = %_e, "eth_getByBlockNumber failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(id))
     }
@@ -157,7 +157,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_number(&self) -> Result<BlockNumber, Error> {
-        trace_info!("eth_getBlockNumber called");
+        opt_info!("eth_getBlockNumber called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number().await },
@@ -166,7 +166,7 @@ impl<N: Network> RobustProvider<N> {
             .await
             .map_err(Error::from);
         if let Err(_e) = &result {
-            trace_error!(error = %_e, "eth_getBlockNumber failed");
+            opt_error!(error = %_e, "eth_getBlockNumber failed");
         }
         result
     }
@@ -183,7 +183,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<BlockNumber, Error> {
-        trace_info!("get_block_number_by_id called");
+        opt_info!("get_block_number_by_id called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number_by_id(block_id).await },
@@ -191,7 +191,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(_e) = &result {
-            trace_error!(error = %_e, "get_block_number_by_id failed");
+            opt_error!(error = %_e, "get_block_number_by_id failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(block_id))
     }
@@ -210,7 +210,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
-        trace_info!("get_latest_confirmed called with confirmations={}", confirmations);
+        opt_info!("get_latest_confirmed called with confirmations={}", confirmations);
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
         Ok(confirmed_block)
@@ -224,7 +224,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_by_hash(&self, hash: BlockHash) -> Result<N::BlockResponse, Error> {
-        trace_info!("eth_getBlockByHash called");
+        opt_info!("eth_getBlockByHash called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_hash(hash).await },
@@ -232,7 +232,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(_e) = &result {
-            trace_error!(error = %_e, "eth_getBlockByHash failed");
+            opt_error!(error = %_e, "eth_getBlockByHash failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(hash.into()))
@@ -246,7 +246,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
-        trace_info!("eth_getLogs called");
+        opt_info!("eth_getLogs called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_logs(filter).await },
@@ -255,7 +255,7 @@ impl<N: Network> RobustProvider<N> {
             .await
             .map_err(Error::from);
         if let Err(_e) = &result {
-            trace_error!(error = %_e, "eth_getLogs failed");
+            opt_error!(error = %_e, "eth_getLogs failed");
         }
         result
     }
@@ -273,7 +273,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// see [retry errors](#retry-errors).
     pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
-        trace_info!("eth_subscribe called");
+        opt_info!("eth_subscribe called");
         let subscription = self
             .try_operation_with_failover(
                 move |provider| async move {
@@ -289,7 +289,7 @@ impl<N: Network> RobustProvider<N> {
         match subscription {
             Ok(sub) => Ok(RobustSubscription::new(sub, self.clone())),
             Err(e) => {
-                trace_error!(error = %e, "eth_subscribe failed");
+                opt_error!(error = %e, "eth_subscribe failed");
                 Err(e.into())
             }
         }
@@ -364,33 +364,33 @@ impl<N: Network> RobustProvider<N> {
     {
         let num_fallbacks = self.fallback_providers.len();
         if num_fallbacks > 0 && start_index == 0 {
-            trace_info!("Primary provider failed, trying fallback provider(s)");
+            opt_info!("Primary provider failed, trying fallback provider(s)");
         }
 
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                trace_info!(
+                opt_info!(
                     "Fallback provider {} doesn't support pubsub, skipping",
                     fallback_idx + 1
                 );
                 continue;
             }
-            trace_info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
+            opt_info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
-                    trace_info!(provider_num = fallback_idx + 1, "Fallback provider succeeded");
+                    opt_info!(provider_num = fallback_idx + 1, "Fallback provider succeeded");
                     return Ok((value, fallback_idx));
                 }
                 Err(e) => {
-                    trace_error!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
+                    opt_error!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
                     last_error = e;
                 }
             }
         }
         // All fallbacks failed / skipped, return the last error
-        trace_error!(
+        opt_error!(
             "All providers failed or timed out - returning the last providers attempt's error"
         );
         Err(last_error)
@@ -415,7 +415,7 @@ impl<N: Network> RobustProvider<N> {
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
                 .notify(|_err: &RpcError<TransportErrorKind>, _dur: Duration| {
-                    trace_info!(error = %_err, "RPC error retrying after {:?}", _dur);
+                    opt_info!(error = %_err, "RPC error retrying after {:?}", _dur);
                 })
                 .sleep(tokio::time::sleep),
         )

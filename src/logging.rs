@@ -1,75 +1,75 @@
 #[cfg(feature = "tracing")]
-macro_rules! trace_error {
+macro_rules! opt_error {
     ($($arg:tt)*) => {
-        tracing::trace_error!($($arg)*)
+        tracing::opt_error!($($arg)*)
     };
 }
 
 #[cfg(not(feature = "tracing"))]
-macro_rules! trace_error {
+macro_rules! opt_error {
     ($($arg:tt)*) => {
         let _ = ($(&stringify!($arg)),*);
     };
 }
 
 #[cfg(feature = "tracing")]
-macro_rules! trace_warn {
+macro_rules! opt_warn {
     ($($arg:tt)*) => {
         tracing::warn!($($arg)*)
     };
 }
 
 #[cfg(not(feature = "tracing"))]
-macro_rules! trace_warn {
+macro_rules! opt_warn {
     ($($arg:tt)*) => {
         ()
     };
 }
 
 #[cfg(feature = "tracing")]
-macro_rules! trace_info {
+macro_rules! opt_info {
     ($($arg:tt)*) => {
         tracing::info!($($arg)*)
     };
 }
 
 #[cfg(not(feature = "tracing"))]
-macro_rules! trace_info {
+macro_rules! opt_info {
     ($($arg:tt)*) => {
         ()
     };
 }
 
 #[cfg(feature = "tracing")]
-macro_rules! trace_debug {
+macro_rules! opt_debug {
     ($($arg:tt)*) => {
         tracing::debug!($($arg)*)
     };
 }
 
 #[cfg(not(feature = "tracing"))]
-macro_rules! trace_debug {
+macro_rules! opt_debug {
     ($($arg:tt)*) => {
         ()
     };
 }
 
 #[cfg(feature = "tracing")]
-macro_rules! trace_trace {
+macro_rules! opt_trace {
     ($($arg:tt)*) => {
         tracing::trace!($($arg)*)
     };
 }
 
 #[cfg(not(feature = "tracing"))]
-macro_rules! trace_trace {
+macro_rules! opt_trace {
     ($($arg:tt)*) => {
         ()
     };
 }
 
-pub(crate) use trace_debug;
-pub(crate) use trace_error;
-pub(crate) use trace_info;
-pub(crate) use trace_trace;
-pub(crate) use trace_warn;
+pub(crate) use opt_debug;
+pub(crate) use opt_error;
+pub(crate) use opt_info;
+pub(crate) use opt_trace;
+pub(crate) use opt_warn;

@@ -67,7 +67,7 @@ pub(crate) async fn stream_live_blocks<N: Network>(
     )
     .await;
 
-    trace_warn!("Live block subscription ended");
+    opt_warn!("Live block subscription ended");
 }
 
 async fn get_first_block<
@@ -85,7 +85,7 @@ async fn get_first_block<
                     subscription::Error::Lagged(_) => {
                         // scanner already accounts for skipped block numbers
                         // next block will be the actual incoming block
-                        trace_info!(
+                        opt_info!(
                             "Skipping Error::Lagged, next block should be the first live block"
                         );
                     }
@@ -134,7 +134,7 @@ async fn initialize_live_streaming_state<N: Network>(
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<LiveStreamingState<N>> {
     let incoming_block_num = first_block.number();
-    trace_info!(block_number = incoming_block_num, "Received first block header");
+    opt_info!(block_number = incoming_block_num, "Received first block header");
 
     let confirmed = incoming_block_num.saturating_sub(block_confirmations);
 
@@ -178,7 +178,7 @@ async fn stream_blocks_continuously<
         let incoming_block = match incoming_block {
             Ok(block) => block,
             Err(e) => {
-                trace_error!(error = %e, "Error receiving block from stream");
+                opt_error!(error = %e, "Error receiving block from stream");
                 match e {
                     subscription::Error::Lagged(_) => {
                         // scanner already accounts for skipped block numbers
@@ -202,7 +202,7 @@ async fn stream_blocks_continuously<
         };
 
         let incoming_block_num = incoming_block.number();
-        trace_info!(block_number = incoming_block_num, "Received block header");
+        opt_info!(block_number = incoming_block_num, "Received block header");
 
         let Some(previous_batch_end) = state.previous_batch_end.as_ref() else {
             // previously detected reorg wasn't fully handled
@@ -212,7 +212,7 @@ async fn stream_blocks_continuously<
         let common_ancestor = match reorg_handler.check(previous_batch_end).await {
             Ok(reorg_opt) => reorg_opt,
             Err(e) => {
-                trace_error!(error = %e, "Failed to perform reorg check");
+                opt_error!(error = %e, "Failed to perform reorg check");
                 _ = sender.try_stream(e).await;
                 return;
             }
@@ -262,7 +262,7 @@ async fn handle_reorg_detected<N: Network>(
     // Reset streaming position based on common ancestor
     if ancestor_num < stream_start {
         // Reorg went before our starting point - restart from stream_start
-        trace_info!(
+        opt_info!(
             ancestor_block = ancestor_num,
             stream_start = stream_start,
             "Reorg detected before stream start, resetting to stream start"
@@ -271,7 +271,7 @@ async fn handle_reorg_detected<N: Network>(
         state.previous_batch_end = None;
     } else {
         // Resume from after the common ancestor
-        trace_info!(ancestor_block = ancestor_num, "Reorg detected, resuming from common ancestor");
+        opt_info!(ancestor_block = ancestor_num, "Reorg detected, resuming from common ancestor");
         state.batch_start = ancestor_num + 1;
         state.previous_batch_end = Some(common_ancestor);
     }
@@ -337,12 +337,12 @@ pub(crate) async fn stream_historical_range<N: Network>(
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<()> {
-    trace_info!("Getting finalized block number");
+    opt_info!("Getting finalized block number");
     let finalized = match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await
     {
         Ok(block) => block,
         Err(e) => {
-            trace_error!(error = %e, "Failed to get finalized block");
+            opt_error!(error = %e, "Failed to get finalized block");
             _ = sender.try_stream(e).await;
             return None;
         }
@@ -408,7 +408,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         let batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
             Ok(block) => block,
             Err(e) => {
-                trace_error!(batch_start = batch.start(), batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                opt_error!(batch_start = batch.start(), batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
                 _ = sender.try_stream(e).await;
                 return None;
             }
@@ -421,7 +421,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         let reorged_opt = match reorg_handler.check(&batch_end).await {
             Ok(opt) => opt,
             Err(e) => {
-                trace_error!(error = %e, "Failed to perform reorg check");
+                opt_error!(error = %e, "Failed to perform reorg check");
                 _ = sender.try_stream(e).await;
                 return None;
             }
@@ -438,6 +438,6 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         last_batch_end = Some(batch_end);
     }
 
-    trace_info!(batch_count = iter.batch_count(), "Historical sync completed");
+    opt_error!(batch_count = iter.batch_count(), "Historical sync completed");
     last_batch_end
 }
