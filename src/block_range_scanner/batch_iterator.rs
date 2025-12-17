@@ -44,9 +44,9 @@ impl BatchIterator<Forward> {
     pub fn reset_to(&mut self, block: BlockNumber) {
         self.current = block;
         self.total_batches = if block > self.end {
-            self.batch_count + (block - self.end) / self.batch_size + 1
-        } else {
             self.batch_count
+        } else {
+            self.batch_count + (self.end - block) / self.batch_size + 1
         };
     }
 }
@@ -87,7 +87,7 @@ impl Iterator for BatchIterator<Forward> {
     type Item = RangeInclusive<BlockNumber>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current > self.end {
+        if self.batch_count >= self.total_batches {
             return None;
         }
 
