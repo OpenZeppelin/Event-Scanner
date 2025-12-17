@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Number(200).into());
         assert_eq!(builder.config.max_concurrent_fetches, 10);
         assert_eq!(builder.block_range_scanner.max_block_range, 50);
-        assert_eq!(builder.block_range_scanner.buffer_capacity, 33)
+        assert_eq!(builder.block_range_scanner.buffer_capacity, 33);
     }
 
     #[test]
