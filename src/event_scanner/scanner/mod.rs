@@ -115,8 +115,9 @@ pub struct SyncFromLatestEvents {
 /// Mode marker for scanning by syncing from the specified block and then switching to live mode.
 ///
 /// For more details on this scanner mode, see
-/// [`EventScannerBuilder::sync().from_block(block_id)`](crate::EventScannerBuilder#method.
-/// from_block-2).
+/// [`EventScannerBuilder::sync().from_block(block_id)`][sync from block].
+///
+/// [sync from block]: crate::EventScannerBuilder#method.from_block-2
 #[derive(Debug)]
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
