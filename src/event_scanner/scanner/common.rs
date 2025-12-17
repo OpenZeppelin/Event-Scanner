@@ -393,7 +393,7 @@ async fn get_logs<N: Network>(
         }
         Err(e) => {
             opt_error!(
-                filter = %event_filter,
+                filter = %_event_filter,
                 error = %e,
                 block_range = ?range,
                 "failed to get logs for block range"
