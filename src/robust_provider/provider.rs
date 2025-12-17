@@ -111,7 +111,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self))]
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -133,7 +132,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self))]
     pub async fn get_block(&self, id: BlockId) -> Result<N::BlockResponse, Error> {
         let result = self
             .try_operation_with_failover(
@@ -151,7 +149,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self))]
     pub async fn get_block_number(&self) -> Result<BlockNumber, Error> {
         self.try_operation_with_failover(
             move |provider| async move { provider.get_block_number().await },
@@ -172,7 +169,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self))]
     pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<BlockNumber, Error> {
         let result = self
             .try_operation_with_failover(
@@ -196,7 +192,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self))]
     pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
@@ -210,7 +205,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self))]
     pub async fn get_block_by_hash(&self, hash: BlockHash) -> Result<N::BlockResponse, Error> {
         let result = self
             .try_operation_with_failover(
@@ -229,7 +223,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// See [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self, filter))]
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         self.try_operation_with_failover(
             move |provider| async move { provider.get_logs(filter).await },
@@ -251,7 +244,6 @@ impl<N: Network> RobustProvider<N> {
     /// # Errors
     ///
     /// see [retry errors](#retry-errors).
-    #[instrument(level = "debug", skip(self))]
     pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
         let subscription = self
             .try_operation_with_failover(
