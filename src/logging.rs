@@ -1,7 +1,7 @@
 #[cfg(feature = "tracing")]
 macro_rules! trace_error {
     ($($arg:tt)*) => {
-        tracing::error!($($arg)*)
+        tracing::trace_error!($($arg)*)
     };
 }
 

@@ -393,7 +393,7 @@ async fn get_logs<N: Network>(
             Ok(logs)
         }
         Err(e) => {
-            error!(
+            trace_error!(
                 filter = %event_filter,
                 error = %e,
                 block_range = ?range,

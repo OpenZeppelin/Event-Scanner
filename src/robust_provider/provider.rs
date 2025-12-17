@@ -122,7 +122,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(e) = &result {
-            error!(error = %e, "eth_getByBlockNumber failed");
+            trace_error!(error = %e, "eth_getByBlockNumber failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(number.into()))
@@ -144,7 +144,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(e) = &result {
-            error!(error = %e, "eth_getByBlockNumber failed");
+            trace_error!(error = %e, "eth_getByBlockNumber failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(id))
     }
@@ -166,7 +166,7 @@ impl<N: Network> RobustProvider<N> {
             .await
             .map_err(Error::from);
         if let Err(e) = &result {
-            error!(error = %e, "eth_getBlockNumber failed");
+            trace_error!(error = %e, "eth_getBlockNumber failed");
         }
         result
     }
@@ -191,7 +191,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(e) = &result {
-            error!(error = %e, "get_block_number_by_id failed");
+            trace_error!(error = %e, "get_block_number_by_id failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(block_id))
     }
@@ -232,7 +232,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await;
         if let Err(e) = &result {
-            error!(error = %e, "eth_getBlockByHash failed");
+            trace_error!(error = %e, "eth_getBlockByHash failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(hash.into()))
@@ -255,7 +255,7 @@ impl<N: Network> RobustProvider<N> {
             .await
             .map_err(Error::from);
         if let Err(e) = &result {
-            error!(error = %e, "eth_getLogs failed");
+            trace_error!(error = %e, "eth_getLogs failed");
         }
         result
     }
@@ -289,7 +289,7 @@ impl<N: Network> RobustProvider<N> {
         match subscription {
             Ok(sub) => Ok(RobustSubscription::new(sub, self.clone())),
             Err(e) => {
-                error!(error = %e, "eth_subscribe failed");
+                trace_error!(error = %e, "eth_subscribe failed");
                 Err(e.into())
             }
         }
@@ -384,13 +384,13 @@ impl<N: Network> RobustProvider<N> {
                     return Ok((value, fallback_idx));
                 }
                 Err(e) => {
-                    error!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
+                    trace_error!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
                     last_error = e;
                 }
             }
         }
         // All fallbacks failed / skipped, return the last error
-        error!("All providers failed or timed out - returning the last providers attempt's error");
+        trace_error!("All providers failed or timed out - returning the last providers attempt's error");
         Err(last_error)
     }
 
