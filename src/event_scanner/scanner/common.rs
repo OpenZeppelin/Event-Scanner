@@ -20,7 +20,6 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::trace;
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -278,10 +277,10 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                     return;
                 }
 
-                trace!(count = collected.len(), "Logs found");
+                opt_trace!(count = collected.len(), "Logs found");
                 collected.reverse(); // restore chronological order
 
-                trace!("Sending collected logs to consumer");
+                opt_trace!("Sending collected logs to consumer");
                 _ = sender.try_stream(collected).await;
             });
 
