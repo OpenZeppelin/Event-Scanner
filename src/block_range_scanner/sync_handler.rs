@@ -1,6 +1,6 @@
 use alloy::{eips::BlockId, network::Network, primitives::BlockNumber};
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::error;
 
 use crate::{
     Notification, ScannerError,
@@ -46,14 +46,14 @@ impl<N: Network> SyncHandler<N> {
 
         match sync_state {
             SyncState::AlreadyLive { start_block } => {
-                info!(
+                trace_info!(
                     start_block = start_block,
                     "Start block is beyond confirmed tip, waiting until starting block is confirmed before starting live stream"
                 );
                 self.spawn_live_only(start_block).await?;
             }
             SyncState::NeedsCatchup { start_block, confirmed_tip } => {
-                info!(
+                trace_info!(
                     start_block = start_block,
                     confirmed_tip = confirmed_tip,
                     "Start block is behind confirmed tip, catching up then transitioning to live"
@@ -183,7 +183,7 @@ impl<N: Network> SyncHandler<N> {
             confirmed_tip = latest.saturating_sub(block_confirmations);
         }
 
-        info!("Historical catchup complete, ready to transition to live");
+        trace_info!("Historical catchup complete, ready to transition to live");
 
         Ok(Some(start_block))
     }
@@ -210,7 +210,7 @@ impl<N: Network> SyncHandler<N> {
             return;
         }
 
-        info!("Successfully transitioned from historical to live streaming");
+        trace_info!("Successfully transitioned from historical to live streaming");
 
         common::stream_live_blocks(
             start_block,

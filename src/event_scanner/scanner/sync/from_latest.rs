@@ -1,6 +1,6 @@
 use alloy::{eips::BlockNumberOrTag, network::Network};
 
-use tracing::{error, info};
+use tracing::error;
 
 use crate::{
     EventScannerBuilder, ScannerError,
@@ -82,7 +82,10 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let listeners = self.listeners.clone();
         let max_concurrent_fetches = self.config.max_concurrent_fetches;
 
-        info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
+        trace_info!(
+            count = count,
+            "Starting scanner, mode: fetch latest events and switch to live"
+        );
 
         let client = self.block_range_scanner.run()?;
 

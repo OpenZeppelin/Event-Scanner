@@ -11,7 +11,7 @@ use alloy::{
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
-use tracing::{error, info};
+use tracing::error;
 
 use crate::robust_provider::RobustSubscription;
 
@@ -115,7 +115,7 @@ impl<N: Network> RobustProvider<N> {
         &self,
         number: BlockNumberOrTag,
     ) -> Result<N::BlockResponse, Error> {
-        info!("eth_getBlockByNumber called");
+        trace_info!("eth_getBlockByNumber called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_number(number).await },
@@ -137,7 +137,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block(&self, id: BlockId) -> Result<N::BlockResponse, Error> {
-        info!("eth_getBlock called");
+        trace_info!("eth_getBlock called");
         let result = self
             .try_operation_with_failover(
                 |provider| async move { provider.get_block(id).await },
@@ -158,7 +158,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_number(&self) -> Result<BlockNumber, Error> {
-        info!("eth_getBlockNumber called");
+        trace_info!("eth_getBlockNumber called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number().await },
@@ -184,7 +184,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<BlockNumber, Error> {
-        info!("get_block_number_by_id called");
+        trace_info!("get_block_number_by_id called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number_by_id(block_id).await },
@@ -211,7 +211,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
-        info!("get_latest_confirmed called with confirmations={}", confirmations);
+        trace_info!("get_latest_confirmed called with confirmations={}", confirmations);
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
         Ok(confirmed_block)
@@ -225,7 +225,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_by_hash(&self, hash: BlockHash) -> Result<N::BlockResponse, Error> {
-        info!("eth_getBlockByHash called");
+        trace_info!("eth_getBlockByHash called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_hash(hash).await },
@@ -247,7 +247,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
-        info!("eth_getLogs called");
+        trace_info!("eth_getLogs called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_logs(filter).await },
@@ -274,7 +274,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// see [retry errors](#retry-errors).
     pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
-        info!("eth_subscribe called");
+        trace_info!("eth_subscribe called");
         let subscription = self
             .try_operation_with_failover(
                 move |provider| async move {
@@ -362,20 +362,23 @@ impl<N: Network> RobustProvider<N> {
     {
         let num_fallbacks = self.fallback_providers.len();
         if num_fallbacks > 0 && start_index == 0 {
-            info!("Primary provider failed, trying fallback provider(s)");
+            trace_info!("Primary provider failed, trying fallback provider(s)");
         }
 
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                info!("Fallback provider {} doesn't support pubsub, skipping", fallback_idx + 1);
+                trace_info!(
+                    "Fallback provider {} doesn't support pubsub, skipping",
+                    fallback_idx + 1
+                );
                 continue;
             }
-            info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
+            trace_info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
-                    info!(provider_num = fallback_idx + 1, "Fallback provider succeeded");
+                    trace_info!(provider_num = fallback_idx + 1, "Fallback provider succeeded");
                     return Ok((value, fallback_idx));
                 }
                 Err(e) => {
@@ -407,8 +410,8 @@ impl<N: Network> RobustProvider<N> {
             self.call_timeout,
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
-                .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
-                    info!(error = %err, "RPC error retrying after {:?}", dur);
+                .notify(|_err: &RpcError<TransportErrorKind>, _dur: Duration| {
+                    trace_info!(error = %_err, "RPC error retrying after {:?}", _dur);
                 })
                 .sleep(tokio::time::sleep),
         )

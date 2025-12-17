@@ -39,7 +39,7 @@
 //!                 // process range
 //!             }
 //!             Ok(ScannerMessage::Notification(notification)) => {
-//!                 info!("Received notification: {:?}", notification);
+//!                 trace_info!("Received notification: {:?}", notification);
 //!             }
 //!             Err(e) => {
 //!                 error!("Received error from subscription: {e}");
@@ -53,7 +53,7 @@
 //!         }
 //!     }
 //!
-//!     info!("Data processing stopped.");
+//!     trace_info!("Data processing stopped.");
 //!
 //!     Ok(())
 //! }
@@ -76,10 +76,10 @@ use crate::{
 use alloy::{
     consensus::BlockHeader,
     eips::{BlockId, BlockNumberOrTag},
-    network::{BlockResponse, Network, primitives::HeaderResponse},
+    network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 mod common;
 mod reorg_handler;
@@ -263,7 +263,7 @@ impl<N: Network> Service<N> {
     }
 
     pub async fn run(mut self) {
-        info!("Starting subscription service");
+        trace_info!("Starting subscription service");
 
         while !self.shutdown {
             tokio::select! {
@@ -281,28 +281,28 @@ impl<N: Network> Service<N> {
             }
         }
 
-        info!("Subscription service stopped");
+        trace_info!("Subscription service stopped");
     }
 
     async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
         match command {
             Command::StreamLive { sender, block_confirmations, response } => {
-                info!("Starting live stream");
+                trace_info!("Starting live stream");
                 let result = self.handle_live(block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamHistorical { sender, start_id, end_id, response } => {
-                info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
+                trace_info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
                 let result = self.handle_historical(start_id, end_id, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamFrom { sender, start_id, block_confirmations, response } => {
-                info!(start_id = ?start_id, "Starting streaming from");
+                trace_info!(start_id = ?start_id, "Starting streaming from");
                 let result = self.handle_sync(start_id, block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::Rewind { sender, start_id, end_id, response } => {
-                info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
+                trace_info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
                 let result = self.handle_rewind(start_id, end_id, sender).await;
                 let _ = response.send(result);
             }
@@ -327,7 +327,7 @@ impl<N: Network> Service<N> {
 
         let subscription = self.provider.subscribe_blocks().await?;
 
-        info!("WebSocket connected for live blocks");
+        trace_info!("WebSocket connected for live blocks");
 
         tokio::spawn(async move {
             let mut reorg_handler =
@@ -370,7 +370,7 @@ impl<N: Network> Service<N> {
             _ => (start_block_num, end_block_num),
         };
 
-        info!(
+        trace_info!(
             start_block = start_block_num,
             end_block = end_block_num,
             "Normalized the block range"
@@ -521,7 +521,7 @@ impl<N: Network> Service<N> {
             batch_from = batch_to - 1;
         }
 
-        info!(batch_count = batch_count, "Rewind completed");
+        trace_info!(batch_count = batch_count, "Rewind completed");
     }
 
     /// Handles re-scanning of reorged blocks.
@@ -536,7 +536,7 @@ impl<N: Network> Service<N> {
     ) -> bool {
         let tip_number = tip.header().number();
         let common_ancestor = common_ancestor.header().number();
-        info!(
+        trace_info!(
             block_number = %tip_number,
             hash = %tip.header().hash(),
             common_ancestor = %common_ancestor,
