@@ -122,10 +122,6 @@ pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 /// Default per-stream buffer size used by scanners.
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
 
-// Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
-// is considered final)
-pub const DEFAULT_REORG_REWIND_DEPTH: u64 = 64;
-
 /// The result type yielded by block-range streams.
 pub type BlockScannerResult = ScannerResult<RangeInclusive<BlockNumber>>;
 
