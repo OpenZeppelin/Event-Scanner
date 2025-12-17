@@ -15,7 +15,7 @@ use thiserror::Error;
 use tokio::{sync::broadcast::error::RecvError, time::timeout};
 use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::{info, trace, warn};
+use tracing::{info, instrument, trace, warn};
 
 use crate::robust_provider::{RobustProvider, provider::CoreError};
 
@@ -133,6 +133,7 @@ impl<N: Network> RobustSubscription<N> {
 
     /// Try to reconnect to the primary provider if enough time has elapsed.
     /// Returns true if reconnection was successful, false if it's not time yet or if it failed.
+    #[instrument(level = "trace", skip(self))]
     async fn try_reconnect_to_primary(&mut self, force: bool) -> bool {
         // Check if we should attempt reconnection
         let should_reconnect = force ||
