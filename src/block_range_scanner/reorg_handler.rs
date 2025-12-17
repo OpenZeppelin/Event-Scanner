@@ -97,6 +97,7 @@ impl<N: Network> ReorgHandler<N> {
 
         let finalized = self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
 
+        #[allow(clippy::used_underscore_binding)]
         let _header = finalized.header();
         opt_info!(finalized_hash = %_header.hash(), block_number = _header.number(), "Finalized block set as common ancestor");
 

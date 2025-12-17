@@ -121,6 +121,7 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
+        #[allow(clippy::used_underscore_binding)]
         if let Err(_e) = &result {
             opt_error!(error = %_e, "eth_getByBlockNumber failed");
         }
@@ -143,6 +144,7 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
+        #[allow(clippy::used_underscore_binding)]
         if let Err(_e) = &result {
             opt_error!(error = %_e, "eth_getByBlockNumber failed");
         }
@@ -165,6 +167,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await
             .map_err(Error::from);
+        #[allow(clippy::used_underscore_binding)]
         if let Err(_e) = &result {
             opt_error!(error = %_e, "eth_getBlockNumber failed");
         }
@@ -190,6 +193,7 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
+        #[allow(clippy::used_underscore_binding)]
         if let Err(_e) = &result {
             opt_error!(error = %_e, "get_block_number_by_id failed");
         }
@@ -231,6 +235,7 @@ impl<N: Network> RobustProvider<N> {
                 false,
             )
             .await;
+        #[allow(clippy::used_underscore_binding)]
         if let Err(_e) = &result {
             opt_error!(error = %_e, "eth_getBlockByHash failed");
         }
@@ -254,6 +259,7 @@ impl<N: Network> RobustProvider<N> {
             )
             .await
             .map_err(Error::from);
+        #[allow(clippy::used_underscore_binding)]
         if let Err(_e) = &result {
             opt_error!(error = %_e, "eth_getLogs failed");
         }
@@ -414,9 +420,12 @@ impl<N: Network> RobustProvider<N> {
             self.call_timeout,
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
-                .notify(|_err: &RpcError<TransportErrorKind>, _dur: Duration| {
-                    opt_info!(error = %_err, "RPC error retrying after {:?}", _dur);
-                })
+                .notify(
+                    #[allow(clippy::used_underscore_binding)]
+                    |_err: &RpcError<TransportErrorKind>, _dur: Duration| {
+                        opt_info!(error = %_err, "RPC error retrying after {:?}", _dur);
+                    },
+                )
                 .sleep(tokio::time::sleep),
         )
         .await

@@ -76,6 +76,7 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     };
 
     while let Some(message) = stream.next().await {
+        #[allow(clippy::used_underscore_binding)]
         if let Err(_err) = range_tx.send(message) {
             opt_warn!(error = %_err, "No log consumers, stopping stream");
             break;
@@ -153,6 +154,7 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                         opt_debug!("No more block ranges to receive");
                         break;
                     }
+                    #[allow(clippy::used_underscore_binding)]
                     Err(RecvError::Lagged(_skipped)) => {
                         opt_debug!("Channel lagged, skipped {_skipped} messages");
                     }
@@ -299,6 +301,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         opt_debug!("No more block ranges to receive");
                         break;
                     }
+                    #[allow(clippy::used_underscore_binding)]
                     Err(RecvError::Lagged(_skipped)) => {
                         opt_debug!("Channel lagged, skipped {_skipped} messages");
                     }
@@ -368,6 +371,7 @@ fn collect_logs<T>(collected: &mut Vec<T>, logs: Vec<T>, count: usize, prepend: 
     collected.len() >= count
 }
 
+#[allow(clippy::used_underscore_binding)]
 async fn get_logs<N: Network>(
     range: RangeInclusive<u64>,
     _event_filter: &EventFilter,
