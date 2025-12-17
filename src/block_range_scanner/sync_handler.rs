@@ -45,14 +45,14 @@ impl<N: Network> SyncHandler<N> {
 
         match sync_state {
             SyncState::AlreadyLive { start_block } => {
-                trace_info!(
+                opt_info!(
                     start_block = start_block,
                     "Start block is beyond confirmed tip, waiting until starting block is confirmed before starting live stream"
                 );
                 self.spawn_live_only(start_block).await?;
             }
             SyncState::NeedsCatchup { start_block, confirmed_tip } => {
-                trace_info!(
+                opt_info!(
                     start_block = start_block,
                     confirmed_tip = confirmed_tip,
                     "Start block is behind confirmed tip, catching up then transitioning to live"
@@ -131,7 +131,7 @@ impl<N: Network> SyncHandler<N> {
                     return; // channel closed
                 }
                 Err(e) => {
-                    trace_error!(error = %e, "Error during historical catchup, shutting down");
+                    opt_error!(error = %e, "Error during historical catchup, shutting down");
                     _ = sender.try_stream(e).await;
                     return;
                 }
@@ -182,7 +182,7 @@ impl<N: Network> SyncHandler<N> {
             confirmed_tip = latest.saturating_sub(block_confirmations);
         }
 
-        trace_info!("Historical catchup complete, ready to transition to live");
+        opt_info!("Historical catchup complete, ready to transition to live");
 
         Ok(Some(start_block))
     }
@@ -199,7 +199,7 @@ impl<N: Network> SyncHandler<N> {
         let subscription = match provider.subscribe_blocks().await {
             Ok(sub) => sub,
             Err(e) => {
-                trace_error!(error = %e, "Error subscribing to live blocks, shutting down");
+                opt_error!(error = %e, "Error subscribing to live blocks, shutting down");
                 _ = sender.try_stream(e).await;
                 return;
             }
@@ -209,7 +209,7 @@ impl<N: Network> SyncHandler<N> {
             return;
         }
 
-        trace_info!("Successfully transitioned from historical to live streaming");
+        opt_info!("Successfully transitioned from historical to live streaming");
 
         common::stream_live_blocks(
             start_block,

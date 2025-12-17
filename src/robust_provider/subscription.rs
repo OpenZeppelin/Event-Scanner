@@ -45,11 +45,11 @@ impl From<RecvError> for Error {
     fn from(err: RecvError) -> Self {
         match err {
             RecvError::Closed => {
-                trace_error!("Provider closed the subscription channel");
+                opt_error!("Provider closed the subscription channel");
                 Error::Closed
             }
             RecvError::Lagged(count) => {
-                trace_error!(skipped = count, "Receiver lagged");
+                opt_error!(skipped = count, "Receiver lagged");
                 Error::Lagged(count)
             }
         }
@@ -126,17 +126,17 @@ impl<N: Network> RobustSubscription<N> {
                     Err(recv_error) => {
                         match recv_error {
                             RecvError::Closed => {
-                                trace_error!("Provider closed the subscription channel");
+                                opt_error!("Provider closed the subscription channel");
                             }
                             RecvError::Lagged(_count) => {
-                                trace_error!(skipped = _count, "Receiver lagged");
+                                opt_error!(skipped = _count, "Receiver lagged");
                             }
                         }
                         return Err(recv_error.into());
                     }
                 },
                 Err(elapsed_err) => {
-                    trace_warn!(
+                    opt_warn!(
                         timeout_secs = subscription_timeout.as_secs(),
                         "Subscription timeout - no block received, switching provider"
                     );
@@ -163,7 +163,7 @@ impl<N: Network> RobustSubscription<N> {
             return false;
         }
 
-        trace_info!("Attempting to reconnect to primary provider");
+        opt_info!("Attempting to reconnect to primary provider");
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
@@ -174,7 +174,7 @@ impl<N: Network> RobustSubscription<N> {
 
         match subscription {
             Ok(sub) => {
-                trace_info!("Successfully reconnected to primary provider");
+                opt_info!("Successfully reconnected to primary provider");
                 self.subscription = sub;
                 self.current_fallback_index = None;
                 self.last_reconnect_attempt = None;
@@ -182,7 +182,7 @@ impl<N: Network> RobustSubscription<N> {
             }
             Err(_e) => {
                 self.last_reconnect_attempt = Some(Instant::now());
-                trace_warn!(error = %_e, "Failed to reconnect to primary provider");
+                opt_warn!(error = %_e, "Failed to reconnect to primary provider");
                 false
             }
         }

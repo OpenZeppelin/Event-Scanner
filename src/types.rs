@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     ScannerError,
-    logging::{trace_info, trace_warn},
+    logging::{opt_info, opt_warn},
 };
 
 /// Messages streamed by the scanner to subscribers.
@@ -113,11 +113,11 @@ impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<ScannerResult<T>> {
     async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool {
         let item = msg.into_scanner_message_result();
         match &item {
-            Ok(_msg) => trace_info!(item = ?_msg, "Sending message"),
-            Err(_err) => trace_info!(error = ?_err, "Sending error"),
+            Ok(_msg) => opt_info!(item = ?_msg, "Sending message"),
+            Err(_err) => opt_info!(error = ?_err, "Sending error"),
         }
         if let Err(_err) = self.send(item).await {
-            trace_warn!(error = %_err, "Downstream channel closed, stopping stream");
+            opt_warn!(error = %_err, "Downstream channel closed, stopping stream");
             return false;
         }
         true

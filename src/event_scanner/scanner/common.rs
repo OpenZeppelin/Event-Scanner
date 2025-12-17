@@ -77,7 +77,7 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
 
     while let Some(message) = stream.next().await {
         if let Err(_err) = range_tx.send(message) {
-            trace_warn!(error = %_err, "No log consumers, stopping stream");
+            opt_warn!(error = %_err, "No log consumers, stopping stream");
             break;
         }
     }
@@ -382,7 +382,7 @@ async fn get_logs<N: Network>(
                 return Ok(logs);
             }
 
-            trace_info!(
+            opt_info!(
                 filter = %_event_filter,
                 log_count = logs.len(),
                 block_range = ?range,
@@ -392,7 +392,7 @@ async fn get_logs<N: Network>(
             Ok(logs)
         }
         Err(e) => {
-            trace_error!(
+            opt_error!(
                 filter = %event_filter,
                 error = %e,
                 block_range = ?range,
