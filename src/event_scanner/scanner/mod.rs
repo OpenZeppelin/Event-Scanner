@@ -17,8 +17,9 @@
 //!
 //! ## Backpressure and lag
 //!
-//! Subscription streams are buffered. If a consumer cannot keep up and the internal broadcast
-//! channel drops messages, the corresponding subscription yields [`ScannerError::Lagged`].
+//! Subscription streams are buffered. If a consumer processes events too slowly and the
+//! internal buffer fills up, the stream yields [`ScannerError::Lagged`] and some events
+//! may be skipped.
 //!
 //! # Reorgs and finality
 //!

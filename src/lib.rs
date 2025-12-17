@@ -1,8 +1,10 @@
-//! Event-Scanner is a Rust library for streaming EVM event logs.
+//! Event-Scanner is a library made to stream EVM event logs.
 //!
-//! The main entry point is [`EventScanner`], configured via [`EventScannerBuilder`] in one of the
-//! supported modes (for example [`Historic`] or [`Live`]). Consumers register one or more event
-//! subscriptions via [`EventScanner::subscribe`] and then start the scanner.
+//! The main entry point is [`EventScanner`], built via [`EventScannerBuilder`] in one of the
+//! supported modes (e.g. [`Historic`] or [`Live`]).
+//!
+//! After constructing a scanner, register one or more event subscriptions with
+//! [`EventScanner::subscribe`], then call [`EventScanner::start`] to begin streaming.
 //!
 //! # Stream items
 //!
