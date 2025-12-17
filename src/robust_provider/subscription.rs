@@ -15,7 +15,7 @@ use thiserror::Error;
 use tokio::{sync::broadcast::error::RecvError, time::timeout};
 use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::{error, info, warn};
+use tracing::error;
 
 use crate::robust_provider::{RobustProvider, provider::CoreError};
 
@@ -136,7 +136,7 @@ impl<N: Network> RobustSubscription<N> {
                     }
                 },
                 Err(elapsed_err) => {
-                    warn!(
+                    trace_warn!(
                         timeout_secs = subscription_timeout.as_secs(),
                         "Subscription timeout - no block received, switching provider"
                     );
@@ -163,7 +163,7 @@ impl<N: Network> RobustSubscription<N> {
             return false;
         }
 
-        info!("Attempting to reconnect to primary provider");
+        trace_info!("Attempting to reconnect to primary provider");
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
@@ -174,15 +174,15 @@ impl<N: Network> RobustSubscription<N> {
 
         match subscription {
             Ok(sub) => {
-                info!("Successfully reconnected to primary provider");
+                trace_info!("Successfully reconnected to primary provider");
                 self.subscription = sub;
                 self.current_fallback_index = None;
                 self.last_reconnect_attempt = None;
                 true
             }
-            Err(e) => {
+            Err(_e) => {
                 self.last_reconnect_attempt = Some(Instant::now());
-                warn!(error = %e, "Failed to reconnect to primary provider");
+                trace_warn!(error = %_e, "Failed to reconnect to primary provider");
                 false
             }
         }

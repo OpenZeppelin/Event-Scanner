@@ -4,7 +4,6 @@ use alloy::{
     network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
     primitives::BlockHash,
 };
-use tracing::{info, warn};
 
 use crate::{
     ScannerError,
@@ -63,11 +62,11 @@ impl<N: Network> ReorgHandler<N> {
         block: &N::BlockResponse,
     ) -> Result<Option<N::BlockResponse>, ScannerError> {
         let block = block.header();
-        info!(block_hash = %block.hash(), block_number = block.number(), "Checking if block was reorged");
+        trace_info!(block_hash = %block.hash(), block_number = block.number(), "Checking if block was reorged");
 
         if !self.reorg_detected(block).await? {
             let block_hash = block.hash();
-            info!(block_hash = %block_hash, block_number = block.number(), "No reorg detected");
+            trace_info!(block_hash = %block_hash, block_number = block.number(), "No reorg detected");
             // store the incoming block's hash for future reference
             if !matches!(self.buffer.back(), Some(&hash) if hash == block_hash) {
                 self.buffer.push(block_hash);
@@ -75,10 +74,10 @@ impl<N: Network> ReorgHandler<N> {
             return Ok(None);
         }
 
-        info!("Reorg detected, searching for common ancestor");
+        trace_info!("Reorg detected, searching for common ancestor");
 
         while let Some(&block_hash) = self.buffer.back() {
-            info!(block_hash = %block_hash, "Checking if block exists on-chain");
+            trace_info!(block_hash = %block_hash, "Checking if block exists on-chain");
             match self.provider.get_block_by_hash(block_hash).await {
                 Ok(common_ancestor) => return self.return_common_ancestor(common_ancestor).await,
                 Err(robust_provider::Error::BlockNotFound(_)) => {
@@ -94,12 +93,12 @@ impl<N: Network> ReorgHandler<N> {
         // no need to store finalized block's hash in the buffer, as it is returned by default only
         // if not buffered hashes exist on-chain
 
-        warn!("Possible deep reorg detected, setting finalized block as common ancestor");
+        trace_warn!("Possible deep reorg detected, setting finalized block as common ancestor");
 
         let finalized = self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
 
-        let header = finalized.header();
-        info!(finalized_hash = %header.hash(), block_number = header.number(), "Finalized block set as common ancestor");
+        let _header = finalized.header();
+        trace_info!(finalized_hash = %_header.hash(), block_number = header.number(), "Finalized block set as common ancestor");
 
         Ok(Some(finalized))
     }
@@ -120,10 +119,10 @@ impl<N: Network> ReorgHandler<N> {
         let finalized = self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
         let finalized_header = finalized.header();
         let common_ancestor = if finalized_header.number() <= common_ancestor_header.number() {
-            info!(common_ancestor = %common_ancestor_header.hash(), block_number = common_ancestor_header.number(), "Common ancestor found");
+            trace_info!(common_ancestor = %common_ancestor_header.hash(), block_number = common_ancestor_header.number(), "Common ancestor found");
             common_ancestor
         } else {
-            warn!(
+            trace_warn!(
                 finalized_hash = %finalized_header.hash(), block_number = finalized_header.number(), "Possible deep reorg detected, using finalized block as common ancestor"
             );
             // all buffered blocks are finalized, so no more need to track them

@@ -20,7 +20,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -77,8 +77,8 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     };
 
     while let Some(message) = stream.next().await {
-        if let Err(err) = range_tx.send(message) {
-            warn!(error = %err, "No log consumers, stopping stream");
+        if let Err(_err) = range_tx.send(message) {
+            trace_warn!(error = %_err, "No log consumers, stopping stream");
             break;
         }
     }
@@ -383,7 +383,7 @@ async fn get_logs<N: Network>(
                 return Ok(logs);
             }
 
-            info!(
+            trace_info!(
                 filter = %event_filter,
                 log_count = logs.len(),
                 block_range = ?range,
