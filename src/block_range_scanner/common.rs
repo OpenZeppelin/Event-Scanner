@@ -13,7 +13,6 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::debug;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_live_blocks<N: Network>(
@@ -420,7 +419,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
 
         batch_count += 1;
         if batch_count % 10 == 0 {
-            debug!(batch_count = batch_count, "Processed historical batches");
+            opt_debug!(batch_count = batch_count, "Processed historical batches");
         }
 
         let reorged_opt = match reorg_handler.check(&batch_end).await {

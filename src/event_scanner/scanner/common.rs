@@ -20,7 +20,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{debug, trace};
+use tracing::trace;
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -150,11 +150,11 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                         tx.send(message).await.expect("receiver dropped only if we exit this loop");
                     }
                     Err(RecvError::Closed) => {
-                        debug!("No more block ranges to receive");
+                        opt_debug!("No more block ranges to receive");
                         break;
                     }
-                    Err(RecvError::Lagged(skipped)) => {
-                        debug!("Channel lagged, skipped {skipped} messages");
+                    Err(RecvError::Lagged(_skipped)) => {
+                        opt_debug!("Channel lagged, skipped {_skipped} messages");
                     }
                 }
             }
@@ -228,7 +228,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 .expect("pending blocks not supported");
                             // Check if in reorg recovery and past the reorg range
                             if reorg_ancestor.is_some_and(|a| last_log_block_num <= a) {
-                                debug!(
+                                opt_debug!(
                                     ancestor = reorg_ancestor,
                                     "Reorg recovery complete, resuming normal log collection"
                                 );
@@ -244,7 +244,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         Ok(ScannerMessage::Notification(Notification::ReorgDetected {
                             common_ancestor,
                         })) => {
-                            debug!(
+                            opt_debug!(
                                 common_ancestor = common_ancestor,
                                 "Received ReorgDetected notification"
                             );
@@ -258,7 +258,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                             // since logs haven't been sent yet
                         }
                         Ok(ScannerMessage::Notification(notification)) => {
-                            debug!(notification = ?notification, "Received notification");
+                            opt_debug!(notification = ?notification, "Received notification");
                             if !sender.try_stream(notification).await {
                                 return;
                             }
@@ -272,7 +272,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 }
 
                 if collected.is_empty() {
-                    debug!("No logs found");
+                    opt_debug!("No logs found");
                     _ = sender.try_stream(Notification::NoPastLogsFound).await;
                     return;
                 }
@@ -296,11 +296,11 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         }
                     }
                     Err(RecvError::Closed) => {
-                        debug!("No more block ranges to receive");
+                        opt_debug!("No more block ranges to receive");
                         break;
                     }
-                    Err(RecvError::Lagged(skipped)) => {
-                        debug!("Channel lagged, skipped {skipped} messages");
+                    Err(RecvError::Lagged(_skipped)) => {
+                        opt_debug!("Channel lagged, skipped {_skipped} messages");
                     }
                 }
             }
@@ -333,7 +333,7 @@ fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) 
         .collect::<Vec<_>>();
     let removed_count = before_count - collected.len();
     if removed_count > 0 {
-        debug!(
+        opt_debug!(
             removed_count = removed_count,
             remaining_count = collected.len(),
             "Invalidated logs from reorged blocks"

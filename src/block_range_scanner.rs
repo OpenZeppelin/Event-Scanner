@@ -79,7 +79,7 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::{debug, warn};
+use tracing::warn;
 
 mod common;
 mod reorg_handler;
@@ -485,7 +485,7 @@ impl<N: Network> Service<N> {
 
             batch_count += 1;
             if batch_count % 10 == 0 {
-                debug!(batch_count = batch_count, "Processed rewind batches");
+                opt_debug!(batch_count = batch_count, "Processed rewind batches");
             }
 
             // check early if end of stream achieved to avoid subtraction overflow when `to
