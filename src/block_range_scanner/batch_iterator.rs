@@ -127,11 +127,9 @@ impl Iterator for BatchIterator<Reverse> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining =
             usize::try_from(self.total_batches - self.batch_count).unwrap_or(usize::MAX);
-        (remaining, Some(remaining))
+        (remaining, None)
     }
 }
-
-impl ExactSizeIterator for BatchIterator<Reverse> {}
 
 #[cfg(test)]
 mod tests {
