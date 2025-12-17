@@ -42,11 +42,11 @@
 //!                 trace_info!("Received notification: {:?}", notification);
 //!             }
 //!             Err(e) => {
-//!                 error!("Received error from subscription: {e}");
+//!                 trace_error!("Received error from subscription: {e}");
 //!                 match e {
 //!                     ScannerError::ServiceShutdown => break,
 //!                     _ => {
-//!                         error!("Non-fatal error, continuing: {e}");
+//!                         trace_error!("Non-fatal error, continuing: {e}");
 //!                     }
 //!                 }
 //!             }
@@ -79,7 +79,7 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 mod common;
 mod reorg_handler;
@@ -269,8 +269,8 @@ impl<N: Network> Service<N> {
             tokio::select! {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
-                        if let Err(e) = self.handle_command(command).await {
-                            error!("Command handling error: {}", e);
+                        if let Err(_e) = self.handle_command(command).await {
+                            trace_error!("Command handling error: {}", e);
                             self.error_count += 1;
                         }
                     } else {
@@ -462,7 +462,7 @@ impl<N: Network> Service<N> {
         {
             Ok(block) => block,
             Err(e) => {
-                error!(error = %e, "Failed to get finalized block");
+                trace_error!(error = %e, "Failed to get finalized block");
                 _ = sender.try_stream(e).await;
                 return;
             }
@@ -498,7 +498,7 @@ impl<N: Network> Service<N> {
                 let reorg = match reorg_handler.check(&tip).await {
                     Ok(opt) => opt,
                     Err(e) => {
-                        error!(error = %e, "Terminal RPC call error, shutting down");
+                        trace_error!(error = %e, "Terminal RPC call error, shutting down");
                         _ = sender.try_stream(e).await;
                         return;
                     }
@@ -551,10 +551,13 @@ impl<N: Network> Service<N> {
         *tip = match provider.get_block_by_number(tip_number.into()).await {
             Ok(block) => block,
             Err(e) => {
+                #[allow(clippy::if_same_then_else)]
                 if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
-                    error!("Unexpected error: pre-reorg chain tip should exist on a reorged chain");
+                    trace_error!(
+                        "Unexpected error: pre-reorg chain tip should exist on a reorged chain"
+                    );
                 } else {
-                    error!(error = %e, "Terminal RPC call error, shutting down");
+                    trace_error!(error = %e, "Terminal RPC call error, shutting down");
                 }
                 _ = sender.try_stream(e).await;
                 return false;

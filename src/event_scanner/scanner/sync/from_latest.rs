@@ -120,7 +120,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 match client.stream_from(latest_block + 1, self.config.block_confirmations).await {
                     Ok(stream) => stream,
                     Err(e) => {
-                        error!(error = %e, "Error during sync mode setup");
+                        trace_error!(error = %e, "Error during sync mode setup");
                         for listener in listeners {
                             _ = listener.sender.try_stream(e.clone()).await;
                         }

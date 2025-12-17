@@ -45,11 +45,11 @@ impl From<RecvError> for Error {
     fn from(err: RecvError) -> Self {
         match err {
             RecvError::Closed => {
-                error!("Provider closed the subscription channel");
+                trace_error!("Provider closed the subscription channel");
                 Error::Closed
             }
             RecvError::Lagged(count) => {
-                error!(skipped = count, "Receiver lagged");
+                trace_error!(skipped = count, "Receiver lagged");
                 Error::Lagged(count)
             }
         }
@@ -126,10 +126,10 @@ impl<N: Network> RobustSubscription<N> {
                     Err(recv_error) => {
                         match recv_error {
                             RecvError::Closed => {
-                                error!("Provider closed the subscription channel");
+                                trace_error!("Provider closed the subscription channel");
                             }
-                            RecvError::Lagged(count) => {
-                                error!(skipped = count, "Receiver lagged");
+                            RecvError::Lagged(_count) => {
+                                trace_error!(skipped = _count, "Receiver lagged");
                             }
                         }
                         return Err(recv_error.into());

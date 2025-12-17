@@ -132,7 +132,7 @@ impl<N: Network> SyncHandler<N> {
                     return; // channel closed
                 }
                 Err(e) => {
-                    error!(error = %e, "Error during historical catchup, shutting down");
+                    trace_error!(error = %e, "Error during historical catchup, shutting down");
                     _ = sender.try_stream(e).await;
                     return;
                 }
@@ -200,7 +200,7 @@ impl<N: Network> SyncHandler<N> {
         let subscription = match provider.subscribe_blocks().await {
             Ok(sub) => sub,
             Err(e) => {
-                error!(error = %e, "Error subscribing to live blocks, shutting down");
+                trace_error!(error = %e, "Error subscribing to live blocks, shutting down");
                 _ = sender.try_stream(e).await;
                 return;
             }
