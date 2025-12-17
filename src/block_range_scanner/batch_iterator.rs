@@ -102,6 +102,12 @@ impl Iterator for BatchIterator<Forward> {
 
         Some(batch_start..=batch_end)
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining =
+            usize::try_from(self.total_batches - self.batch_count).unwrap_or(usize::MAX);
+        (remaining, None)
+    }
 }
 
 impl Iterator for BatchIterator<Reverse> {
@@ -125,9 +131,10 @@ impl Iterator for BatchIterator<Reverse> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining =
-            usize::try_from(self.total_batches - self.batch_count).unwrap_or(usize::MAX);
-        (remaining, None)
+        match usize::try_from(self.total_batches - self.batch_count) {
+            Ok(remaining) => (remaining, Some(remaining)),
+            Err(_) => (usize::MAX, None),
+        }
     }
 }
 
