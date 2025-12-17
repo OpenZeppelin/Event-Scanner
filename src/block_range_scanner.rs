@@ -73,10 +73,11 @@ use crate::{
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 
+#[allow(unused_imports)]
 use alloy::{
     consensus::BlockHeader,
     eips::{BlockId, BlockNumberOrTag},
-    network::{BlockResponse, Network},
+    network::{BlockResponse, Network, primitives::HeaderResponse},
     primitives::BlockNumber,
 };
 
@@ -269,7 +270,7 @@ impl<N: Network> Service<N> {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
                         if let Err(_e) = self.handle_command(command).await {
-                            opt_error!("Command handling error: {}", e);
+                            opt_error!("Command handling error: {}", _e);
                             self.error_count += 1;
                         }
                     } else {
