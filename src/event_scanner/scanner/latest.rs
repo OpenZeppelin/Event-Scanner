@@ -141,7 +141,6 @@ impl<N: Network> EventScanner<LatestEvents, N> {
     ///
     /// # Errors
     ///
-    /// * [`ScannerError::ServiceShutdown`] - if the internal block-range service cannot be started.
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` or `to_block` cannot be resolved.

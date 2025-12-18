@@ -84,11 +84,7 @@
 //! ```
 
 use std::{cmp::Ordering, ops::RangeInclusive};
-use tokio::{
-    sync::{mpsc, oneshot},
-    try_join,
-};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio::{sync::mpsc, try_join};
 
 use crate::{
     ScannerError, ScannerMessage,
@@ -240,9 +236,6 @@ impl BlockRangeScanner {
 }
 
 /// A [`BlockRangeScanner`] connected to a provider.
-///
-/// Use [`ConnectedBlockRangeScanner::run`] to start the background service and obtain a
-/// [`BlockRangeScannerClient`].
 #[derive(Debug)]
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RobustProvider<N>,
@@ -263,64 +256,20 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     pub fn buffer_capacity(&self) -> usize {
         self.buffer_capacity
     }
-
-    /// Starts the subscription service and returns a client for sending commands.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the subscription service fails to start.
-    pub fn run(&self) -> Result<BlockRangeScannerClient, ScannerError> {
-        let (service, cmd_tx) = Service::new(
-            self.provider.clone(),
-            self.max_block_range,
-            self.past_blocks_storage_capacity,
-        );
-        tokio::spawn(async move {
-            service.run().await;
-        });
-        Ok(BlockRangeScannerClient::new(cmd_tx, self.buffer_capacity))
-    }
 }
 
-struct Service<N: Network> {
+struct BlockRangeScannerClient<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
     past_blocks_storage_capacity: RingBufferCapacity,
-    error_count: u64,
-    command_receiver: mpsc::Receiver<Command>,
-    shutdown: bool,
 }
 
-impl<N: Network> Service<N> {
-    /// Creates a new background service instance and its command channel.
-    pub fn new(
-        provider: RobustProvider<N>,
-        max_block_range: u64,
-        past_blocks_storage_capacity: RingBufferCapacity,
-    ) -> (Self, mpsc::Sender<Command>) {
-        let (cmd_tx, cmd_rx) = mpsc::channel(100);
-
-        let service = Self {
-            provider,
-            max_block_range,
-            past_blocks_storage_capacity,
-            error_count: 0,
-            command_receiver: cmd_rx,
-            shutdown: false,
-        };
-
-        (service, cmd_tx)
-    }
-
+impl<N: Network> BlockRangeScannerClient<N> {
     /// Streams live blocks starting from the latest block.
     ///
     /// # Arguments
     ///
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     async fn handle_live(
         &mut self,
         block_confirmations: u64,
@@ -367,10 +316,6 @@ impl<N: Network> Service<N> {
     ///
     /// * `start_id` - The starting block id
     /// * `end_id` - The ending block id
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     async fn handle_historical(
         &mut self,
         start_id: BlockId,
@@ -423,10 +368,6 @@ impl<N: Network> Service<N> {
     ///
     /// * `start_id` - The starting block id.
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     async fn handle_stream_from(
         &self,
         start_id: BlockId,
@@ -476,10 +417,6 @@ impl<N: Network> Service<N> {
     /// The reason reorged blocks are streamed in chronological order is to make it easier to handle
     /// reorgs in [`EventScannerBuilder::latest`][latest mode] mode, i.e. to prepend reorged blocks
     /// to the result collection, which must maintain chronological order.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     ///
     /// [latest mode]: crate::EventScannerBuilder::latest
     async fn handle_rewind(
