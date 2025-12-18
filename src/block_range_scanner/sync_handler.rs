@@ -12,6 +12,7 @@ use crate::{
 };
 
 /// Represents the initial state when starting a sync operation
+#[derive(Debug)]
 enum SyncState {
     /// Start block is already at or beyond the confirmed tip - go straight to live
     AlreadyLive { start_block: BlockNumber },
@@ -19,6 +20,7 @@ enum SyncState {
     NeedsCatchup { start_block: BlockNumber, confirmed_tip: BlockNumber },
 }
 
+#[derive(Debug)]
 pub(crate) struct SyncHandler<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
