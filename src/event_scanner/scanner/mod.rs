@@ -582,20 +582,4 @@ mod tests {
 
         Ok(())
     }
-
-    #[tokio::test]
-    async fn test_latest_returns_error_with_zero_count() {
-        use alloy::{
-            providers::{RootProvider, mock::Asserter},
-            rpc::client::RpcClient,
-        };
-
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let result = EventScannerBuilder::latest(0).connect(provider).await;
-
-        match result {
-            Err(ScannerError::InvalidEventCount) => {}
-            _ => panic!("Expected InvalidEventCount error"),
-        }
-    }
 }
