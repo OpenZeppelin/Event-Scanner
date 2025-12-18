@@ -82,20 +82,20 @@ use tokio::{sync::mpsc, try_join};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    Notification, ScannerError,
+    ScannerError,
     block_range_scanner::{
-        RangeIterator, RingBufferCapacity,
+        RingBufferCapacity,
         common::{self, BlockScannerResult},
         reorg_handler::ReorgHandler,
+        rewind_handler::RewindHandler,
         sync_handler::SyncHandler,
     },
     robust_provider::RobustProvider,
-    types::TryStream,
 };
 
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockId,
     network::{BlockResponse, Network},
 };
 
@@ -137,6 +137,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         info!("Starting live stream");
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
+
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let latest = self.provider.get_block_number().await?;
@@ -190,7 +191,9 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let start_id = start_id.into();
         let end_id = end_id.into();
+
         info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
+
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
         let max_block_range = self.max_block_range;
@@ -250,6 +253,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let start_id = start_id.into();
+
         info!(start_id = ?start_id, "Starting streaming from");
 
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
@@ -307,164 +311,48 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `start_id` or `end_id` cannot be resolved.
     pub async fn stream_rewind(
-        &mut self,
+        &self,
         start_id: impl Into<BlockId>,
         end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let start_id = start_id.into();
         let end_id = end_id.into();
+
         info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
+
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
-        let max_block_range = self.max_block_range;
-        let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
-        let provider = self.provider.clone();
 
         let (start_block, end_block) =
             try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
 
-        // normalize block range
+        // normalize block range: from (higher) -> to (lower)
         let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
             Ordering::Greater => (start_block, end_block),
             _ => (end_block, start_block),
         };
 
-        tokio::spawn(async move {
-            let mut reorg_handler =
-                ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
-
-            Self::handle_stream_rewind(
-                from,
-                to,
-                max_block_range,
-                &blocks_sender,
-                &provider,
-                &mut reorg_handler,
-            )
-            .await;
-        });
-
-        Ok(ReceiverStream::new(blocks_receiver))
-    }
-
-    /// Streams blocks in reverse order from `from` to `to`.
-    async fn handle_stream_rewind(
-        from: N::BlockResponse,
-        to: N::BlockResponse,
-        max_block_range: u64,
-        sender: &mpsc::Sender<BlockScannerResult>,
-        provider: &RobustProvider<N>,
-        reorg_handler: &mut ReorgHandler<N>,
-    ) {
-        // for checking whether reorg occurred
-        let mut tip = from;
-
-        let from = tip.header().number();
-        let to = to.header().number();
-
-        let finalized_block = match provider.get_block_by_number(BlockNumberOrTag::Finalized).await
-        {
-            Ok(block) => block,
-            Err(e) => {
-                error!(error = %e, "Failed to get finalized block");
-                _ = sender.try_stream(e).await;
-                return;
-            }
-        };
-
-        let finalized_number = finalized_block.header().number();
-
-        // only check reorg if our tip is after the finalized block
-        let check_reorg = tip.header().number() > finalized_number;
-
-        let mut iter = RangeIterator::reverse(from, to, max_block_range);
-        for range in &mut iter {
-            // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(range).await {
-                break;
-            }
-
-            if check_reorg {
-                let reorg = match reorg_handler.check(&tip).await {
-                    Ok(opt) => opt,
-                    Err(e) => {
-                        error!(error = %e, "Terminal RPC call error, shutting down");
-                        _ = sender.try_stream(e).await;
-                        return;
-                    }
-                };
-
-                if let Some(common_ancestor) = reorg &&
-                    !Self::handle_reorg_rescan(
-                        &mut tip,
-                        common_ancestor,
-                        max_block_range,
-                        sender,
-                        provider,
-                    )
-                    .await
-                {
-                    return;
-                }
-            }
-        }
-
-        info!(batch_count = iter.batch_count(), "Rewind completed");
-    }
-
-    /// Handles re-scanning of reorged blocks.
-    ///
-    /// Returns `true` on success, `false` if stream closed or terminal error occurred.
-    async fn handle_reorg_rescan(
-        tip: &mut N::BlockResponse,
-        common_ancestor: N::BlockResponse,
-        max_block_range: u64,
-        sender: &mpsc::Sender<BlockScannerResult>,
-        provider: &RobustProvider<N>,
-    ) -> bool {
-        let tip_number = tip.header().number();
-        let common_ancestor = common_ancestor.header().number();
-        info!(
-            block_number = %tip_number,
-            hash = %alloy::network::primitives::HeaderResponse::hash(tip.header()),
-            common_ancestor = %common_ancestor,
-            "Reorg detected"
+        let rewind_handler = RewindHandler::new(
+            self.provider.clone(),
+            self.max_block_range,
+            from,
+            to,
+            self.past_blocks_storage_capacity,
+            blocks_sender,
         );
 
-        if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
-            return false;
-        }
+        rewind_handler.run();
 
-        // Get the new tip block (same height as original tip, but new hash)
-        *tip = match provider.get_block_by_number(tip_number.into()).await {
-            Ok(block) => block,
-            Err(e) => {
-                if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
-                    error!("Unexpected error: pre-reorg chain tip should exist on a reorged chain");
-                } else {
-                    error!(error = %e, "Terminal RPC call error, shutting down");
-                }
-                _ = sender.try_stream(e).await;
-                return false;
-            }
-        };
-
-        // Re-scan only the affected range (from common_ancestor + 1 up to tip)
-        let rescan_from = common_ancestor + 1;
-
-        for batch in RangeIterator::forward(rescan_from, tip_number, max_block_range) {
-            if !sender.try_stream(batch).await {
-                return false;
-            }
-        }
-
-        true
+        Ok(ReceiverStream::new(blocks_receiver))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::block_range_scanner::{
-        BlockRangeScanner, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+    use crate::{
+        block_range_scanner::{
+            BlockRangeScanner, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+        },
+        types::TryStream,
     };
 
     use super::*;
