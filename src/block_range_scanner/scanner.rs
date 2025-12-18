@@ -126,6 +126,11 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     /// # Arguments
     ///
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    ///
+    /// # Errors
+    ///
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     pub async fn stream_live(
         &mut self,
         block_confirmations: u64,
@@ -172,6 +177,12 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     ///
     /// * `start_id` - The starting block id
     /// * `end_id` - The ending block id
+    ///
+    /// # Errors
+    ///
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
+    /// * [`ScannerError::BlockNotFound`] - if `start_id` or `end_id` cannot be resolved.
     pub async fn stream_historical(
         &mut self,
         start_id: impl Into<BlockId>,
@@ -227,6 +238,12 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     ///
     /// * `start_id` - The starting block id.
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    ///
+    /// # Errors
+    ///
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
+    /// * [`ScannerError::BlockNotFound`] - if `start_id` cannot be resolved.
     pub async fn stream_from(
         &self,
         start_id: impl Into<BlockId>,
@@ -283,6 +300,12 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     /// to the result collection, which must maintain chronological order.
     ///
     /// [latest mode]: crate::EventScannerBuilder::latest
+    ///
+    /// # Errors
+    ///
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
+    /// * [`ScannerError::BlockNotFound`] - if `start_id` or `end_id` cannot be resolved.
     pub async fn stream_rewind(
         &mut self,
         start_id: impl Into<BlockId>,
