@@ -1,5 +1,5 @@
 #[macro_use]
-pub mod logging;
+mod logging;
 
 pub mod block_range_scanner;
 pub mod robust_provider;
