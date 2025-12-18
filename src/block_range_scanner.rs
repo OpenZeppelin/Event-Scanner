@@ -85,6 +85,7 @@
 
 use std::{cmp::Ordering, ops::RangeInclusive};
 use tokio::{sync::mpsc, try_join};
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     ScannerError, ScannerMessage,
@@ -256,26 +257,18 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     pub fn buffer_capacity(&self) -> usize {
         self.buffer_capacity
     }
-}
 
-struct BlockRangeScannerClient<N: Network> {
-    provider: RobustProvider<N>,
-    max_block_range: u64,
-    past_blocks_storage_capacity: RingBufferCapacity,
-}
-
-impl<N: Network> BlockRangeScannerClient<N> {
     /// Streams live blocks starting from the latest block.
     ///
     /// # Arguments
     ///
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
-    async fn handle_live(
+    pub async fn stream_live(
         &mut self,
         block_confirmations: u64,
-        sender: mpsc::Sender<BlockScannerResult>,
-    ) -> Result<(), ScannerError> {
+    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         info!("Starting live stream");
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let latest = self.provider.get_block_number().await?;
@@ -297,7 +290,7 @@ impl<N: Network> BlockRangeScannerClient<N> {
             common::stream_live_blocks(
                 range_start,
                 subscription,
-                &sender,
+                &blocks_sender,
                 &provider,
                 block_confirmations,
                 max_block_range,
@@ -307,7 +300,7 @@ impl<N: Network> BlockRangeScannerClient<N> {
             .await;
         });
 
-        Ok(())
+        Ok(ReceiverStream::new(blocks_receiver))
     }
 
     /// Streams a batch of historical blocks from `start_id` to `end_id`.
@@ -316,13 +309,16 @@ impl<N: Network> BlockRangeScannerClient<N> {
     ///
     /// * `start_id` - The starting block id
     /// * `end_id` - The ending block id
-    async fn handle_historical(
+    pub async fn stream_historical(
         &mut self,
-        start_id: BlockId,
-        end_id: BlockId,
-        sender: mpsc::Sender<BlockScannerResult>,
-    ) -> Result<(), ScannerError> {
+        start_id: impl Into<BlockId>,
+        end_id: impl Into<BlockId>,
+    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
+        let start_id = start_id.into();
+        let end_id = end_id.into();
         info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
+
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
@@ -352,14 +348,14 @@ impl<N: Network> BlockRangeScannerClient<N> {
                 start_block_num,
                 end_block_num,
                 max_block_range,
-                &sender,
+                &blocks_sender,
                 &provider,
                 &mut reorg_handler,
             )
             .await;
         });
 
-        Ok(())
+        Ok(ReceiverStream::new(blocks_receiver))
     }
 
     /// Streams blocks starting from `start_id` and transitions to live mode.
@@ -368,22 +364,27 @@ impl<N: Network> BlockRangeScannerClient<N> {
     ///
     /// * `start_id` - The starting block id.
     /// * `block_confirmations` - Number of confirmations to apply once in live mode.
-    async fn handle_stream_from(
+    pub async fn stream_from(
         &self,
-        start_id: BlockId,
+        start_id: impl Into<BlockId>,
         block_confirmations: u64,
-        sender: mpsc::Sender<BlockScannerResult>,
-    ) -> Result<(), ScannerError> {
+    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
+        let start_id = start_id.into();
         info!(start_id = ?start_id, "Starting streaming from");
+
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let sync_handler = SyncHandler::new(
             self.provider.clone(),
             self.max_block_range,
             start_id,
             block_confirmations,
             self.past_blocks_storage_capacity,
-            sender,
+            blocks_sender,
         );
-        sync_handler.run().await
+
+        sync_handler.run().await?;
+
+        Ok(ReceiverStream::new(blocks_receiver))
     }
 
     /// Streams blocks in reverse order from `start_id` to `end_id`.
@@ -419,13 +420,15 @@ impl<N: Network> BlockRangeScannerClient<N> {
     /// to the result collection, which must maintain chronological order.
     ///
     /// [latest mode]: crate::EventScannerBuilder::latest
-    async fn handle_rewind(
+    pub async fn stream_rewind(
         &mut self,
-        start_id: BlockId,
-        end_id: BlockId,
-        sender: mpsc::Sender<BlockScannerResult>,
-    ) -> Result<(), ScannerError> {
+        start_id: impl Into<BlockId>,
+        end_id: impl Into<BlockId>,
+    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
+        let start_id = start_id.into();
+        let end_id = end_id.into();
         info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
@@ -443,15 +446,22 @@ impl<N: Network> BlockRangeScannerClient<N> {
             let mut reorg_handler =
                 ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
-            Self::stream_rewind(from, to, max_block_range, &sender, &provider, &mut reorg_handler)
-                .await;
+            Self::handle_stream_rewind(
+                from,
+                to,
+                max_block_range,
+                &blocks_sender,
+                &provider,
+                &mut reorg_handler,
+            )
+            .await;
         });
 
-        Ok(())
+        Ok(ReceiverStream::new(blocks_receiver))
     }
 
     /// Streams blocks in reverse order from `from` to `to`.
-    async fn stream_rewind(
+    async fn handle_stream_rewind(
         from: N::BlockResponse,
         to: N::BlockResponse,
         max_block_range: u64,
