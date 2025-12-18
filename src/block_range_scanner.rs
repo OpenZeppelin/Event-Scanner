@@ -282,38 +282,6 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     }
 }
 
-/// Commands accepted by the internal block-range service.
-#[derive(Debug)]
-enum Command {
-    /// Start a live stream.
-    StreamLive {
-        sender: mpsc::Sender<BlockScannerResult>,
-        block_confirmations: u64,
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
-    /// Start a historical range stream.
-    StreamHistorical {
-        sender: mpsc::Sender<BlockScannerResult>,
-        start_id: BlockId,
-        end_id: BlockId,
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
-    /// Start a stream that catches up from `start_id` and then transitions to live streaming.
-    StreamFrom {
-        sender: mpsc::Sender<BlockScannerResult>,
-        start_id: BlockId,
-        block_confirmations: u64,
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
-    /// Start a reverse stream (newer to older), in batches.
-    Rewind {
-        sender: mpsc::Sender<BlockScannerResult>,
-        start_id: BlockId,
-        end_id: BlockId,
-        response: oneshot::Sender<Result<(), ScannerError>>,
-    },
-}
-
 struct Service<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
@@ -344,59 +312,21 @@ impl<N: Network> Service<N> {
         (service, cmd_tx)
     }
 
-    pub async fn run(mut self) {
-        info!("Starting subscription service");
-
-        while !self.shutdown {
-            tokio::select! {
-                cmd = self.command_receiver.recv() => {
-                    if let Some(command) = cmd {
-                        if let Err(e) = self.handle_command(command).await {
-                            error!(error = %e, "Command handling error");
-                            self.error_count += 1;
-                        }
-                    } else {
-                        warn!("Command channel closed, shutting down");
-                        break;
-                    }
-                }
-            }
-        }
-
-        info!("Subscription service stopped");
-    }
-
-    async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
-        match command {
-            Command::StreamLive { sender, block_confirmations, response } => {
-                info!("Starting live stream");
-                let result = self.handle_live(block_confirmations, sender).await;
-                let _ = response.send(result);
-            }
-            Command::StreamHistorical { sender, start_id, end_id, response } => {
-                info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
-                let result = self.handle_historical(start_id, end_id, sender).await;
-                let _ = response.send(result);
-            }
-            Command::StreamFrom { sender, start_id, block_confirmations, response } => {
-                info!(start_id = ?start_id, "Starting streaming from");
-                let result = self.handle_sync(start_id, block_confirmations, sender).await;
-                let _ = response.send(result);
-            }
-            Command::Rewind { sender, start_id, end_id, response } => {
-                info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
-                let result = self.handle_rewind(start_id, end_id, sender).await;
-                let _ = response.send(result);
-            }
-        }
-        Ok(())
-    }
-
+    /// Streams live blocks starting from the latest block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    ///
+    /// # Errors
+    ///
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     async fn handle_live(
         &mut self,
         block_confirmations: u64,
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Result<(), ScannerError> {
+        info!("Starting live stream");
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let latest = self.provider.get_block_number().await?;
@@ -431,12 +361,23 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
+    /// Streams a batch of historical blocks from `start_id` to `end_id`.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_id` - The starting block id
+    /// * `end_id` - The ending block id
+    ///
+    /// # Errors
+    ///
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
     async fn handle_historical(
         &mut self,
         start_id: BlockId,
         end_id: BlockId,
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Result<(), ScannerError> {
+        info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
@@ -476,12 +417,23 @@ impl<N: Network> Service<N> {
         Ok(())
     }
 
-    async fn handle_sync(
+    /// Streams blocks starting from `start_id` and transitions to live mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_id` - The starting block id.
+    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
+    ///
+    /// # Errors
+    ///
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
+    async fn handle_stream_from(
         &self,
         start_id: BlockId,
         block_confirmations: u64,
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Result<(), ScannerError> {
+        info!(start_id = ?start_id, "Starting streaming from");
         let sync_handler = SyncHandler::new(
             self.provider.clone(),
             self.max_block_range,
@@ -493,12 +445,50 @@ impl<N: Network> Service<N> {
         sync_handler.run().await
     }
 
+    /// Streams blocks in reverse order from `start_id` to `end_id`.
+    ///
+    /// The `start_id` block is assumed to be greater than or equal to the `end_id` block.
+    /// Blocks are streamed in batches, where each batch is ordered from lower to higher
+    /// block numbers (chronological order within each batch), but batches themselves
+    /// progress from newer to older blocks.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_id` - The starting block id (higher block number).
+    /// * `end_id` - The ending block id (lower block number).
+    ///
+    /// # Reorg Handling
+    ///
+    /// Reorg checks are only performed when the specified block range tip is above the
+    /// current finalized block height. When a reorg is detected:
+    ///
+    /// 1. A [`Notification::ReorgDetected`] is emitted with the common ancestor block
+    /// 2. The scanner fetches the new tip block at the same height
+    /// 3. Reorged blocks are re-streamed in chronological order (from `common_ancestor + 1` up to
+    ///    the new tip)
+    /// 4. The reverse scan continues from where it left off
+    ///
+    /// If the range tip is at or below the finalized block, no reorg checks are
+    /// performed since finalized blocks cannot be reorganized.
+    ///
+    /// # Note
+    ///
+    /// The reason reorged blocks are streamed in chronological order is to make it easier to handle
+    /// reorgs in [`EventScannerBuilder::latest`][latest mode] mode, i.e. to prepend reorged blocks
+    /// to the result collection, which must maintain chronological order.
+    ///
+    /// # Errors
+    ///
+    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
+    ///
+    /// [latest mode]: crate::EventScannerBuilder::latest
     async fn handle_rewind(
         &mut self,
         start_id: BlockId,
         end_id: BlockId,
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Result<(), ScannerError> {
+        info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
@@ -635,179 +625,6 @@ impl<N: Network> Service<N> {
         }
 
         true
-    }
-}
-
-/// Client for requesting block-range streams from the background service.
-///
-/// Each method returns a new stream whose items are [`BlockScannerResult`] values.
-pub struct BlockRangeScannerClient {
-    command_sender: mpsc::Sender<Command>,
-    buffer_capacity: usize,
-}
-
-impl BlockRangeScannerClient {
-    /// Creates a new subscription client.
-    ///
-    /// # Arguments
-    ///
-    /// * `command_sender` - The sender for sending commands to the subscription service.
-    /// * `buffer_capacity` - The capacity for buffering messages in the stream.
-    #[must_use]
-    fn new(command_sender: mpsc::Sender<Command>, buffer_capacity: usize) -> Self {
-        Self { command_sender, buffer_capacity }
-    }
-
-    /// Streams live blocks starting from the latest block.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_live(
-        &self,
-        block_confirmations: u64,
-    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::StreamLive {
-            sender: blocks_sender,
-            block_confirmations,
-            response: response_tx,
-        };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
-
-        Ok(ReceiverStream::new(blocks_receiver))
-    }
-
-    /// Streams a batch of historical blocks from `start_id` to `end_id`.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_id` - The starting block id
-    /// * `end_id` - The ending block id
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_historical(
-        &self,
-        start_id: impl Into<BlockId>,
-        end_id: impl Into<BlockId>,
-    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::StreamHistorical {
-            sender: blocks_sender,
-            start_id: start_id.into(),
-            end_id: end_id.into(),
-            response: response_tx,
-        };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
-
-        Ok(ReceiverStream::new(blocks_receiver))
-    }
-
-    /// Streams blocks starting from `start_id` and transitions to live mode.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_id` - The starting block id.
-    /// * `block_confirmations` - Number of confirmations to apply once in live mode.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    pub async fn stream_from(
-        &self,
-        start_id: impl Into<BlockId>,
-        block_confirmations: u64,
-    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::StreamFrom {
-            sender: blocks_sender,
-            start_id: start_id.into(),
-            block_confirmations,
-            response: response_tx,
-        };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
-
-        Ok(ReceiverStream::new(blocks_receiver))
-    }
-
-    /// Streams blocks in reverse order from `start_id` to `end_id`.
-    ///
-    /// The `start_id` block is assumed to be greater than or equal to the `end_id` block.
-    /// Blocks are streamed in batches, where each batch is ordered from lower to higher
-    /// block numbers (chronological order within each batch), but batches themselves
-    /// progress from newer to older blocks.
-    ///
-    /// # Arguments
-    ///
-    /// * `start_id` - The starting block id (higher block number).
-    /// * `end_id` - The ending block id (lower block number).
-    ///
-    /// # Reorg Handling
-    ///
-    /// Reorg checks are only performed when the specified block range tip is above the
-    /// current finalized block height. When a reorg is detected:
-    ///
-    /// 1. A [`Notification::ReorgDetected`] is emitted with the common ancestor block
-    /// 2. The scanner fetches the new tip block at the same height
-    /// 3. Reorged blocks are re-streamed in chronological order (from `common_ancestor + 1` up to
-    ///    the new tip)
-    /// 4. The reverse scan continues from where it left off
-    ///
-    /// If the range tip is at or below the finalized block, no reorg checks are
-    /// performed since finalized blocks cannot be reorganized.
-    ///
-    /// # Note
-    ///
-    /// The reason reorged blocks are streamed in chronological order is to make it easier to handle
-    /// reorgs in [`EventScannerBuilder::latest`][latest mode] mode, i.e. to prepend reorged blocks
-    /// to the result collection, which must maintain chronological order.
-    ///
-    /// # Errors
-    ///
-    /// * `ScannerError::ServiceShutdown` - if the service is already shutting down.
-    ///
-    /// [latest mode]: crate::EventScannerBuilder::latest
-    pub async fn rewind(
-        &self,
-        start_id: impl Into<BlockId>,
-        end_id: impl Into<BlockId>,
-    ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let command = Command::Rewind {
-            sender: blocks_sender,
-            start_id: start_id.into(),
-            end_id: end_id.into(),
-            response: response_tx,
-        };
-
-        self.command_sender.send(command).await.map_err(|_| ScannerError::ServiceShutdown)?;
-
-        response_rx.await.map_err(|_| ScannerError::ServiceShutdown)??;
-
-        Ok(ReceiverStream::new(blocks_receiver))
     }
 }
 
