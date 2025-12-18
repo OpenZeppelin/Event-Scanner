@@ -95,8 +95,8 @@ pub struct LatestEvents {
     pub(crate) max_concurrent_fetches: usize,
 }
 
-#[derive(Default, Debug)]
 /// Marker indicating that a sync mode must be selected.
+#[derive(Default, Debug)]
 pub struct Synchronize;
 
 /// Mode marker for scanning by syncing from the specified count of latest events and then switching
