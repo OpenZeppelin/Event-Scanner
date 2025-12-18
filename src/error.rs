@@ -44,6 +44,10 @@ pub enum ScannerError {
     #[error("Max block range must be greater than 0")]
     InvalidMaxBlockRange,
 
+    /// The configured stream buffer capacity is invalid (must be greater than zero).
+    #[error("Stream buffer capacity must be greater than 0")]
+    InvalidBufferCapacity,
+
     /// The configured maximum number of concurrent fetches is invalid (must be greater than
     /// zero).
     #[error("Max concurrent fetches must be greater than 0")]

@@ -3,7 +3,7 @@ use tokio_stream::StreamExt;
 
 use crate::{
     ScannerError,
-    block_range_scanner::{BlockScannerResult, reorg_handler::ReorgHandler},
+    block_range_scanner::{BlockScannerResult, RangeIterator, reorg_handler::ReorgHandler},
     robust_provider::{RobustProvider, RobustSubscription, subscription},
     types::{Notification, TryStream},
 };
@@ -13,7 +13,7 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_live_blocks<N: Network>(
@@ -347,17 +347,16 @@ pub(crate) async fn stream_historical_range<N: Network>(
     };
 
     // no reorg check for finalized blocks
-    let mut batch_start = start;
     let finalized_batch_end = finalized.min(end);
-    while batch_start <= finalized_batch_end {
-        let batch_end = batch_start.saturating_add(max_block_range - 1).min(finalized_batch_end);
-
-        if !sender.try_stream(batch_start..=batch_end).await {
+    for range in RangeIterator::forward(start, finalized_batch_end, max_block_range) {
+        if !sender.try_stream(range).await {
             return None; // channel closed
         }
-
-        batch_start = batch_end + 1;
     }
+
+    // If start > finalized_batch_end, the loop above was empty and we should
+    // continue from start. Otherwise, continue from after finalized_batch_end.
+    let batch_start = start.max(finalized_batch_end + 1);
 
     // covers case when `end <= finalized`
     if batch_start > end {
@@ -392,33 +391,29 @@ pub(crate) async fn stream_historical_range<N: Network>(
 /// Assumes that `min_common_ancestor <= next_start_block <= end`, performs no internal checks.
 pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
     min_common_ancestor: BlockNumber,
-    mut next_start_block: BlockNumber,
+    next_start_block: BlockNumber,
     end: BlockNumber,
     max_block_range: u64,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<N::BlockResponse> {
-    let mut batch_count = 0;
+    let mut last_batch_end: Option<N::BlockResponse> = None;
+    let mut iter = RangeIterator::forward(next_start_block, end, max_block_range);
 
-    loop {
-        let batch_end_num = next_start_block.saturating_add(max_block_range - 1).min(end);
+    while let Some(batch) = iter.next() {
+        let batch_end_num = *batch.end();
         let batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
             Ok(block) => block,
             Err(e) => {
-                error!(batch_start = next_start_block, batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                error!(batch_start = batch.start(), batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
                 _ = sender.try_stream(e).await;
                 return None;
             }
         };
 
-        if !sender.try_stream(next_start_block..=batch_end_num).await {
+        if !sender.try_stream(batch).await {
             return None; // channel closed
-        }
-
-        batch_count += 1;
-        if batch_count % 10 == 0 {
-            debug!(batch_count = batch_count, "Processed historical batches");
         }
 
         let reorged_opt = match reorg_handler.check(&batch_end).await {
@@ -430,19 +425,17 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
             }
         };
 
-        next_start_block = if let Some(common_ancestor) = reorged_opt {
+        if let Some(common_ancestor) = reorged_opt {
             let common_ancestor = common_ancestor.header().number();
             if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
                 return None;
             }
-            (common_ancestor + 1).max(min_common_ancestor)
-        } else {
-            batch_end_num + 1
-        };
-
-        if next_start_block > end {
-            info!(batch_count = batch_count, "Historical sync completed");
-            return Some(batch_end);
+            iter.reset_to((common_ancestor + 1).max(min_common_ancestor));
         }
+
+        last_batch_end = Some(batch_end);
     }
+
+    info!(batch_count = iter.batch_count(), "Historical sync completed");
+    last_batch_end
 }

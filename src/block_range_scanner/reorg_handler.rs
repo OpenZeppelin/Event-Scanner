@@ -14,7 +14,7 @@ use crate::{
 
 use super::ring_buffer::RingBuffer;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct ReorgHandler<N: Network = Ethereum> {
     provider: RobustProvider<N>,
     buffer: RingBuffer<BlockHash>,
