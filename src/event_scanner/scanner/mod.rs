@@ -9,7 +9,7 @@ use crate::{
     EventFilter, ScannerError,
     block_range_scanner::{
         BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
-        MAX_BUFFERED_MESSAGES, RingBufferCapacity,
+        RingBufferCapacity,
     },
     event_scanner::{EventScannerResult, listener::EventListener},
     robust_provider::IntoRobustProvider,
@@ -24,22 +24,19 @@ mod sync;
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Unspecified;
-#[derive(Debug)]
 pub struct Historic {
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Debug)]
 pub struct Live {
     pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Debug)]
 pub struct LatestEvents {
     pub(crate) count: usize,
     pub(crate) from_block: BlockId,
@@ -47,16 +44,14 @@ pub struct LatestEvents {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Synchronize;
-#[derive(Debug)]
 pub struct SyncFromLatestEvents {
     pub(crate) count: usize,
     pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Debug)]
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
     pub(crate) block_confirmations: u64,
@@ -83,14 +78,13 @@ impl Default for Live {
     }
 }
 
-#[derive(Debug)]
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     config: M,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct EventScannerBuilder<M> {
     pub(crate) config: M,
     pub(crate) block_range_scanner: BlockRangeScanner,
@@ -459,6 +453,20 @@ impl<M> EventScannerBuilder<M> {
         self
     }
 
+    /// Sets the stream buffer capacity.
+    ///
+    /// Controls the maximum number of messages that can be buffered in the stream
+    /// before backpressure is applied.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer_capacity` - Maximum number of messages to buffer (must be greater than 0)
+    #[must_use]
+    pub fn buffer_capacity(mut self, buffer_capacity: usize) -> Self {
+        self.block_range_scanner.buffer_capacity = buffer_capacity;
+        self
+    }
+
     /// Builds the scanner by connecting to an existing provider.
     ///
     /// This is a shared method used internally by scanner-specific `connect()` methods.
@@ -466,9 +474,6 @@ impl<M> EventScannerBuilder<M> {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<M, N>, ScannerError> {
-        if self.block_range_scanner.max_block_range == 0 {
-            return Err(ScannerError::InvalidMaxBlockRange);
-        }
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
@@ -476,8 +481,14 @@ impl<M> EventScannerBuilder<M> {
 
 impl<M, N: Network> EventScanner<M, N> {
     #[must_use]
+    pub fn buffer_capacity(&self) -> usize {
+        self.block_range_scanner.buffer_capacity()
+    }
+
+    #[must_use]
     pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<EventScannerResult> {
-        let (sender, receiver) = mpsc::channel::<EventScannerResult>(MAX_BUFFERED_MESSAGES);
+        let (sender, receiver) =
+            mpsc::channel::<EventScannerResult>(self.block_range_scanner.buffer_capacity());
         self.listeners.push(EventListener { filter, sender });
         ReceiverStream::new(receiver)
     }
@@ -490,6 +501,8 @@ mod tests {
         rpc::client::RpcClient,
     };
 
+    use crate::DEFAULT_STREAM_BUFFER_CAPACITY;
+
     use super::*;
 
     #[test]
@@ -498,6 +511,7 @@ mod tests {
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Latest.into());
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
@@ -505,6 +519,7 @@ mod tests {
         let builder = EventScannerBuilder::<Live>::default();
 
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
@@ -515,6 +530,7 @@ mod tests {
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Latest.into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Earliest.into());
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
@@ -523,6 +539,7 @@ mod tests {
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[tokio::test]
@@ -545,29 +562,25 @@ mod tests {
     #[tokio::test]
     async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().build(provider).await?;
+        let mut scanner = EventScannerBuilder::historic().build(provider.clone()).await?;
 
         let _ = scanner.subscribe(EventFilter::new());
-
         let sender = &scanner.listeners[0].sender;
-        assert_eq!(sender.capacity(), MAX_BUFFERED_MESSAGES);
+        assert_eq!(sender.capacity(), scanner.block_range_scanner.buffer_capacity());
+
+        let custom_capacity = 1000;
+
+        let mut scanner = EventScannerBuilder::historic()
+            .buffer_capacity(custom_capacity)
+            .build(provider)
+            .await?;
+
+        assert_eq!(scanner.block_range_scanner.buffer_capacity(), custom_capacity);
+
+        let _ = scanner.subscribe(EventFilter::new());
+        let sender = &scanner.listeners[0].sender;
+        assert_eq!(sender.capacity(), custom_capacity);
 
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_latest_returns_error_with_zero_count() {
-        use alloy::{
-            providers::{RootProvider, mock::Asserter},
-            rpc::client::RpcClient,
-        };
-
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let result = EventScannerBuilder::latest(0).connect(provider).await;
-
-        match result {
-            Err(ScannerError::InvalidEventCount) => {}
-            _ => panic!("Expected InvalidEventCount error"),
-        }
     }
 }

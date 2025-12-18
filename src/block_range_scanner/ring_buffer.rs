@@ -20,7 +20,7 @@ macro_rules! impl_from_unsigned {
 
 impl_from_unsigned!(RingBufferCapacity; u8, u16, u32, usize);
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct RingBuffer<T> {
     inner: VecDeque<T>,
     capacity: RingBufferCapacity,

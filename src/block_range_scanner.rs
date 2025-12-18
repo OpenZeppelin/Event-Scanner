@@ -96,7 +96,7 @@ pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 
-pub const MAX_BUFFERED_MESSAGES: usize = 50000;
+pub const DEFAULT_STREAM_BUFFER_CAPACITY: usize = 50000;
 
 // Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
 // is considered final)
@@ -124,10 +124,11 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
     pub past_blocks_storage_capacity: RingBufferCapacity,
+    pub buffer_capacity: usize,
 }
 
 impl Default for BlockRangeScanner {
@@ -142,6 +143,7 @@ impl BlockRangeScanner {
         Self {
             max_block_range: DEFAULT_MAX_BLOCK_RANGE,
             past_blocks_storage_capacity: RingBufferCapacity::Limited(10),
+            buffer_capacity: DEFAULT_STREAM_BUFFER_CAPACITY,
         }
     }
 
@@ -160,6 +162,12 @@ impl BlockRangeScanner {
         self
     }
 
+    #[must_use]
+    pub fn buffer_capacity(mut self, buffer_capacity: usize) -> Self {
+        self.buffer_capacity = buffer_capacity;
+        self
+    }
+
     /// Connects to an existing provider
     ///
     /// # Errors
@@ -169,20 +177,27 @@ impl BlockRangeScanner {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+        if self.max_block_range == 0 {
+            return Err(ScannerError::InvalidMaxBlockRange);
+        }
+        if self.buffer_capacity == 0 {
+            return Err(ScannerError::InvalidBufferCapacity);
+        }
         let provider = provider.into_robust_provider().await?;
         Ok(ConnectedBlockRangeScanner {
             provider,
             max_block_range: self.max_block_range,
             past_blocks_storage_capacity: self.past_blocks_storage_capacity,
+            buffer_capacity: self.buffer_capacity,
         })
     }
 }
 
-#[derive(Debug)]
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
     past_blocks_storage_capacity: RingBufferCapacity,
+    buffer_capacity: usize,
 }
 
 impl<N: Network> ConnectedBlockRangeScanner<N> {
@@ -190,6 +205,12 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
     #[must_use]
     pub fn provider(&self) -> &RobustProvider<N> {
         &self.provider
+    }
+
+    /// Returns the stream buffer capacity.
+    #[must_use]
+    pub fn buffer_capacity(&self) -> usize {
+        self.buffer_capacity
     }
 
     /// Starts the subscription service and returns a client for sending commands.
@@ -206,7 +227,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
         tokio::spawn(async move {
             service.run().await;
         });
-        Ok(BlockRangeScannerClient::new(cmd_tx))
+        Ok(BlockRangeScannerClient::new(cmd_tx, self.buffer_capacity))
     }
 }
 
@@ -562,6 +583,7 @@ impl<N: Network> Service<N> {
 
 pub struct BlockRangeScannerClient {
     command_sender: mpsc::Sender<Command>,
+    buffer_capacity: usize,
 }
 
 impl BlockRangeScannerClient {
@@ -570,9 +592,10 @@ impl BlockRangeScannerClient {
     /// # Arguments
     ///
     /// * `command_sender` - The sender for sending commands to the subscription service.
+    /// * `buffer_capacity` - The capacity for buffering messages in the stream.
     #[must_use]
-    pub fn new(command_sender: mpsc::Sender<Command>) -> Self {
-        Self { command_sender }
+    pub fn new(command_sender: mpsc::Sender<Command>, buffer_capacity: usize) -> Self {
+        Self { command_sender, buffer_capacity }
     }
 
     /// Streams live blocks starting from the latest block.
@@ -588,7 +611,7 @@ impl BlockRangeScannerClient {
         &self,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamLive {
@@ -619,7 +642,7 @@ impl BlockRangeScannerClient {
         start_id: impl Into<BlockId>,
         end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamHistorical {
@@ -651,7 +674,7 @@ impl BlockRangeScannerClient {
         start_id: impl Into<BlockId>,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::StreamFrom {
@@ -710,7 +733,7 @@ impl BlockRangeScannerClient {
         start_id: impl Into<BlockId>,
         end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let (blocks_sender, blocks_receiver) = mpsc::channel(MAX_BUFFERED_MESSAGES);
+        let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = Command::Rewind {
@@ -731,7 +754,12 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::eips::{BlockId, BlockNumberOrTag};
+    use alloy::{
+        eips::{BlockId, BlockNumberOrTag},
+        network::Ethereum,
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
     use tokio::sync::mpsc;
 
     #[test]
@@ -739,15 +767,15 @@ mod tests {
         let scanner = BlockRangeScanner::new();
 
         assert_eq!(scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
+        assert_eq!(scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
     fn builder_methods_update_configuration() {
-        let max_block_range = 42;
+        let scanner = BlockRangeScanner::new().max_block_range(42).buffer_capacity(33);
 
-        let scanner = BlockRangeScanner::new().max_block_range(max_block_range);
-
-        assert_eq!(scanner.max_block_range, max_block_range);
+        assert_eq!(scanner.max_block_range, 42);
+        assert_eq!(scanner.buffer_capacity, 33);
     }
 
     #[tokio::test]
@@ -760,5 +788,21 @@ mod tests {
             rx.recv().await,
             Some(Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))))
         ));
+    }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_buffer_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = BlockRangeScanner::new().buffer_capacity(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidBufferCapacity)));
+    }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_max_block_range() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = BlockRangeScanner::new().max_block_range(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidMaxBlockRange)));
     }
 }
