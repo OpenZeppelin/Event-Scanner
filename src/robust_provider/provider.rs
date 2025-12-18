@@ -337,7 +337,11 @@ impl<N: Network> RobustProvider<N> {
                 continue;
             }
 
-            trace!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
+            trace!(
+                fallback_provider_index = fallback_idx + 1,
+                total_num_fallbacks = num_fallbacks,
+                "Attempting fallback provider"
+            );
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
