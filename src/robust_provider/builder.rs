@@ -1,4 +1,4 @@
-use std::{pin::Pin, time::Duration};
+use std::{fmt::Debug, pin::Pin, time::Duration};
 
 use alloy::{network::Network, providers::RootProvider};
 
@@ -26,6 +26,28 @@ pub struct RobustProviderBuilder<N: Network, P: IntoRootProvider<N>> {
     max_retries: usize,
     min_delay: Duration,
     reconnect_interval: Duration,
+}
+
+impl<N: Network, P: IntoRootProvider<N>> Debug for RobustProviderBuilder<N, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct FallbacksDebug(usize);
+
+        impl Debug for FallbacksDebug {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "[{} fallback provider(s)]", self.0)
+            }
+        }
+
+        f.debug_struct("RobustProviderBuilder")
+            .field("primary_provider", &"")
+            .field("fallback_providers", &FallbacksDebug(self.fallback_providers.len()))
+            .field("call_timeout", &self.call_timeout)
+            .field("subscription_timeout", &self.subscription_timeout)
+            .field("max_retries", &self.max_retries)
+            .field("min_delay", &self.min_delay)
+            .field("reconnect_interval", &self.reconnect_interval)
+            .finish()
+    }
 }
 
 impl<N: Network, P: IntoRootProvider<N>> RobustProviderBuilder<N, P> {

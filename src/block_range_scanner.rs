@@ -121,7 +121,7 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
     pub past_blocks_storage_capacity: RingBufferCapacity,
@@ -175,6 +175,7 @@ impl BlockRangeScanner {
     }
 }
 
+#[derive(Debug)]
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,

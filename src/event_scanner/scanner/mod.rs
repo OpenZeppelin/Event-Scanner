@@ -24,19 +24,22 @@ mod sync;
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Unspecified;
+#[derive(Debug)]
 pub struct Historic {
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+#[derive(Debug)]
 pub struct Live {
     pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+#[derive(Debug)]
 pub struct LatestEvents {
     pub(crate) count: usize,
     pub(crate) from_block: BlockId,
@@ -44,14 +47,16 @@ pub struct LatestEvents {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Synchronize;
+#[derive(Debug)]
 pub struct SyncFromLatestEvents {
     pub(crate) count: usize,
     pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
+#[derive(Debug)]
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
     pub(crate) block_confirmations: u64,
@@ -78,13 +83,14 @@ impl Default for Live {
     }
 }
 
+#[derive(Debug)]
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     config: M,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct EventScannerBuilder<M> {
     pub(crate) config: M,
     pub(crate) block_range_scanner: BlockRangeScanner,
