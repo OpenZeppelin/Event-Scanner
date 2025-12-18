@@ -3,7 +3,7 @@ use tokio_stream::StreamExt;
 
 use crate::{
     ScannerError,
-    block_range_scanner::{BatchIterator, BlockScannerResult, reorg_handler::ReorgHandler},
+    block_range_scanner::{BlockScannerResult, RangeIterator, reorg_handler::ReorgHandler},
     robust_provider::{RobustProvider, RobustSubscription, subscription},
     types::{Notification, TryStream},
 };
@@ -348,8 +348,8 @@ pub(crate) async fn stream_historical_range<N: Network>(
 
     // no reorg check for finalized blocks
     let finalized_batch_end = finalized.min(end);
-    for batch in BatchIterator::forward(start, finalized_batch_end, max_block_range) {
-        if !sender.try_stream(batch).await {
+    for range in RangeIterator::forward(start, finalized_batch_end, max_block_range) {
+        if !sender.try_stream(range).await {
             return None; // channel closed
         }
     }
@@ -399,7 +399,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<N::BlockResponse> {
     let mut last_batch_end: Option<N::BlockResponse> = None;
-    let mut iter = BatchIterator::forward(next_start_block, end, max_block_range);
+    let mut iter = RangeIterator::forward(next_start_block, end, max_block_range);
 
     while let Some(batch) = iter.next() {
         let batch_end_num = *batch.end();

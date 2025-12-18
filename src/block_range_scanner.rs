@@ -81,19 +81,19 @@ use alloy::{
 };
 use tracing::{error, info, warn};
 
-mod batch_iterator;
 mod common;
+mod range_iterator;
 mod reorg_handler;
 mod ring_buffer;
 mod sync_handler;
 
-pub(crate) use batch_iterator::BatchIterator;
+pub(crate) use range_iterator::RangeIterator;
 
 use reorg_handler::ReorgHandler;
 pub use ring_buffer::RingBufferCapacity;
 
 pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
-// copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
+// copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_range_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
@@ -474,10 +474,10 @@ impl<N: Network> Service<N> {
         // only check reorg if our tip is after the finalized block
         let check_reorg = tip.header().number() > finalized_number;
 
-        let mut iter = BatchIterator::reverse(from, to, max_block_range);
-        for batch in &mut iter {
+        let mut iter = RangeIterator::reverse(from, to, max_block_range);
+        for range in &mut iter {
             // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(batch).await {
+            if !sender.try_stream(range).await {
                 break;
             }
 
@@ -549,7 +549,7 @@ impl<N: Network> Service<N> {
         // Re-scan only the affected range (from common_ancestor + 1 up to tip)
         let rescan_from = common_ancestor + 1;
 
-        for batch in BatchIterator::forward(rescan_from, tip_number, max_block_range) {
+        for batch in RangeIterator::forward(rescan_from, tip_number, max_block_range) {
             if !sender.try_stream(batch).await {
                 return false;
             }
