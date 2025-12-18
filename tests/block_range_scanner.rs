@@ -5,8 +5,8 @@ use alloy::{
 };
 use alloy_node_bindings::Anvil;
 use event_scanner::{
-    Notification, ScannerError, assert_closed, assert_empty, assert_next, assert_range_coverage,
-    block_range_scanner::BlockRangeScanner,
+    BlockRangeScanner, Notification, ScannerError, assert_closed, assert_empty, assert_next,
+    assert_range_coverage,
 };
 
 #[tokio::test]

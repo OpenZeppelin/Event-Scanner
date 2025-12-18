@@ -41,8 +41,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     EventFilter, ScannerError,
     block_range_scanner::{
-        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
-        RingBufferCapacity,
+        ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, RingBufferCapacity,
+        builder::BlockRangeScanner,
     },
     event_scanner::{EventScannerResult, listener::EventListener},
     robust_provider::IntoRobustProvider,

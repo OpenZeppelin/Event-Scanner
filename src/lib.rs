@@ -61,7 +61,8 @@ mod event_scanner;
 mod types;
 
 pub use block_range_scanner::{
-    DEFAULT_STREAM_BUFFER_CAPACITY, RingBufferCapacity as PastBlocksStorageCapacity,
+    RingBufferCapacity as PastBlocksStorageCapacity, builder::BlockRangeScanner,
+    common::DEFAULT_STREAM_BUFFER_CAPACITY,
 };
 
 pub use error::ScannerError;
