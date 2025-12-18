@@ -10,7 +10,7 @@
 //!
 //! # Output stream
 //!
-//! Streams returned by [`BlockRangeScannerClient`] yield [`BlockScannerResult`] items:
+//! Streams returned by [`ConnectedBlockRangeScanner`] yield [`BlockScannerResult`] items:
 //!
 //! - `Ok(ScannerMessage::Data(range))` for a block range to process.
 //! - `Ok(ScannerMessage::Notification(_))` for scanner notifications.
@@ -33,8 +33,7 @@
 //! use event_scanner::{
 //!     ScannerError, ScannerMessage,
 //!     block_range_scanner::{
-//!         BlockRangeScanner, BlockRangeScannerClient, DEFAULT_BLOCK_CONFIRMATIONS,
-//!         DEFAULT_MAX_BLOCK_RANGE,
+//!         BlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE,
 //!     },
 //!     robust_provider::RobustProviderBuilder,
 //! };
@@ -51,11 +50,9 @@
 //!     let robust_provider = RobustProviderBuilder::new(provider).build().await?;
 //!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider).await?;
 //!
-//!     // Create client to send subscribe command to block scanner
-//!     let client: BlockRangeScannerClient = block_range_scanner.run()?;
-//!
-//!     let mut stream =
-//!         client.stream_from(BlockNumberOrTag::Number(5), DEFAULT_BLOCK_CONFIRMATIONS).await?;
+//!     let mut stream = block_range_scanner
+//!         .stream_from(BlockNumberOrTag::Number(5), DEFAULT_BLOCK_CONFIRMATIONS)
+//!         .await?;
 //!
 //!     while let Some(message) = stream.next().await {
 //!         match message {
@@ -68,7 +65,7 @@
 //!             Err(e) => {
 //!                 error!("Received error from subscription: {e}");
 //!                 match e {
-//!                     ScannerError::ServiceShutdown => break,
+//!                     ScannerError::Lagged(_) => break,
 //!                     _ => {
 //!                         error!("Non-fatal error, continuing: {e}");
 //!                     }
