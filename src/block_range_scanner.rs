@@ -174,6 +174,9 @@ impl BlockRangeScanner {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+        if self.max_block_range == 0 {
+            return Err(ScannerError::InvalidMaxBlockRange);
+        }
         let provider = provider.into_robust_provider().await?;
         Ok(ConnectedBlockRangeScanner {
             provider,
