@@ -12,7 +12,6 @@ use backon::{ExponentialBuilder, Retryable};
 use futures::TryFutureExt;
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
-use tracing::{error, info};
 
 use crate::robust_provider::RobustSubscription;
 
@@ -229,7 +228,7 @@ impl<N: Network> RobustProvider<N> {
     /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
     ///   `call_timeout`).
     pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
-        info!("get_latest_confirmed called with confirmations={}", confirmations);
+        info!(configurations = confirmations, "get_latest_confirmed called");
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
         Ok(confirmed_block)
@@ -392,10 +391,13 @@ impl<N: Network> RobustProvider<N> {
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                info!("Fallback provider {} doesn't support pubsub, skipping", fallback_idx + 1);
+                info!(
+                    fallback_index = fallback_idx + 1,
+                    "Fallback provider doesn't support pubsub, skipping"
+                );
                 continue;
             }
-            info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
+            info!(fallback_index = fallback_idx + 1, "Attempting fallback provider");
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
@@ -432,7 +434,7 @@ impl<N: Network> RobustProvider<N> {
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
                 .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
-                    info!(error = %err, "RPC error retrying after {:?}", dur);
+                    info!(error = %err, duration_ms = dur.as_millis(), "RPC error retrying");
                 })
                 .sleep(tokio::time::sleep),
         )

@@ -4,7 +4,6 @@ use alloy::{
     network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
     primitives::BlockHash,
 };
-use tracing::{info, warn};
 
 use crate::{
     ScannerError,
