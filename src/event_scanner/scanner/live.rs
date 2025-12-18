@@ -102,7 +102,7 @@ mod tests {
     use alloy_node_bindings::Anvil;
 
     use crate::{
-        DEFAULT_BUFFER_CAPACITY,
+        DEFAULT_STREAM_BUFFER_CAPACITY,
         block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
         event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
         assert_eq!(builder.config.max_concurrent_fetches, DEFAULT_MAX_CONCURRENT_FETCHES);
         assert_eq!(builder.block_range_scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
-        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_BUFFER_CAPACITY);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]

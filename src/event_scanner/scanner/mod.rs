@@ -500,7 +500,7 @@ mod tests {
         rpc::client::RpcClient,
     };
 
-    use crate::DEFAULT_BUFFER_CAPACITY;
+    use crate::DEFAULT_STREAM_BUFFER_CAPACITY;
 
     use super::*;
 
@@ -510,7 +510,7 @@ mod tests {
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Latest.into());
-        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_BUFFER_CAPACITY);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
@@ -518,7 +518,7 @@ mod tests {
         let builder = EventScannerBuilder::<Live>::default();
 
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
-        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_BUFFER_CAPACITY);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
@@ -529,7 +529,7 @@ mod tests {
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Latest.into());
         assert_eq!(builder.config.to_block, BlockNumberOrTag::Earliest.into());
-        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_BUFFER_CAPACITY);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
@@ -538,7 +538,7 @@ mod tests {
 
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
-        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_BUFFER_CAPACITY);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[tokio::test]

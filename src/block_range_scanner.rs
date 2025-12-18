@@ -93,7 +93,7 @@ pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
 // copied form https://github.com/taikoxyz/taiko-mono/blob/f4b3a0e830e42e2fee54829326389709dd422098/packages/taiko-client/pkg/chain_iterator/block_batch_iterator.go#L19
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 
-pub const DEFAULT_BUFFER_CAPACITY: usize = 50000;
+pub const DEFAULT_STREAM_BUFFER_CAPACITY: usize = 50000;
 
 // Maximum amount of reorged blocks on Ethereum (after this amount of block confirmations, a block
 // is considered final)
@@ -140,7 +140,7 @@ impl BlockRangeScanner {
         Self {
             max_block_range: DEFAULT_MAX_BLOCK_RANGE,
             past_blocks_storage_capacity: RingBufferCapacity::Limited(10),
-            buffer_capacity: DEFAULT_BUFFER_CAPACITY,
+            buffer_capacity: DEFAULT_STREAM_BUFFER_CAPACITY,
         }
     }
 
@@ -790,7 +790,7 @@ mod tests {
         let scanner = BlockRangeScanner::new();
 
         assert_eq!(scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
-        assert_eq!(scanner.buffer_capacity, DEFAULT_BUFFER_CAPACITY);
+        assert_eq!(scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]

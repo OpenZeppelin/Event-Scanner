@@ -165,7 +165,7 @@ impl<N: Network> EventScanner<LatestEvents, N> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        DEFAULT_BUFFER_CAPACITY, block_range_scanner::DEFAULT_MAX_BLOCK_RANGE,
+        DEFAULT_STREAM_BUFFER_CAPACITY, block_range_scanner::DEFAULT_MAX_BLOCK_RANGE,
         event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(builder.config.count, 10);
         assert_eq!(builder.config.max_concurrent_fetches, DEFAULT_MAX_CONCURRENT_FETCHES);
         assert_eq!(builder.block_range_scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
-        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_BUFFER_CAPACITY);
+        assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
     }
 
     #[test]
