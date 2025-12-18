@@ -121,7 +121,7 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BlockRangeScanner {
     pub max_block_range: u64,
     pub past_blocks_storage_capacity: RingBufferCapacity,
@@ -174,9 +174,6 @@ impl BlockRangeScanner {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
-        if self.max_block_range == 0 {
-            return Err(ScannerError::InvalidMaxBlockRange);
-        }
         let provider = provider.into_robust_provider().await?;
         Ok(ConnectedBlockRangeScanner {
             provider,
@@ -187,7 +184,6 @@ impl BlockRangeScanner {
     }
 }
 
-#[derive(Debug)]
 pub struct ConnectedBlockRangeScanner<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,

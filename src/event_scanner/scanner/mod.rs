@@ -24,22 +24,19 @@ mod sync;
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Unspecified;
-#[derive(Debug)]
 pub struct Historic {
     pub(crate) from_block: BlockId,
     pub(crate) to_block: BlockId,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Debug)]
 pub struct Live {
     pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Debug)]
 pub struct LatestEvents {
     pub(crate) count: usize,
     pub(crate) from_block: BlockId,
@@ -47,16 +44,14 @@ pub struct LatestEvents {
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Synchronize;
-#[derive(Debug)]
 pub struct SyncFromLatestEvents {
     pub(crate) count: usize,
     pub(crate) block_confirmations: u64,
     /// Controls how many log-fetching RPC requests can run in parallel during the scan.
     pub(crate) max_concurrent_fetches: usize,
 }
-#[derive(Debug)]
 pub struct SyncFromBlock {
     pub(crate) from_block: BlockId,
     pub(crate) block_confirmations: u64,
@@ -83,14 +78,13 @@ impl Default for Live {
     }
 }
 
-#[derive(Debug)]
 pub struct EventScanner<M = Unspecified, N: Network = Ethereum> {
     config: M,
     block_range_scanner: ConnectedBlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct EventScannerBuilder<M> {
     pub(crate) config: M,
     pub(crate) block_range_scanner: BlockRangeScanner,
@@ -479,6 +473,9 @@ impl<M> EventScannerBuilder<M> {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<M, N>, ScannerError> {
+        if self.block_range_scanner.max_block_range == 0 {
+            return Err(ScannerError::InvalidMaxBlockRange);
+        }
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
