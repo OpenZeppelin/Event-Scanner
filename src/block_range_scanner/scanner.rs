@@ -31,10 +31,8 @@
 //!
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
-//!     ScannerError, ScannerMessage,
-//!     block_range_scanner::{
-//!         BlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE,
-//!     },
+//!     BlockRangeScanner, ScannerError, ScannerMessage,
+//!     block_range_scanner::common::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
 //!     robust_provider::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
