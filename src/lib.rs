@@ -1,5 +1,7 @@
-pub mod block_range_scanner;
+#[macro_use]
+mod logging;
 
+pub mod block_range_scanner;
 pub mod robust_provider;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

@@ -1,6 +1,5 @@
 use alloy::{eips::BlockId, network::Network, primitives::BlockNumber};
 use tokio::sync::mpsc;
-use tracing::{error, info};
 
 use crate::{
     Notification, ScannerError,

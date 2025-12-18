@@ -20,7 +20,6 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{debug, error, info, trace, warn};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -155,7 +154,7 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
-                        debug!("Channel lagged, skipped {skipped} messages");
+                        debug!(skipped_messages = skipped, "Channel lagged");
                     }
                 }
             }
@@ -301,7 +300,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
-                        debug!("Channel lagged, skipped {skipped} messages");
+                        debug!(skipped_messages = skipped, "Channel lagged");
                     }
                 }
             }

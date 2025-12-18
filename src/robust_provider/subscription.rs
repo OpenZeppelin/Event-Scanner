@@ -4,6 +4,7 @@ use std::{
     task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
+use tracing::instrument;
 
 use alloy::{
     network::Network,
@@ -15,7 +16,6 @@ use thiserror::Error;
 use tokio::{sync::broadcast::error::RecvError, time::timeout};
 use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::{info, instrument, trace, warn};
 
 use crate::robust_provider::{RobustProvider, provider::CoreError};
 

@@ -9,9 +9,10 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
+use futures::TryFutureExt;
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
-use tracing::{error, info, instrument, trace, warn};
+use tracing::instrument;
 
 use crate::robust_provider::RobustSubscription;
 
@@ -28,7 +29,7 @@ pub enum Error {
 
 /// Low-level error related to RPC calls and failover logic.
 #[derive(Error, Debug)]
-pub(crate) enum CoreError {
+pub enum CoreError {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
@@ -279,7 +280,7 @@ impl<N: Network> RobustProvider<N> {
     /// * Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
     /// * Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
+    pub async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
         require_pubsub: bool,
@@ -289,15 +290,11 @@ impl<N: Network> RobustProvider<N> {
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
         let primary = self.primary();
-        let result = self.try_provider_with_timeout(primary, &operation).await;
-
-        if result.is_ok() {
-            return result;
-        }
-
-        let last_error = result.unwrap_err();
-
-        self.try_fallback_providers(&operation, require_pubsub, last_error).await
+        self.try_provider_with_timeout(primary, &operation)
+            .or_else(|last_error| {
+                self.try_fallback_providers(&operation, require_pubsub, last_error)
+            })
+            .await
     }
 
     #[instrument(level = "trace", skip(self, operation, last_error))]

@@ -1,6 +1,5 @@
 use alloy::primitives::BlockNumber;
 use std::{marker::PhantomData, ops::RangeInclusive};
-use tracing::debug;
 
 pub struct Forward;
 pub struct Reverse;

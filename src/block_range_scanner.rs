@@ -76,10 +76,9 @@ use crate::{
 use alloy::{
     consensus::BlockHeader,
     eips::{BlockId, BlockNumberOrTag},
-    network::{BlockResponse, Network, primitives::HeaderResponse},
+    network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
-use tracing::{error, info, warn};
 
 mod common;
 mod range_iterator;
@@ -295,7 +294,7 @@ impl<N: Network> Service<N> {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
                         if let Err(e) = self.handle_command(command).await {
-                            error!("Command handling error: {}", e);
+                            error!(error = %e, "Command handling error");
                             self.error_count += 1;
                         }
                     } else {
@@ -545,7 +544,7 @@ impl<N: Network> Service<N> {
         let common_ancestor = common_ancestor.header().number();
         info!(
             block_number = %tip_number,
-            hash = %tip.header().hash(),
+            hash = %alloy::network::primitives::HeaderResponse::hash(tip.header()),
             common_ancestor = %common_ancestor,
             "Reorg detected"
         );

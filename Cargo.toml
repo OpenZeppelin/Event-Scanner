@@ -74,3 +74,4 @@ workspace = true
 
 [features]
 test-utils = []
+tracing = []

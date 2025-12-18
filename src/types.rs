@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 
 use tokio::sync::mpsc;
-use tracing::{info, warn};
 
 use crate::ScannerError;
 
