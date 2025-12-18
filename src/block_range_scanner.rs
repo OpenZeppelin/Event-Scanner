@@ -93,6 +93,7 @@ use reorg_handler::ReorgHandler;
 pub use ring_buffer::RingBufferCapacity;
 
 pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
+
 pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
 
 pub const MAX_BUFFERED_MESSAGES: usize = 50000;
