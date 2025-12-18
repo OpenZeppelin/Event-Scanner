@@ -293,7 +293,7 @@ impl<N: Network> Service<N> {
             tokio::select! {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
-                                                if let Err(e) = self.handle_command(command).await {
+                        if let Err(e) = self.handle_command(command).await {
                             error!(error = %e, "Command handling error");
                             self.error_count += 1;
                         }

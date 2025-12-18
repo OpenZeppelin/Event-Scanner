@@ -435,6 +435,6 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         last_batch_end = Some(batch_end);
     }
 
-    error!(batch_count = iter.batch_count(), "Historical sync completed");
+    info!(batch_count = iter.batch_count(), "Historical sync completed");
     last_batch_end
 }
