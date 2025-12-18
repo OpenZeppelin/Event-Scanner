@@ -144,7 +144,7 @@ impl<N: Network> EventScanner<LatestEvents, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` or `to_block` cannot be resolved.
-    pub async fn start(mut self) -> Result<(), ScannerError> {
+    pub async fn start(self) -> Result<(), ScannerError> {
         let stream = self
             .block_range_scanner
             .stream_rewind(self.config.from_block, self.config.to_block)

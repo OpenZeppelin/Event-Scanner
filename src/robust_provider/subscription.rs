@@ -150,8 +150,8 @@ impl<N: Network> RobustSubscription<N> {
     /// Returns true if reconnection was successful, false if it's not time yet or if it failed.
     async fn try_reconnect_to_primary(&mut self, force: bool) -> bool {
         // Check if we should attempt reconnection
-        let should_reconnect = force ||
-            match self.last_reconnect_attempt {
+        let should_reconnect = force
+            || match self.last_reconnect_attempt {
                 None => false,
                 Some(last_attempt) => {
                     last_attempt.elapsed() >= self.robust_provider.reconnect_interval
