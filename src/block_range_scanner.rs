@@ -73,11 +73,10 @@ use crate::{
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 
-#[allow(unused_imports)]
 use alloy::{
     consensus::BlockHeader,
     eips::{BlockId, BlockNumberOrTag},
-    network::{BlockResponse, Network, primitives::HeaderResponse},
+    network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
 
@@ -288,47 +287,46 @@ impl<N: Network> Service<N> {
     }
 
     pub async fn run(mut self) {
-        opt_info!("Starting subscription service");
+        info!("Starting subscription service");
 
         while !self.shutdown {
             tokio::select! {
                 cmd = self.command_receiver.recv() => {
                     if let Some(command) = cmd {
-                        #[allow(clippy::used_underscore_binding)]
-                        if let Err(_e) = self.handle_command(command).await {
-                            opt_error!("Command handling error: {}", _e);
+                                                if let Err(e) = self.handle_command(command).await {
+                            error!(error = %e, "Command handling error");
                             self.error_count += 1;
                         }
                     } else {
-                        opt_warn!("Command channel closed, shutting down");
+                        warn!("Command channel closed, shutting down");
                         break;
                     }
                 }
             }
         }
 
-        opt_info!("Subscription service stopped");
+        info!("Subscription service stopped");
     }
 
     async fn handle_command(&mut self, command: Command) -> Result<(), ScannerError> {
         match command {
             Command::StreamLive { sender, block_confirmations, response } => {
-                opt_info!("Starting live stream");
+                info!("Starting live stream");
                 let result = self.handle_live(block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamHistorical { sender, start_id, end_id, response } => {
-                opt_info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
+                info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
                 let result = self.handle_historical(start_id, end_id, sender).await;
                 let _ = response.send(result);
             }
             Command::StreamFrom { sender, start_id, block_confirmations, response } => {
-                opt_info!(start_id = ?start_id, "Starting streaming from");
+                info!(start_id = ?start_id, "Starting streaming from");
                 let result = self.handle_sync(start_id, block_confirmations, sender).await;
                 let _ = response.send(result);
             }
             Command::Rewind { sender, start_id, end_id, response } => {
-                opt_info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
+                info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
                 let result = self.handle_rewind(start_id, end_id, sender).await;
                 let _ = response.send(result);
             }
@@ -353,7 +351,7 @@ impl<N: Network> Service<N> {
 
         let subscription = self.provider.subscribe_blocks().await?;
 
-        opt_info!("WebSocket connected for live blocks");
+        info!("WebSocket connected for live blocks");
 
         tokio::spawn(async move {
             let mut reorg_handler =
@@ -396,7 +394,7 @@ impl<N: Network> Service<N> {
             _ => (start_block_num, end_block_num),
         };
 
-        opt_info!(
+        info!(
             start_block = start_block_num,
             end_block = end_block_num,
             "Normalized the block range"
@@ -486,7 +484,7 @@ impl<N: Network> Service<N> {
         {
             Ok(block) => block,
             Err(e) => {
-                opt_error!(error = %e, "Failed to get finalized block");
+                error!(error = %e, "Failed to get finalized block");
                 _ = sender.try_stream(e).await;
                 return;
             }
@@ -508,7 +506,7 @@ impl<N: Network> Service<N> {
                 let reorg = match reorg_handler.check(&tip).await {
                     Ok(opt) => opt,
                     Err(e) => {
-                        opt_error!(error = %e, "Terminal RPC call error, shutting down");
+                        error!(error = %e, "Terminal RPC call error, shutting down");
                         _ = sender.try_stream(e).await;
                         return;
                     }
@@ -529,7 +527,7 @@ impl<N: Network> Service<N> {
             }
         }
 
-        opt_info!(batch_count = iter.batch_count(), "Rewind completed");
+        info!(batch_count = iter.batch_count(), "Rewind completed");
     }
 
     /// Handles re-scanning of reorged blocks.
@@ -544,9 +542,9 @@ impl<N: Network> Service<N> {
     ) -> bool {
         let tip_number = tip.header().number();
         let common_ancestor = common_ancestor.header().number();
-        opt_info!(
+        info!(
             block_number = %tip_number,
-            hash = %tip.header().hash(),
+            hash = %alloy::network::primitives::HeaderResponse::hash(tip.header()),
             common_ancestor = %common_ancestor,
             "Reorg detected"
         );
@@ -559,13 +557,10 @@ impl<N: Network> Service<N> {
         *tip = match provider.get_block_by_number(tip_number.into()).await {
             Ok(block) => block,
             Err(e) => {
-                #[allow(clippy::if_same_then_else)]
                 if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
-                    opt_error!(
-                        "Unexpected error: pre-reorg chain tip should exist on a reorged chain"
-                    );
+                    error!("Unexpected error: pre-reorg chain tip should exist on a reorged chain");
                 } else {
-                    opt_error!(error = %e, "Terminal RPC call error, shutting down");
+                    error!(error = %e, "Terminal RPC call error, shutting down");
                 }
                 _ = sender.try_stream(e).await;
                 return false;

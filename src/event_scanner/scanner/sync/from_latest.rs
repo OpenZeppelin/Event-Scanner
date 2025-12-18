@@ -81,7 +81,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let buffer_capacity = self.buffer_capacity();
 
-        opt_info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
+        info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
 
         let client = self.block_range_scanner.run()?;
 
@@ -117,7 +117,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 match client.stream_from(latest_block + 1, self.config.block_confirmations).await {
                     Ok(stream) => stream,
                     Err(e) => {
-                        opt_error!(error = %e, "Error during sync mode setup");
+                        error!(error = %e, "Error during sync mode setup");
                         for listener in listeners {
                             _ = listener.sender.try_stream(e.clone()).await;
                         }

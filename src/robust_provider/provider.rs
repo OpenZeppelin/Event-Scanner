@@ -11,7 +11,6 @@ use alloy::{
 use backon::{ExponentialBuilder, Retryable};
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
-use tracing::error;
 
 use crate::robust_provider::RobustSubscription;
 
@@ -114,16 +113,15 @@ impl<N: Network> RobustProvider<N> {
         &self,
         number: BlockNumberOrTag,
     ) -> Result<N::BlockResponse, Error> {
-        opt_info!("eth_getBlockByNumber called");
+        info!("eth_getBlockByNumber called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_number(number).await },
                 false,
             )
             .await;
-        #[allow(clippy::used_underscore_binding)]
-        if let Err(_e) = &result {
-            opt_error!(error = %_e, "eth_getByBlockNumber failed");
+        if let Err(e) = &result {
+            error!(error = %e, "eth_getByBlockNumber failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(number.into()))
@@ -137,16 +135,15 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block(&self, id: BlockId) -> Result<N::BlockResponse, Error> {
-        opt_info!("eth_getBlock called");
+        info!("eth_getBlock called");
         let result = self
             .try_operation_with_failover(
                 |provider| async move { provider.get_block(id).await },
                 false,
             )
             .await;
-        #[allow(clippy::used_underscore_binding)]
-        if let Err(_e) = &result {
-            opt_error!(error = %_e, "eth_getByBlockNumber failed");
+        if let Err(e) = &result {
+            error!(error = %e, "eth_getByBlockNumber failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(id))
     }
@@ -159,7 +156,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_number(&self) -> Result<BlockNumber, Error> {
-        opt_info!("eth_getBlockNumber called");
+        info!("eth_getBlockNumber called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number().await },
@@ -167,9 +164,8 @@ impl<N: Network> RobustProvider<N> {
             )
             .await
             .map_err(Error::from);
-        #[allow(clippy::used_underscore_binding)]
-        if let Err(_e) = &result {
-            opt_error!(error = %_e, "eth_getBlockNumber failed");
+        if let Err(e) = &result {
+            error!(error = %e, "eth_getBlockNumber failed");
         }
         result
     }
@@ -186,16 +182,15 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<BlockNumber, Error> {
-        opt_info!("get_block_number_by_id called");
+        info!("get_block_number_by_id called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_number_by_id(block_id).await },
                 false,
             )
             .await;
-        #[allow(clippy::used_underscore_binding)]
-        if let Err(_e) = &result {
-            opt_error!(error = %_e, "get_block_number_by_id failed");
+        if let Err(e) = &result {
+            error!(error = %e, "get_block_number_by_id failed");
         }
         result?.ok_or_else(|| Error::BlockNotFound(block_id))
     }
@@ -214,7 +209,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
-        opt_info!("get_latest_confirmed called with confirmations={}", confirmations);
+        info!(configurations = confirmations, "get_latest_confirmed called");
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
         Ok(confirmed_block)
@@ -228,16 +223,15 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_block_by_hash(&self, hash: BlockHash) -> Result<N::BlockResponse, Error> {
-        opt_info!("eth_getBlockByHash called");
+        info!("eth_getBlockByHash called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_block_by_hash(hash).await },
                 false,
             )
             .await;
-        #[allow(clippy::used_underscore_binding)]
-        if let Err(_e) = &result {
-            opt_error!(error = %_e, "eth_getBlockByHash failed");
+        if let Err(e) = &result {
+            error!(error = %e, "eth_getBlockByHash failed");
         }
 
         result?.ok_or_else(|| Error::BlockNotFound(hash.into()))
@@ -251,7 +245,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// See [retry errors](#retry-errors).
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
-        opt_info!("eth_getLogs called");
+        info!("eth_getLogs called");
         let result = self
             .try_operation_with_failover(
                 move |provider| async move { provider.get_logs(filter).await },
@@ -259,9 +253,8 @@ impl<N: Network> RobustProvider<N> {
             )
             .await
             .map_err(Error::from);
-        #[allow(clippy::used_underscore_binding)]
-        if let Err(_e) = &result {
-            opt_error!(error = %_e, "eth_getLogs failed");
+        if let Err(e) = &result {
+            error!(error = %e, "eth_getLogs failed");
         }
         result
     }
@@ -279,7 +272,7 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// see [retry errors](#retry-errors).
     pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
-        opt_info!("eth_subscribe called");
+        info!("eth_subscribe called");
         let subscription = self
             .try_operation_with_failover(
                 move |provider| async move {
@@ -295,7 +288,7 @@ impl<N: Network> RobustProvider<N> {
         match subscription {
             Ok(sub) => Ok(RobustSubscription::new(sub, self.clone())),
             Err(e) => {
-                opt_error!(error = %e, "eth_subscribe failed");
+                error!(error = %e, "eth_subscribe failed");
                 Err(e.into())
             }
         }
@@ -370,35 +363,33 @@ impl<N: Network> RobustProvider<N> {
     {
         let num_fallbacks = self.fallback_providers.len();
         if num_fallbacks > 0 && start_index == 0 {
-            opt_info!("Primary provider failed, trying fallback provider(s)");
+            info!("Primary provider failed, trying fallback provider(s)");
         }
 
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                opt_info!(
-                    "Fallback provider {} doesn't support pubsub, skipping",
-                    fallback_idx + 1
+                info!(
+                    fallback_index = fallback_idx + 1,
+                    "Fallback provider doesn't support pubsub, skipping"
                 );
                 continue;
             }
-            opt_info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
+            info!(fallback_index = fallback_idx + 1, "Attempting fallback provider");
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
-                    opt_info!(provider_num = fallback_idx + 1, "Fallback provider succeeded");
+                    info!(provider_num = fallback_idx + 1, "Fallback provider succeeded");
                     return Ok((value, fallback_idx));
                 }
                 Err(e) => {
-                    opt_error!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
+                    error!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
                     last_error = e;
                 }
             }
         }
         // All fallbacks failed / skipped, return the last error
-        opt_error!(
-            "All providers failed or timed out - returning the last providers attempt's error"
-        );
+        error!("All providers failed or timed out - returning the last providers attempt's error");
         Err(last_error)
     }
 
@@ -420,12 +411,9 @@ impl<N: Network> RobustProvider<N> {
             self.call_timeout,
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
-                .notify(
-                    #[allow(clippy::used_underscore_binding)]
-                    |_err: &RpcError<TransportErrorKind>, _dur: Duration| {
-                        opt_info!(error = %_err, "RPC error retrying after {:?}", _dur);
-                    },
-                )
+                .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
+                    info!(error = %err, duration_ms = dur.as_millis(), "RPC error retrying");
+                })
                 .sleep(tokio::time::sleep),
         )
         .await

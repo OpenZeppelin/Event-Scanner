@@ -76,9 +76,8 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     };
 
     while let Some(message) = stream.next().await {
-        #[allow(clippy::used_underscore_binding)]
-        if let Err(_err) = range_tx.send(message) {
-            opt_warn!(error = %_err, "No log consumers, stopping stream");
+        if let Err(err) = range_tx.send(message) {
+            warn!(error = %err, "No log consumers, stopping stream");
             break;
         }
     }
@@ -151,12 +150,11 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                         tx.send(message).await.expect("receiver dropped only if we exit this loop");
                     }
                     Err(RecvError::Closed) => {
-                        opt_debug!("No more block ranges to receive");
+                        debug!("No more block ranges to receive");
                         break;
                     }
-                    #[allow(clippy::used_underscore_binding)]
-                    Err(RecvError::Lagged(_skipped)) => {
-                        opt_debug!("Channel lagged, skipped {_skipped} messages");
+                    Err(RecvError::Lagged(skipped)) => {
+                        debug!(skipped_messages = skipped, "Channel lagged");
                     }
                 }
             }
@@ -230,7 +228,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 .expect("pending blocks not supported");
                             // Check if in reorg recovery and past the reorg range
                             if reorg_ancestor.is_some_and(|a| last_log_block_num <= a) {
-                                opt_debug!(
+                                debug!(
                                     ancestor = reorg_ancestor,
                                     "Reorg recovery complete, resuming normal log collection"
                                 );
@@ -246,7 +244,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         Ok(ScannerMessage::Notification(Notification::ReorgDetected {
                             common_ancestor,
                         })) => {
-                            opt_debug!(
+                            debug!(
                                 common_ancestor = common_ancestor,
                                 "Received ReorgDetected notification"
                             );
@@ -260,7 +258,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                             // since logs haven't been sent yet
                         }
                         Ok(ScannerMessage::Notification(notification)) => {
-                            opt_debug!(notification = ?notification, "Received notification");
+                            debug!(notification = ?notification, "Received notification");
                             if !sender.try_stream(notification).await {
                                 return;
                             }
@@ -274,15 +272,15 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 }
 
                 if collected.is_empty() {
-                    opt_debug!("No logs found");
+                    debug!("No logs found");
                     _ = sender.try_stream(Notification::NoPastLogsFound).await;
                     return;
                 }
 
-                opt_trace!(count = collected.len(), "Logs found");
+                trace!(count = collected.len(), "Logs found");
                 collected.reverse(); // restore chronological order
 
-                opt_trace!("Sending collected logs to consumer");
+                trace!("Sending collected logs to consumer");
                 _ = sender.try_stream(collected).await;
             });
 
@@ -298,12 +296,11 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         }
                     }
                     Err(RecvError::Closed) => {
-                        opt_debug!("No more block ranges to receive");
+                        debug!("No more block ranges to receive");
                         break;
                     }
-                    #[allow(clippy::used_underscore_binding)]
-                    Err(RecvError::Lagged(_skipped)) => {
-                        opt_debug!("Channel lagged, skipped {_skipped} messages");
+                    Err(RecvError::Lagged(skipped)) => {
+                        debug!(skipped_messages = skipped, "Channel lagged");
                     }
                 }
             }
@@ -336,7 +333,7 @@ fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) 
         .collect::<Vec<_>>();
     let removed_count = before_count - collected.len();
     if removed_count > 0 {
-        opt_debug!(
+        debug!(
             removed_count = removed_count,
             remaining_count = collected.len(),
             "Invalidated logs from reorged blocks"
@@ -371,10 +368,9 @@ fn collect_logs<T>(collected: &mut Vec<T>, logs: Vec<T>, count: usize, prepend: 
     collected.len() >= count
 }
 
-#[allow(clippy::used_underscore_binding)]
 async fn get_logs<N: Network>(
     range: RangeInclusive<u64>,
-    _event_filter: &EventFilter,
+    event_filter: &EventFilter,
     log_filter: &Filter,
     provider: &RobustProvider<N>,
 ) -> Result<Vec<Log>, RobustProviderError> {
@@ -386,8 +382,8 @@ async fn get_logs<N: Network>(
                 return Ok(logs);
             }
 
-            opt_info!(
-                filter = %_event_filter,
+            info!(
+                filter = %event_filter,
                 log_count = logs.len(),
                 block_range = ?range,
                 "found logs for event in block range"
@@ -396,8 +392,8 @@ async fn get_logs<N: Network>(
             Ok(logs)
         }
         Err(e) => {
-            opt_error!(
-                filter = %_event_filter,
+            error!(
+                filter = %event_filter,
                 error = %e,
                 block_range = ?range,
                 "failed to get logs for block range"

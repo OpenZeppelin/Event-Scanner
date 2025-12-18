@@ -106,16 +106,15 @@ pub(crate) trait TryStream<T: Clone> {
     async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool;
 }
 
-#[allow(clippy::used_underscore_binding)]
 impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<ScannerResult<T>> {
     async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool {
         let item = msg.into_scanner_message_result();
         match &item {
-            Ok(_msg) => opt_info!(item = ?_msg, "Sending message"),
-            Err(_err) => opt_info!(error = ?_err, "Sending error"),
+            Ok(msg) => info!(item = ?msg, "Sending message"),
+            Err(err) => info!(error = ?err, "Sending error"),
         }
-        if let Err(_err) = self.send(item).await {
-            opt_warn!(error = %_err, "Downstream channel closed, stopping stream");
+        if let Err(err) = self.send(item).await {
+            warn!(error = %err, "Downstream channel closed, stopping stream");
             return false;
         }
         true

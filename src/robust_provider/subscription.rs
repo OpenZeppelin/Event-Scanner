@@ -15,7 +15,6 @@ use thiserror::Error;
 use tokio::{sync::broadcast::error::RecvError, time::timeout};
 use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::error;
 
 use crate::robust_provider::{RobustProvider, provider::CoreError};
 
@@ -45,11 +44,11 @@ impl From<RecvError> for Error {
     fn from(err: RecvError) -> Self {
         match err {
             RecvError::Closed => {
-                opt_error!("Provider closed the subscription channel");
+                error!("Provider closed the subscription channel");
                 Error::Closed
             }
             RecvError::Lagged(count) => {
-                opt_error!(skipped = count, "Receiver lagged");
+                error!(skipped = count, "Receiver lagged");
                 Error::Lagged(count)
             }
         }
@@ -126,18 +125,17 @@ impl<N: Network> RobustSubscription<N> {
                     Err(recv_error) => {
                         match recv_error {
                             RecvError::Closed => {
-                                opt_error!("Provider closed the subscription channel");
+                                error!("Provider closed the subscription channel");
                             }
-                            #[allow(clippy::used_underscore_binding)]
-                            RecvError::Lagged(_count) => {
-                                opt_error!(skipped = _count, "Receiver lagged");
+                            RecvError::Lagged(count) => {
+                                error!(skipped = count, "Receiver lagged");
                             }
                         }
                         return Err(recv_error.into());
                     }
                 },
                 Err(elapsed_err) => {
-                    opt_warn!(
+                    warn!(
                         timeout_secs = subscription_timeout.as_secs(),
                         "Subscription timeout - no block received, switching provider"
                     );
@@ -164,7 +162,7 @@ impl<N: Network> RobustSubscription<N> {
             return false;
         }
 
-        opt_info!("Attempting to reconnect to primary provider");
+        info!("Attempting to reconnect to primary provider");
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
@@ -175,16 +173,15 @@ impl<N: Network> RobustSubscription<N> {
 
         match subscription {
             Ok(sub) => {
-                opt_info!("Successfully reconnected to primary provider");
+                info!("Successfully reconnected to primary provider");
                 self.subscription = sub;
                 self.current_fallback_index = None;
                 self.last_reconnect_attempt = None;
                 true
             }
-            #[allow(clippy::used_underscore_binding)]
-            Err(_e) => {
+            Err(e) => {
                 self.last_reconnect_attempt = Some(Instant::now());
-                opt_warn!(error = %_e, "Failed to reconnect to primary provider");
+                warn!(error = %e, "Failed to reconnect to primary provider");
                 false
             }
         }
