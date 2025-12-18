@@ -28,7 +28,7 @@ pub enum Error {
 
 /// Low-level error related to RPC calls and failover logic.
 #[derive(Error, Debug)]
-pub(crate) enum CoreError {
+pub enum CoreError {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
@@ -315,7 +315,7 @@ impl<N: Network> RobustProvider<N> {
     /// * Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
     ///   is true and all providers don't support pubsub.
     /// * Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
+    pub async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
         require_pubsub: bool,
