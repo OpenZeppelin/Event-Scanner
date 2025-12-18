@@ -174,6 +174,9 @@ impl BlockRangeScanner {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+        if self.max_block_range == 0 {
+            return Err(ScannerError::InvalidMaxBlockRange);
+        }
         if self.buffer_capacity == 0 {
             return Err(ScannerError::InvalidBufferCapacity);
         }
@@ -816,5 +819,13 @@ mod tests {
         let result = BlockRangeScanner::new().buffer_capacity(0).connect(provider).await;
 
         assert!(matches!(result, Err(ScannerError::InvalidBufferCapacity)));
+    }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_max_block_range() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = BlockRangeScanner::new().max_block_range(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidMaxBlockRange)));
     }
 }

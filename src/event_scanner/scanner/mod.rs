@@ -473,9 +473,6 @@ impl<M> EventScannerBuilder<M> {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<M, N>, ScannerError> {
-        if self.block_range_scanner.max_block_range == 0 {
-            return Err(ScannerError::InvalidMaxBlockRange);
-        }
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
     }
