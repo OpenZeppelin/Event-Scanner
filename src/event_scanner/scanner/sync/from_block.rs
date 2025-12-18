@@ -10,6 +10,11 @@ use crate::{
 };
 
 impl EventScannerBuilder<SyncFromBlock> {
+    /// Sets the number of confirmations required before a block is considered stable enough to
+    /// scan in the live phase.
+    ///
+    /// This affects the post-sync live streaming phase; higher values reduce reorg risk at the
+    /// cost of increased event delivery latency.
     #[must_use]
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;
@@ -61,19 +66,16 @@ impl EventScannerBuilder<SyncFromBlock> {
 }
 
 impl<N: Network> EventScanner<SyncFromBlock, N> {
-    /// Starts the scanner.
+    /// Starts the scanner in [`SyncFromBlock`] mode.
     ///
-    /// # Important notes
-    ///
-    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
-    ///   this function.
-    /// * The method returns immediately; events are delivered asynchronously.
+    /// See [`EventScanner`] for general startup notes.
     ///
     /// # Errors
     ///
-    /// Can error out if the service fails to start.
-    ///
-    /// [subscribe]: EventScanner::subscribe
+    /// * [`ScannerError::ServiceShutdown`] - if the internal block-range service cannot be started.
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
+    /// * [`ScannerError::BlockNotFound`] - if `from_block` cannot be resolved.
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream =

@@ -44,12 +44,13 @@ pub enum Notification {
     ///
     /// **How to handle**: This is a benign race condition. Your application should be designed to
     /// handle duplicate logs idempotently (e.g., using transaction hashes or log indices as
-    /// deduplication keys). The scanner prioritizes correctness by ensuring all logs from the
-    /// canonical chain are delivered, even if it means occasional duplicates during reorgs.
-    ///
-    /// The `common_ancestor` field contains the block number of the last block
-    /// that is still valid on the canonical chain.
-    ReorgDetected { common_ancestor: u64 },
+    /// deduplication keys). Depending on your application semantics, you may also treat this
+    /// notification as a signal to roll back application state derived from blocks after the
+    /// reported common ancestor.
+    ReorgDetected {
+        /// The block number of the last block that is still valid on the canonical chain.
+        common_ancestor: u64,
+    },
 
     /// Emitted during the latest events phase when no matching logs are found in the
     /// scanned range.
@@ -72,8 +73,12 @@ impl<T: Clone> PartialEq<Notification> for ScannerMessage<T> {
     }
 }
 
+/// A convenience `Result` type for scanner streams.
+///
+/// Successful items are [`ScannerMessage`] values; failures are [`ScannerError`].
 pub type ScannerResult<T> = Result<ScannerMessage<T>, ScannerError>;
 
+/// Conversion helper for streaming either data, notifications, or errors.
 pub trait IntoScannerResult<T: Clone> {
     fn into_scanner_message_result(self) -> ScannerResult<T>;
 }
@@ -102,6 +107,7 @@ impl<T: Clone> IntoScannerResult<T> for Notification {
     }
 }
 
+/// Internal helper for attempting to forward a stream item through an `mpsc` channel.
 pub(crate) trait TryStream<T: Clone> {
     async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool;
 }

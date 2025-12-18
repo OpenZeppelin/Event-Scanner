@@ -230,11 +230,15 @@ let multi_sigs = EventFilter::new()
 The scanner delivers three types of messages through the event stream:
 
 - **`Message::Data(Vec<Log>)`** – Contains a batch of matching event logs. Each log includes the raw event data, transaction hash, block number, and other metadata.
-- **`Message::Notification(Notification)`** – Notifications from the scanner:
-- **`ScannerError`** – Errors indicating that the scanner has encountered issues (e.g., RPC failures, connection problems)
+- **`Message::Notification(Notification)`** – Notifications from the scanner.
+- **`ScannerError`** – Errors indicating that the scanner has encountered issues (e.g., RPC failures, connection problems, or a lagging consumer).
 
 Always handle all message types in your stream processing loop to ensure robust error handling and proper reorg detection.
 
+Notes:
+
+- Ordering is guaranteed only within a single subscription stream. There is no global ordering guarantee across multiple subscriptions.
+- When the scanner detects a reorg, it emits `Notification::ReorgDetected`. Consumers should assume the same events might be delivered more than once around reorgs (i.e. benign duplicates are possible). Depending on the application's needs, this could be handled via idempotency/deduplication or by rolling back application state on reorg notifications.
 
 ### Scanning Modes
 
@@ -248,7 +252,7 @@ Always handle all message types in your stream processing loop to ensure robust 
 
 - Set `max_block_range` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks). Default is 1000 blocks.
 - The modes come with sensible defaults; for example, not specifying a start block for historic mode automatically sets it to the genesis block.
-- For live mode, if the WebSocket subscription lags significantly (e.g., >2000 blocks), ranges are automatically capped to prevent RPC errors.
+- In live mode, if the block subscription lags and the scanner needs to catch up by querying past blocks, catch-up queries are performed in ranges bounded by `max_block_range` to respect provider limits.
 
 ---
 

@@ -124,19 +124,16 @@ impl EventScannerBuilder<Historic> {
 }
 
 impl<N: Network> EventScanner<Historic, N> {
-    /// Starts the scanner.
+    /// Starts the scanner in [`Historic`] mode.
     ///
-    /// # Important notes
-    ///
-    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
-    ///   this function.
-    /// * The method returns immediately; events are delivered asynchronously.
+    /// See [`EventScanner`] for general startup notes.
     ///
     /// # Errors
     ///
-    /// Can error out if the service fails to start.
-    ///
-    /// [subscribe]: EventScanner::subscribe
+    /// * [`ScannerError::ServiceShutdown`] - if the internal block-range service cannot be started.
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
+    /// * [`ScannerError::BlockNotFound`] - if `from_block` or `to_block` cannot be resolved.
     pub async fn start(self) -> Result<(), ScannerError> {
         let client = self.block_range_scanner.run()?;
         let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;

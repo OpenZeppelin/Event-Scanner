@@ -14,6 +14,11 @@ use crate::{
 };
 
 impl EventScannerBuilder<SyncFromLatestEvents> {
+    /// Sets the number of confirmations required before a block is considered stable enough to
+    /// scan in the live phase.
+    ///
+    /// This affects the post-sync live streaming phase; higher values reduce reorg risk at the
+    /// cost of increased event delivery latency.
     #[must_use]
     pub fn block_confirmations(mut self, confirmations: u64) -> Self {
         self.config.block_confirmations = confirmations;
@@ -60,19 +65,15 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
 }
 
 impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
-    /// Starts the scanner.
+    /// Starts the scanner in [`SyncFromLatestEvents`] mode.
     ///
-    /// # Important notes
-    ///
-    /// * Register event streams via [`scanner.subscribe(filter)`][subscribe] **before** calling
-    ///   this function.
-    /// * The method returns immediately; events are delivered asynchronously.
+    /// See [`EventScanner`] for general startup notes.
     ///
     /// # Errors
     ///
-    /// Can error out if the service fails to start.
-    ///
-    /// [subscribe]: EventScanner::subscribe
+    /// * [`ScannerError::ServiceShutdown`] - if the internal block-range service cannot be started.
+    /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
+    /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     #[allow(clippy::missing_panics_doc)]
     pub async fn start(self) -> Result<(), ScannerError> {
         let count = self.config.count;

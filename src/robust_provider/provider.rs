@@ -110,7 +110,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -131,7 +135,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block(&self, id: BlockId) -> Result<N::BlockResponse, Error> {
         let result = self
             .try_operation_with_failover(
@@ -148,7 +156,10 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn get_block_number(&self) -> Result<BlockNumber, Error> {
         self.try_operation_with_failover(
             move |provider| async move { provider.get_block_number().await },
@@ -168,7 +179,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<BlockNumber, Error> {
         let result = self
             .try_operation_with_failover(
@@ -191,7 +206,10 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
@@ -204,7 +222,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block_by_hash(&self, hash: BlockHash) -> Result<N::BlockResponse, Error> {
         let result = self
             .try_operation_with_failover(
@@ -222,7 +244,10 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         self.try_operation_with_failover(
             move |provider| async move { provider.get_logs(filter).await },
@@ -243,7 +268,10 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// see [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
         let subscription = self
             .try_operation_with_failover(
@@ -262,7 +290,7 @@ impl<N: Network> RobustProvider<N> {
 
     /// Execute `operation` with exponential backoff and a total timeout.
     ///
-    /// Wraps the retry logic with `tokio::time::timeout(self.call_timeout, ...)` so
+    /// Wraps the retry logic with [`tokio::time::timeout`] so
     /// the entire operation (including time spent inside the RPC call) cannot exceed
     /// `call_timeout`.
     ///
@@ -272,14 +300,11 @@ impl<N: Network> RobustProvider<N> {
     /// If `require_pubsub` is true, providers that don't support pubsub will be skipped.
     ///
     /// # Errors
-    /// <a name="retry-errors"></a>
     ///
-    /// * Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
-    ///   and all fallback providers failed" if the overall timeout elapses and no fallback
-    ///   providers succeed.
-    /// * Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
-    ///   is true and all providers don't support pubsub.
-    /// * Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
+    /// * [`CoreError::RpcError`] - if no fallback providers succeeded; contains the last error
+    ///   returned by the last provider attempted on the last retry.
+    /// * [`CoreError::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
