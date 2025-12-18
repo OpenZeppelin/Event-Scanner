@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use crate::{
     Message, Notification, ScannerError, ScannerMessage,
-    block_range_scanner::{BlockScannerResult, MAX_BUFFERED_MESSAGES},
+    block_range_scanner::BlockScannerResult,
     event_scanner::{filter::EventFilter, listener::EventListener},
     robust_provider::{RobustProvider, provider::Error as RobustProviderError},
     types::TryStream,
@@ -56,8 +56,9 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     listeners: &[EventListener],
     mode: ConsumerMode,
     max_concurrent_fetches: usize,
+    buffer_capacity: usize,
 ) {
-    let (range_tx, _) = broadcast::channel::<BlockScannerResult>(MAX_BUFFERED_MESSAGES);
+    let (range_tx, _) = broadcast::channel::<BlockScannerResult>(buffer_capacity);
 
     let consumers = match mode {
         ConsumerMode::Stream => spawn_log_consumers_in_stream_mode(
