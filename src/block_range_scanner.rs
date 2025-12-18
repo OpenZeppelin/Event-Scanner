@@ -174,6 +174,9 @@ impl BlockRangeScanner {
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+        if self.buffer_capacity == 0 {
+            return Err(ScannerError::InvalidBufferCapacity);
+        }
         let provider = provider.into_robust_provider().await?;
         Ok(ConnectedBlockRangeScanner {
             provider,
@@ -771,7 +774,12 @@ impl BlockRangeScannerClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::eips::{BlockId, BlockNumberOrTag};
+    use alloy::{
+        eips::{BlockId, BlockNumberOrTag},
+        network::Ethereum,
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
     use tokio::sync::mpsc;
 
     #[test]
@@ -800,5 +808,13 @@ mod tests {
             rx.recv().await,
             Some(Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))))
         ));
+    }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_buffer_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = BlockRangeScanner::new().buffer_capacity(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidBufferCapacity)));
     }
 }

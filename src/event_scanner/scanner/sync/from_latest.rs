@@ -258,4 +258,13 @@ mod tests {
             _ => panic!("Expected InvalidMaxBlockRange error"),
         }
     }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_buffer_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result =
+            EventScannerBuilder::sync().from_latest(10).buffer_capacity(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidBufferCapacity)));
+    }
 }

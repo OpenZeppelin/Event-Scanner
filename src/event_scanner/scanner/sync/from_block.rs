@@ -208,6 +208,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn returns_error_with_zero_buffer_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result =
+            EventScannerBuilder::sync().from_block(100).buffer_capacity(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidBufferCapacity)));
+    }
+
+    #[tokio::test]
     async fn test_sync_from_block_scanner_with_valid_from_hash() {
         let anvil = Anvil::new().try_spawn().unwrap();
         let provider = ProviderBuilder::new().connect_http(anvil.endpoint_url());

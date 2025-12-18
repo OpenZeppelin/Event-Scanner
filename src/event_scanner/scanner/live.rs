@@ -183,4 +183,12 @@ mod tests {
 
         assert!(matches!(result, Err(ScannerError::InvalidMaxConcurrentFetches)));
     }
+
+    #[tokio::test]
+    async fn returns_error_with_zero_buffer_capacity() {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let result = EventScannerBuilder::live().buffer_capacity(0).connect(provider).await;
+
+        assert!(matches!(result, Err(ScannerError::InvalidBufferCapacity)));
+    }
 }
