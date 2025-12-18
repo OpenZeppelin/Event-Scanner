@@ -1,14 +1,18 @@
-pub mod builder;
-pub mod common;
+mod builder;
+pub(crate) mod common;
 mod range_iterator;
 mod reorg_handler;
-pub mod ring_buffer;
+mod ring_buffer;
 mod scanner;
 mod sync_handler;
 
+pub use builder::BlockRangeScanner;
 pub use common::BlockScannerResult;
-pub(crate) use common::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE};
-pub(crate) use range_iterator::RangeIterator;
-pub(crate) use scanner::ConnectedBlockRangeScanner;
-
 pub use ring_buffer::RingBufferCapacity;
+pub use scanner::ConnectedBlockRangeScanner;
+
+pub use common::{
+    DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+};
+
+pub(crate) use range_iterator::RangeIterator;

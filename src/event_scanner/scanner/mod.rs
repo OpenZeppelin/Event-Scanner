@@ -41,8 +41,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     EventFilter, ScannerError,
     block_range_scanner::{
-        ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, RingBufferCapacity,
-        builder::BlockRangeScanner,
+        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
+        RingBufferCapacity,
     },
     event_scanner::{EventScannerResult, listener::EventListener},
     robust_provider::IntoRobustProvider,
@@ -605,7 +605,7 @@ mod tests {
         rpc::client::RpcClient,
     };
 
-    use crate::DEFAULT_STREAM_BUFFER_CAPACITY;
+    use crate::block_range_scanner::DEFAULT_STREAM_BUFFER_CAPACITY;
 
     use super::*;
 

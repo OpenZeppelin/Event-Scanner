@@ -1,9 +1,11 @@
-use crate::block_range_scanner::RingBufferCapacity;
 use alloy::network::Network;
 
 use crate::{
-    DEFAULT_STREAM_BUFFER_CAPACITY, ScannerError,
-    block_range_scanner::{ConnectedBlockRangeScanner, DEFAULT_MAX_BLOCK_RANGE},
+    ScannerError,
+    block_range_scanner::{
+        ConnectedBlockRangeScanner, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+        RingBufferCapacity,
+    },
     robust_provider::IntoRobustProvider,
 };
 

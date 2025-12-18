@@ -31,8 +31,7 @@
 //!
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
-//!     BlockRangeScanner, ScannerError, ScannerMessage,
-//!     block_range_scanner::common::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
+//!     BlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, ScannerError, ScannerMessage,
 //!     robust_provider::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
@@ -441,9 +440,8 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        DEFAULT_STREAM_BUFFER_CAPACITY,
-        block_range_scanner::{DEFAULT_MAX_BLOCK_RANGE, builder::BlockRangeScanner},
+    use crate::block_range_scanner::{
+        BlockRangeScanner, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
     };
 
     use super::*;
