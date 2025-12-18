@@ -46,7 +46,6 @@ impl<N: Network, P: IntoRootProvider<N>> Debug for RobustProviderBuilder<N, P> {
             .field("max_retries", &self.max_retries)
             .field("min_delay", &self.min_delay)
             .field("reconnect_interval", &self.reconnect_interval)
-            .field("subscription_buffer_capacity", &self.subscription_buffer_capacity)
             .finish()
     }
 }
