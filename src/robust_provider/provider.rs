@@ -337,7 +337,7 @@ impl<N: Network> RobustProvider<N> {
                 continue;
             }
 
-            trace!(
+            tracing::trace!(
                 fallback_provider_index = fallback_idx + 1,
                 total_num_fallbacks = num_fallbacks,
                 "Attempting fallback provider"
@@ -353,13 +353,14 @@ impl<N: Network> RobustProvider<N> {
                     return Ok((value, fallback_idx));
                 }
                 Err(e) => {
-                    warn!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
+                    tracing::warn!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
                     last_error = e;
                 }
             }
         }
 
-        error!("All providers exhausted");
+        tracing::error!("All providers exhausted");
+
         Err(last_error)
     }
 
