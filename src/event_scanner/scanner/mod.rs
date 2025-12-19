@@ -596,10 +596,6 @@ impl<Mode, N: Network> EventScanner<Mode, N> {
         self.listeners.push(EventListener { filter, sender });
         EventSubscription::new(ReceiverStream::new(receiver))
     }
-
-    pub fn buffer_capacity(&self) -> usize {
-        self.block_range_scanner.buffer_capacity()
-    }
 }
 
 #[cfg(test)]
