@@ -1,5 +1,5 @@
 mod builder;
-pub(crate) mod common;
+mod common;
 mod range_iterator;
 mod reorg_handler;
 mod ring_buffer;
