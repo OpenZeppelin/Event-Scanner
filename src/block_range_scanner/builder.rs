@@ -3,15 +3,15 @@ use alloy::network::Network;
 use crate::{
     ScannerError,
     block_range_scanner::{
-        ConnectedBlockRangeScanner, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
-        RingBufferCapacity,
+        DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY, RingBufferCapacity,
+        scanner::BlockRangeScanner,
     },
     robust_provider::IntoRobustProvider,
 };
 
 /// Builder/configuration for the block-range streaming service.
 #[derive(Clone, Debug)]
-pub struct BlockRangeScanner {
+pub struct BlockRangeScannerBuilder {
     /// Maximum number of blocks per streamed range.
     pub max_block_range: u64,
     /// How many past block hashes to keep in memory for reorg detection.
@@ -21,13 +21,13 @@ pub struct BlockRangeScanner {
     pub buffer_capacity: usize,
 }
 
-impl Default for BlockRangeScanner {
+impl Default for BlockRangeScannerBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl BlockRangeScanner {
+impl BlockRangeScannerBuilder {
     /// Creates a scanner with default configuration.
     #[must_use]
     pub fn new() -> Self {
@@ -84,7 +84,7 @@ impl BlockRangeScanner {
     pub async fn connect<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
-    ) -> Result<ConnectedBlockRangeScanner<N>, ScannerError> {
+    ) -> Result<BlockRangeScanner<N>, ScannerError> {
         if self.max_block_range == 0 {
             return Err(ScannerError::InvalidMaxBlockRange);
         }
@@ -92,7 +92,7 @@ impl BlockRangeScanner {
             return Err(ScannerError::InvalidBufferCapacity);
         }
         let provider = provider.into_robust_provider().await?;
-        Ok(ConnectedBlockRangeScanner {
+        Ok(BlockRangeScanner {
             provider,
             max_block_range: self.max_block_range,
             past_blocks_storage_capacity: self.past_blocks_storage_capacity,
