@@ -31,7 +31,7 @@
 //!
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
-//!     BlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, ScannerError, ScannerMessage,
+//!     BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS, ScannerError, ScannerMessage,
 //!     robust_provider::RobustProviderBuilder,
 //! };
 //! use tokio::time::Duration;
@@ -45,7 +45,7 @@
 //!     // Configuration
 //!     let provider = ProviderBuilder::new().connect("ws://localhost:8546").await?;
 //!     let robust_provider = RobustProviderBuilder::new(provider).build().await?;
-//!     let block_range_scanner = BlockRangeScanner::new().connect(robust_provider).await?;
+//!     let block_range_scanner = BlockRangeScannerBuilder::new().connect(robust_provider).await?;
 //!
 //!     let mut stream = block_range_scanner
 //!         .stream_from(BlockNumberOrTag::Number(5), DEFAULT_BLOCK_CONFIRMATIONS)
