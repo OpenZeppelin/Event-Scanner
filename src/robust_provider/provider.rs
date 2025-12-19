@@ -12,6 +12,7 @@ use backon::{ExponentialBuilder, Retryable};
 use futures::TryFutureExt;
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
+#[cfg(feature = "tracing")]
 use tracing::instrument;
 
 use crate::robust_provider::RobustSubscription;
@@ -322,7 +323,7 @@ impl<N: Network> RobustProvider<N> {
             .await
     }
 
-    #[instrument(level = "trace", skip(self, operation, last_error))]
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip(self, operation, last_error)))]
     pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
         &self,
         operation: F,
@@ -338,7 +339,7 @@ impl<N: Network> RobustProvider<N> {
             .map(|(value, _idx)| value)
     }
 
-    #[instrument(level = "trace", skip(self, operation, last_error))]
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip(self, operation, last_error)))]
     pub(crate) async fn try_fallback_providers_from<T: Debug, F, Fut>(
         &self,
         operation: F,
@@ -362,7 +363,7 @@ impl<N: Network> RobustProvider<N> {
                 continue;
             }
 
-            tracing::trace!(
+            trace!(
                 fallback_provider_index = fallback_idx + 1,
                 total_num_fallbacks = num_fallbacks,
                 "Attempting fallback provider"
@@ -384,7 +385,7 @@ impl<N: Network> RobustProvider<N> {
             }
         }
 
-        tracing::error!("All providers exhausted");
+        tracing::error!("All providers failed");
 
         Err(last_error)
     }

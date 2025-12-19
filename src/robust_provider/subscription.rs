@@ -4,6 +4,7 @@ use std::{
     task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
+#[cfg(feature = "tracing")]
 use tracing::instrument;
 
 use alloy::{
@@ -133,7 +134,7 @@ impl<N: Network> RobustSubscription<N> {
 
     /// Try to reconnect to the primary provider if enough time has elapsed.
     /// Returns true if reconnection was successful, false if it's not time yet or if it failed.
-    #[instrument(level = "trace", skip(self))]
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip(self)))]
     async fn try_reconnect_to_primary(&mut self, force: bool) -> bool {
         // Check if we should attempt reconnection
         let should_reconnect = force ||
@@ -147,8 +148,6 @@ impl<N: Network> RobustSubscription<N> {
         if !should_reconnect {
             return false;
         }
-
-        trace!("Attempting to reconnect to primary provider");
 
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
