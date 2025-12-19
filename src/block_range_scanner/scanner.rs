@@ -101,14 +101,14 @@ use alloy::{
 
 /// A [`BlockRangeScanner`](crate::BlockRangeScanner) connected to a provider.
 #[derive(Debug)]
-pub struct ConnectedBlockRangeScanner<N: Network> {
+pub struct BlockRangeScanner<N: Network> {
     pub(crate) provider: RobustProvider<N>,
     pub(crate) max_block_range: u64,
     pub(crate) past_blocks_storage_capacity: RingBufferCapacity,
     pub(crate) buffer_capacity: usize,
 }
 
-impl<N: Network> ConnectedBlockRangeScanner<N> {
+impl<N: Network> BlockRangeScanner<N> {
     /// Returns the underlying [`RobustProvider`].
     #[must_use]
     pub fn provider(&self) -> &RobustProvider<N> {
@@ -464,7 +464,7 @@ impl<N: Network> ConnectedBlockRangeScanner<N> {
 #[cfg(test)]
 mod tests {
     use crate::block_range_scanner::{
-        BlockRangeScanner, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+        BlockRangeScannerBuilder, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
     };
 
     use super::*;
@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn block_range_scanner_defaults_match_constants() {
-        let scanner = BlockRangeScanner::new();
+        let scanner = BlockRangeScannerBuilder::new();
 
         assert_eq!(scanner.max_block_range, DEFAULT_MAX_BLOCK_RANGE);
         assert_eq!(scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn builder_methods_update_configuration() {
-        let scanner = BlockRangeScanner::new().max_block_range(42).buffer_capacity(33);
+        let scanner = BlockRangeScannerBuilder::new().max_block_range(42).buffer_capacity(33);
 
         assert_eq!(scanner.max_block_range, 42);
         assert_eq!(scanner.buffer_capacity, 33);
@@ -507,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn returns_error_with_zero_buffer_capacity() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let result = BlockRangeScanner::new().buffer_capacity(0).connect(provider).await;
+        let result = BlockRangeScannerBuilder::new().buffer_capacity(0).connect(provider).await;
 
         assert!(matches!(result, Err(ScannerError::InvalidBufferCapacity)));
     }
@@ -515,7 +515,7 @@ mod tests {
     #[tokio::test]
     async fn returns_error_with_zero_max_block_range() {
         let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let result = BlockRangeScanner::new().max_block_range(0).connect(provider).await;
+        let result = BlockRangeScannerBuilder::new().max_block_range(0).connect(provider).await;
 
         assert!(matches!(result, Err(ScannerError::InvalidMaxBlockRange)));
     }
