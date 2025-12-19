@@ -348,8 +348,11 @@ impl<N: Network> BlockRangeScanner<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::block_range_scanner::{
-        BlockRangeScannerBuilder, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+    use crate::{
+        block_range_scanner::{
+            BlockRangeScannerBuilder, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+        },
+        types::TryStream,
     };
 
     use super::*;
