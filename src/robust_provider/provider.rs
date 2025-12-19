@@ -9,9 +9,9 @@ use alloy::{
     transports::{RpcError, TransportErrorKind},
 };
 use backon::{ExponentialBuilder, Retryable};
+use futures::TryFutureExt;
 use thiserror::Error;
 use tokio::time::{error as TokioError, timeout};
-use tracing::{error, info};
 
 use crate::robust_provider::RobustSubscription;
 
@@ -28,7 +28,7 @@ pub enum Error {
 
 /// Low-level error related to RPC calls and failover logic.
 #[derive(Error, Debug)]
-pub(crate) enum CoreError {
+pub enum CoreError {
     #[error("Operation timed out")]
     Timeout,
     #[error("RPC call failed after exhausting all retry attempts: {0}")]
@@ -109,7 +109,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -134,7 +138,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block(&self, id: BlockId) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlock called");
         let result = self
@@ -155,7 +163,10 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn get_block_number(&self) -> Result<BlockNumber, Error> {
         info!("eth_getBlockNumber called");
         let result = self
@@ -181,7 +192,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block_number_by_id(&self, block_id: BlockId) -> Result<BlockNumber, Error> {
         info!("get_block_number_by_id called");
         let result = self
@@ -208,9 +223,12 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn get_latest_confirmed(&self, confirmations: u64) -> Result<u64, Error> {
-        info!("get_latest_confirmed called with confirmations={}", confirmations);
+        info!(configurations = confirmations, "get_latest_confirmed called");
         let latest_block = self.get_block_number().await?;
         let confirmed_block = latest_block.saturating_sub(confirmations);
         Ok(confirmed_block)
@@ -222,7 +240,11 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    /// * [`Error::BlockNotFound`] - if the block with the specified hash was not found on-chain.
     pub async fn get_block_by_hash(&self, hash: BlockHash) -> Result<N::BlockResponse, Error> {
         info!("eth_getBlockByHash called");
         let result = self
@@ -244,7 +266,10 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// See [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>, Error> {
         info!("eth_getLogs called");
         let result = self
@@ -271,7 +296,10 @@ impl<N: Network> RobustProvider<N> {
     ///
     /// # Errors
     ///
-    /// see [retry errors](#retry-errors).
+    /// * [`Error::RpcError`] - if no fallback providers succeeded; contains the last error returned
+    ///   by the last provider attempted on the last retry.
+    /// * [`Error::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
     pub async fn subscribe_blocks(&self) -> Result<RobustSubscription<N>, Error> {
         info!("eth_subscribe called");
         let subscription = self
@@ -297,7 +325,7 @@ impl<N: Network> RobustProvider<N> {
 
     /// Execute `operation` with exponential backoff and a total timeout.
     ///
-    /// Wraps the retry logic with `tokio::time::timeout(self.call_timeout, ...)` so
+    /// Wraps the retry logic with [`tokio::time::timeout`] so
     /// the entire operation (including time spent inside the RPC call) cannot exceed
     /// `call_timeout`.
     ///
@@ -307,15 +335,12 @@ impl<N: Network> RobustProvider<N> {
     /// If `require_pubsub` is true, providers that don't support pubsub will be skipped.
     ///
     /// # Errors
-    /// <a name="retry-errors"></a>
     ///
-    /// * Returns [`RpcError<TransportErrorKind>`] with message "total operation timeout exceeded
-    ///   and all fallback providers failed" if the overall timeout elapses and no fallback
-    ///   providers succeed.
-    /// * Returns [`RpcError::Transport(TransportErrorKind::PubsubUnavailable)`] if `require_pubsub`
-    ///   is true and all providers don't support pubsub.
-    /// * Propagates any [`RpcError<TransportErrorKind>`] from the underlying retries.
-    pub(crate) async fn try_operation_with_failover<T: Debug, F, Fut>(
+    /// * [`CoreError::RpcError`] - if no fallback providers succeeded; contains the last error
+    ///   returned by the last provider attempted on the last retry.
+    /// * [`CoreError::Timeout`] - if the overall operation timeout elapses (i.e. exceeds
+    ///   `call_timeout`).
+    pub async fn try_operation_with_failover<T: Debug, F, Fut>(
         &self,
         operation: F,
         require_pubsub: bool,
@@ -325,15 +350,11 @@ impl<N: Network> RobustProvider<N> {
         Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
     {
         let primary = self.primary();
-        let result = self.try_provider_with_timeout(primary, &operation).await;
-
-        if result.is_ok() {
-            return result;
-        }
-
-        let last_error = result.unwrap_err();
-
-        self.try_fallback_providers(&operation, require_pubsub, last_error).await
+        self.try_provider_with_timeout(primary, &operation)
+            .or_else(|last_error| {
+                self.try_fallback_providers(&operation, require_pubsub, last_error)
+            })
+            .await
     }
 
     pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
@@ -370,10 +391,13 @@ impl<N: Network> RobustProvider<N> {
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                info!("Fallback provider {} doesn't support pubsub, skipping", fallback_idx + 1);
+                info!(
+                    fallback_index = fallback_idx + 1,
+                    "Fallback provider doesn't support pubsub, skipping"
+                );
                 continue;
             }
-            info!("Attempting fallback provider {}/{}", fallback_idx + 1, num_fallbacks);
+            info!(fallback_index = fallback_idx + 1, "Attempting fallback provider");
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
@@ -410,7 +434,7 @@ impl<N: Network> RobustProvider<N> {
             (|| operation(provider.clone()))
                 .retry(retry_strategy)
                 .notify(|err: &RpcError<TransportErrorKind>, dur: Duration| {
-                    info!(error = %err, "RPC error retrying after {:?}", dur);
+                    info!(error = %err, duration_ms = dur.as_millis(), "RPC error retrying");
                 })
                 .sleep(tokio::time::sleep),
         )

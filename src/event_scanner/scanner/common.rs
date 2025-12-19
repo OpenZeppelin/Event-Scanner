@@ -20,7 +20,6 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{debug, error, info, trace, warn};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ConsumerMode {
@@ -86,7 +85,9 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     // Close the channel sender to signal to the log consumers that streaming is done.
     drop(range_tx);
 
-    // ensure all consumers finish before they're dropped
+    // ensure all consumers finish before they're dropped - this is to ensure that this consumer set
+    // finishes its log processing before the next consumer set can be spawned in a subsequent
+    // `handle_stream` invocation.
     consumers.join_all().await;
 }
 
@@ -123,8 +124,8 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                                 .map_err(ScannerError::from)
                         }
                         Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
-                        // No need to stop the stream on an error, because that decision is up to
-                        // the caller.
+                        // No need to stop the stream on an error, because there will be no more
+                        // values received from the range stream.
                         Err(e) => Err(e),
                     })
                     .buffered(max_concurrent_fetches);
@@ -155,7 +156,9 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
-                        debug!("Channel lagged, skipped {skipped} messages");
+                        tx.send(Err(ScannerError::Lagged(skipped)))
+                            .await
+                            .expect("receiver dropped only if we exit this loop");
                     }
                 }
             }
@@ -178,10 +181,8 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
     max_concurrent_fetches: usize,
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
-        let EventListener { filter, sender } = listener;
-
         let provider = provider.clone();
-        let base_filter = Filter::from(&filter);
+        let base_filter = Filter::from(&listener.filter);
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
@@ -197,14 +198,14 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 let mut stream = ReceiverStream::new(rx)
                     .map(async |message| match message {
                         Ok(ScannerMessage::Data(range)) => {
-                            get_logs(range, &filter, &base_filter, &provider)
+                            get_logs(range, &listener.filter, &base_filter, &provider)
                                 .await
                                 .map(Message::from)
                                 .map_err(ScannerError::from)
                         }
                         Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
-                        // No need to stop the stream on an error, because that decision is up to
-                        // the caller.
+                        // No need to stop the stream on an error, because there will be no more
+                        // values received from the range stream.
                         Err(e) => Err(e),
                     })
                     .buffered(max_concurrent_fetches);
@@ -260,12 +261,12 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         }
                         Ok(ScannerMessage::Notification(notification)) => {
                             debug!(notification = ?notification, "Received notification");
-                            if !sender.try_stream(notification).await {
+                            if !listener.sender.try_stream(notification).await {
                                 return;
                             }
                         }
                         Err(e) => {
-                            if !sender.try_stream(e).await {
+                            if !listener.sender.try_stream(e).await {
                                 return;
                             }
                         }
@@ -274,7 +275,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
 
                 if collected.is_empty() {
                     debug!("No logs found");
-                    _ = sender.try_stream(Notification::NoPastLogsFound).await;
+                    _ = listener.sender.try_stream(Notification::NoPastLogsFound).await;
                     return;
                 }
 
@@ -282,7 +283,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 collected.reverse(); // restore chronological order
 
                 trace!("Sending collected logs to consumer");
-                _ = sender.try_stream(collected).await;
+                _ = listener.sender.try_stream(collected).await;
             });
 
             // Receive block ranges from the broadcast channel and send them to the range processor
@@ -301,7 +302,9 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
-                        debug!("Channel lagged, skipped {skipped} messages");
+                        tx.send(Err(ScannerError::Lagged(skipped)))
+                            .await
+                            .expect("receiver dropped only if we exit this loop");
                     }
                 }
             }
@@ -407,6 +410,14 @@ async fn get_logs<N: Network>(
 
 #[cfg(test)]
 mod tests {
+    use alloy::{
+        network::Ethereum,
+        providers::{RootProvider, mock::Asserter},
+        rpc::client::RpcClient,
+    };
+
+    use crate::robust_provider::RobustProviderBuilder;
+
     use super::*;
 
     #[test]
@@ -505,5 +516,59 @@ mod tests {
         assert!(done);
 
         assert_eq!(collected, vec![95, 90, 85]);
+    }
+
+    #[tokio::test]
+    async fn spawn_log_consumers_in_stream_mode_streams_lagged_error() -> anyhow::Result<()> {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let provider = RobustProviderBuilder::fragile(provider).build().await?;
+
+        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(1);
+        let (sender, mut receiver) = mpsc::channel(1);
+        let listeners = &[EventListener { filter: EventFilter::new(), sender }];
+        let max_concurrent_fetches = 1;
+
+        let _set = spawn_log_consumers_in_stream_mode(
+            &provider,
+            listeners,
+            &range_tx,
+            max_concurrent_fetches,
+        );
+
+        range_tx.send(Ok(ScannerMessage::Data(0..=1)))?;
+        // the next range "overfills" the channel, causing a lag
+        range_tx.send(Ok(ScannerMessage::Data(2..=3)))?;
+
+        assert!(matches!(receiver.recv().await.unwrap(), Err(ScannerError::Lagged(1))));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spawn_log_consumers_in_collection_mode_streams_lagged_error() -> anyhow::Result<()> {
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
+        let provider = RobustProviderBuilder::fragile(provider).build().await?;
+
+        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(1);
+        let (sender, mut receiver) = mpsc::channel(1);
+        let listeners = &[EventListener { filter: EventFilter::new(), sender }];
+        let count = 5;
+        let max_concurrent_fetches = 1;
+
+        let _set = spawn_log_consumers_in_collection_mode(
+            &provider,
+            listeners,
+            &range_tx,
+            count,
+            max_concurrent_fetches,
+        );
+
+        range_tx.send(Ok(ScannerMessage::Data(2..=3)))?;
+        // the next range "overfills" the channel, causing a lag
+        range_tx.send(Ok(ScannerMessage::Data(0..=1)))?;
+
+        assert!(matches!(receiver.recv().await.unwrap(), Err(ScannerError::Lagged(1))));
+
+        Ok(())
     }
 }

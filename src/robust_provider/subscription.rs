@@ -15,7 +15,6 @@ use thiserror::Error;
 use tokio::{sync::broadcast::error::RecvError, time::timeout};
 use tokio_stream::Stream;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::{error, info, warn};
 
 use crate::robust_provider::{RobustProvider, provider::CoreError};
 
