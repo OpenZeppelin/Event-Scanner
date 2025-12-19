@@ -130,13 +130,14 @@ impl<N: Network> EventScanner<Historic, N> {
     ///
     /// # Errors
     ///
-    /// * [`ScannerError::ServiceShutdown`] - if the internal block-range service cannot be started.
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` or `to_block` cannot be resolved.
-    pub async fn start(self) -> Result<(), ScannerError> {
-        let client = self.block_range_scanner.run()?;
-        let stream = client.stream_historical(self.config.from_block, self.config.to_block).await?;
+    pub async fn start(mut self) -> Result<(), ScannerError> {
+        let stream = self
+            .block_range_scanner
+            .stream_historical(self.config.from_block, self.config.to_block)
+            .await?;
 
         let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let provider = self.block_range_scanner.provider().clone();
