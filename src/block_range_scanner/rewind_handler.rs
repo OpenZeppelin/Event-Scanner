@@ -100,8 +100,8 @@ impl<N: Network> RewindHandler<N> {
                     }
                 };
 
-                if let Some(common_ancestor) = reorg
-                    && !Self::handle_reorg_rescan(
+                if let Some(common_ancestor) = reorg &&
+                    !Self::handle_reorg_rescan(
                         &mut tip,
                         common_ancestor,
                         max_block_range,
