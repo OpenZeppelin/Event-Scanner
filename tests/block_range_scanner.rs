@@ -16,7 +16,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 
     // --- Zero block confirmations -> stream immediately ---
 
-    let client = BlockRangeScanner::new().connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().connect(provider.clone()).await?;
 
     let mut stream = client.stream_live(0).await?;
 
@@ -51,7 +51,7 @@ async fn live_mode_processes_all_blocks_respecting_block_confirmations() -> anyh
 async fn live_with_block_confirmations_always_emits_genesis_block() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
-    let client = BlockRangeScanner::new().connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().connect(provider.clone()).await?;
 
     let mut stream = client.stream_live(3).await?;
 
@@ -78,7 +78,7 @@ async fn stream_from_starts_at_latest_once_it_has_enough_confirmations() -> anyh
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-    let client = BlockRangeScanner::new().connect(provider.clone()).await?.run()?;
+    let client = BlockRangeScanner::new().connect(provider.clone()).await?;
 
     provider.anvil_mine(Some(20), None).await?;
 
@@ -106,7 +106,7 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-    let client = BlockRangeScanner::new().connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().connect(provider.clone()).await?;
 
     let mut stream = client.stream_live(5).await?;
 
@@ -138,7 +138,7 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
-    let client = BlockRangeScanner::new().connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().connect(provider.clone()).await?;
 
     let mut stream = client.stream_live(3).await?;
 
@@ -182,8 +182,7 @@ async fn historical_emits_correction_range_when_reorg_below_end() -> anyhow::Res
 
     let end_num = 110;
 
-    let client =
-        BlockRangeScanner::new().max_block_range(30).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(30).connect(provider.clone()).await?;
 
     let mut stream = client
         .stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Number(end_num))
@@ -214,8 +213,7 @@ async fn historical_emits_correction_range_when_end_num_reorgs() -> anyhow::Resu
 
     provider.anvil_mine(Some(120), None).await?;
 
-    let client =
-        BlockRangeScanner::new().max_block_range(30).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(30).connect(provider.clone()).await?;
 
     let mut stream =
         client.stream_historical(BlockNumberOrTag::Number(0), BlockNumberOrTag::Latest).await?;
@@ -247,8 +245,7 @@ async fn historical_reorg_occurring_immediately_after_finalized_processing_is_ig
 
     provider.anvil_mine(Some(11), None).await?;
 
-    let client =
-        BlockRangeScanner::new().max_block_range(10).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(10).connect(provider.clone()).await?;
 
     let mut stream =
         client.stream_historical(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
@@ -272,8 +269,7 @@ async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
 
     provider.anvil_mine(Some(100), None).await?;
 
-    let client =
-        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?;
 
     // ranges where each batch is of max blocks per epoch size
     let mut stream = client.stream_historical(0, 19).await?;
@@ -300,7 +296,7 @@ async fn historic_mode_respects_blocks_read_per_epoch() -> anyhow::Result<()> {
     assert_closed!(stream);
 
     // range where blocks per epoch is larger than the number of blocks on chain
-    let client = BlockRangeScanner::new().max_block_range(200).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(200).connect(provider).await?;
 
     let mut stream = client.stream_historical(0, 20).await?;
     assert_next!(stream, 0..=20);
@@ -321,7 +317,7 @@ async fn historic_mode_normalises_start_and_end_block() -> anyhow::Result<()> {
 
     provider.anvil_mine(Some(11), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?;
 
     let mut stream = client.stream_historical(10, 0).await?;
     assert_next!(stream, 0..=0);
@@ -345,9 +341,9 @@ async fn rewind_single_batch_when_epoch_larger_than_range() -> anyhow::Result<()
 
     provider.anvil_mine(Some(150), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(100).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(100).connect(provider).await?;
 
-    let mut stream = client.rewind(100, 150).await?;
+    let mut stream = client.stream_rewind(100, 150).await?;
 
     // Range length is 51, epoch is 100 -> single batch [100..=150]
     assert_next!(stream, 100..=150);
@@ -363,9 +359,9 @@ async fn rewind_exact_multiple_of_epoch_creates_full_batches_in_reverse() -> any
 
     provider.anvil_mine(Some(15), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?;
 
-    let mut stream = client.rewind(0, 14).await?;
+    let mut stream = client.stream_rewind(0, 14).await?;
 
     // 0..=14 with epoch 5 -> [10..=14, 5..=9, 0..=4]
     assert_next!(stream, 10..=14);
@@ -383,9 +379,9 @@ async fn rewind_with_remainder_trims_first_batch_to_stream_start() -> anyhow::Re
 
     provider.anvil_mine(Some(15), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(4).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(4).connect(provider).await?;
 
-    let mut stream = client.rewind(3, 12).await?;
+    let mut stream = client.stream_rewind(3, 12).await?;
 
     // 3..=12 with epoch 4 -> ends: 12,8,4 -> batches: [9..=12, 5..=8, 3..=4]
     assert_next!(stream, 9..=12);
@@ -403,9 +399,9 @@ async fn rewind_single_block_range() -> anyhow::Result<()> {
 
     provider.anvil_mine(Some(15), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?;
 
-    let mut stream = client.rewind(7, 7).await?;
+    let mut stream = client.stream_rewind(7, 7).await?;
 
     assert_next!(stream, 7..=7);
     assert_closed!(stream);
@@ -420,9 +416,9 @@ async fn rewind_epoch_of_one_sends_each_block_in_reverse_order() -> anyhow::Resu
 
     provider.anvil_mine(Some(15), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(1).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(1).connect(provider).await?;
 
-    let mut stream = client.rewind(5, 8).await?;
+    let mut stream = client.stream_rewind(5, 8).await?;
 
     // 5..=8 with epoch 1 -> [8..=8, 7..=7, 6..=6, 5..=5]
     assert_next!(stream, 8..=8);
@@ -442,9 +438,10 @@ async fn command_rewind_defaults_latest_to_earliest_batches_correctly() -> anyho
     // Mine 20 blocks, so the total number of blocks is 21 (including 0th block)
     provider.anvil_mine(Some(20), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(7).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(7).connect(provider).await?;
 
-    let mut stream = client.rewind(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
+    let mut stream =
+        client.stream_rewind(BlockNumberOrTag::Earliest, BlockNumberOrTag::Latest).await?;
 
     assert_next!(stream, 14..=20);
     assert_next!(stream, 7..=13);
@@ -462,16 +459,16 @@ async fn command_rewind_handles_start_and_end_in_any_order() -> anyhow::Result<(
     // Ensure blocks at 3 and 15 exist
     provider.anvil_mine(Some(16), None).await?;
 
-    let client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?;
 
-    let mut stream = client.rewind(15, 3).await?;
+    let mut stream = client.stream_rewind(15, 3).await?;
 
     assert_next!(stream, 11..=15);
     assert_next!(stream, 6..=10);
     assert_next!(stream, 3..=5);
     assert_closed!(stream);
 
-    let mut stream = client.rewind(3, 15).await?;
+    let mut stream = client.stream_rewind(3, 15).await?;
 
     assert_next!(stream, 11..=15);
     assert_next!(stream, 6..=10);
@@ -487,9 +484,9 @@ async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()>
 
     // Do not mine up to 999 so start won't exist
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
-    let client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider).await?;
 
-    let stream = client.rewind(0, 999).await;
+    let stream = client.stream_rewind(0, 999).await;
 
     assert!(matches!(
         stream,
@@ -500,17 +497,16 @@ async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()>
 }
 
 #[tokio::test]
-#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+#[ignore = "stream_rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn rewind_reorg_emits_notification_and_rescans_affected_range() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
     provider.anvil_mine(Some(20), None).await?;
 
-    let client =
-        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?;
 
-    let mut stream = client.rewind(5, 20).await?;
+    let mut stream = client.stream_rewind(5, 20).await?;
 
     assert_next!(stream, 16..=20);
     assert_next!(stream, 11..=15);
@@ -530,17 +526,16 @@ async fn rewind_reorg_emits_notification_and_rescans_affected_range() -> anyhow:
 }
 
 #[tokio::test]
-#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+#[ignore = "stream_rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn deep_rewind_reorg_streams_affected_range_in_chronologi() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.ws_endpoint_url().as_str()).await?;
 
     provider.anvil_mine(Some(20), None).await?;
 
-    let client =
-        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?;
 
-    let mut stream = client.rewind(5, 20).await?;
+    let mut stream = client.stream_rewind(5, 20).await?;
 
     assert_next!(stream, 16..=20);
 
@@ -561,7 +556,7 @@ async fn deep_rewind_reorg_streams_affected_range_in_chronologi() -> anyhow::Res
 }
 
 #[tokio::test]
-#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+#[ignore = "stream_rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn rewind_skips_reorg_check_when_tip_below_finalized() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
@@ -570,11 +565,10 @@ async fn rewind_skips_reorg_check_when_tip_below_finalized() -> anyhow::Result<(
 
     let finalized = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?.unwrap();
 
-    let client =
-        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?;
 
     // Rewind with tip < finalized
-    let mut stream = client.rewind(0, finalized.header.number - 1).await?;
+    let mut stream = client.stream_rewind(0, finalized.header.number - 1).await?;
 
     assert_next!(stream, 31..=35);
     assert_next!(stream, 26..=30);
@@ -595,7 +589,7 @@ async fn rewind_skips_reorg_check_when_tip_below_finalized() -> anyhow::Result<(
 }
 
 #[tokio::test]
-#[ignore = "rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
+#[ignore = "stream_rewind reorg tests require ack-channels to reliably halt processing: https://github.com/OpenZeppelin/Event-Scanner/issues/218"]
 async fn rewind_skips_reorg_when_tip_is_at_finalized() -> anyhow::Result<()> {
     let anvil = Anvil::new().try_spawn()?;
     let provider = ProviderBuilder::new().connect(anvil.endpoint().as_str()).await?;
@@ -603,11 +597,10 @@ async fn rewind_skips_reorg_when_tip_is_at_finalized() -> anyhow::Result<()> {
     provider.anvil_mine(Some(100), None).await?;
 
     let finalized = provider.get_block_by_number(BlockNumberOrTag::Finalized).await?.unwrap();
-    let client =
-        BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?.run()?;
+    let mut client = BlockRangeScanner::new().max_block_range(5).connect(provider.clone()).await?;
 
     // Rewind with tip == finalized
-    let mut stream = client.rewind(0, finalized.header.number).await?;
+    let mut stream = client.stream_rewind(0, finalized.header.number).await?;
 
     assert_next!(stream, 32..=36);
     assert_next!(stream, 27..=31);
