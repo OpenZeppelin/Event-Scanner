@@ -20,10 +20,6 @@ pub enum ScannerError {
     #[error("RPC error: {0}")]
     RpcError(Arc<RpcError<TransportErrorKind>>),
 
-    /// The internal service has shut down and can no longer process commands.
-    #[error("Service is shutting down")]
-    ServiceShutdown,
-
     /// A requested block (by number, hash or tag) could not be retrieved.
     #[error("Block not found, Block Id: {0}")]
     BlockNotFound(BlockId),

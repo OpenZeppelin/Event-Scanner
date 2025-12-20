@@ -71,11 +71,10 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
     ///
     /// # Errors
     ///
-    /// * [`ScannerError::ServiceShutdown`] - if the internal block-range service cannot be started.
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     #[allow(clippy::missing_panics_doc)]
-    pub async fn start(self) -> Result<(), ScannerError> {
+    pub async fn start(mut self) -> Result<(), ScannerError> {
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
@@ -84,8 +83,6 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
 
         info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
 
-        let client = self.block_range_scanner.run()?;
-
         // Fetch the latest block number.
         // This is used to determine the starting point for the rewind stream and the live
         // stream. We do this before starting the streams to avoid a race condition
@@ -93,7 +90,10 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let latest_block = provider.get_block_number().await?;
 
         // Setup rewind and live streams to run in parallel.
-        let rewind_stream = client.rewind(latest_block, BlockNumberOrTag::Earliest).await?;
+        let rewind_stream = self
+            .block_range_scanner
+            .stream_rewind(latest_block, BlockNumberOrTag::Earliest)
+            .await?;
 
         // Start streaming...
         tokio::spawn(async move {
@@ -114,17 +114,20 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             // We actually rely on the sync mode for the live stream, as more blocks could have been
             // minted while the scanner was collecting the latest `count` events.
             // Note: Sync mode will notify the client when it switches to live streaming.
-            let sync_stream =
-                match client.stream_from(latest_block + 1, self.config.block_confirmations).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!(error = %e, "Error during sync mode setup");
-                        for listener in listeners {
-                            _ = listener.sender.try_stream(e.clone()).await;
-                        }
-                        return;
+            let sync_stream = match self
+                .block_range_scanner
+                .stream_from(latest_block + 1, self.config.block_confirmations)
+                .await
+            {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!(error = %e, "Error during sync mode setup");
+                    for listener in listeners {
+                        _ = listener.sender.try_stream(e.clone()).await;
                     }
-                };
+                    return;
+                }
+            };
 
             // Start the live (sync) stream.
             handle_stream(
