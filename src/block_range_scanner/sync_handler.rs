@@ -4,7 +4,9 @@ use tokio::sync::mpsc;
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{
-        BlockScannerResult, common, reorg_handler::ReorgHandler, ring_buffer::RingBufferCapacity,
+        common::{self, BlockScannerResult},
+        reorg_handler::ReorgHandler,
+        ring_buffer::RingBufferCapacity,
     },
     robust_provider::RobustProvider,
     types::TryStream,
