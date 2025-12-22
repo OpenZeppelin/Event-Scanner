@@ -316,28 +316,10 @@ impl<N: Network> RobustProvider<N> {
         let primary = self.primary();
         self.try_provider_with_timeout(primary, &operation)
             .or_else(|last_error| {
-                self.try_fallback_providers(&operation, require_pubsub, last_error)
+                self.try_fallback_providers_from(&operation, require_pubsub, last_error, 0)
+                    .map_ok(|(value, _)| value)
             })
             .await
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", skip(self, operation, last_error))
-    )]
-    pub(crate) async fn try_fallback_providers<T: Debug, F, Fut>(
-        &self,
-        operation: F,
-        require_pubsub: bool,
-        last_error: CoreError,
-    ) -> Result<T, CoreError>
-    where
-        F: Fn(RootProvider<N>) -> Fut,
-        Fut: Future<Output = Result<T, RpcError<TransportErrorKind>>>,
-    {
-        self.try_fallback_providers_from(operation, require_pubsub, last_error, 0)
-            .await
-            .map(|(value, _idx)| value)
     }
 
     #[cfg_attr(
