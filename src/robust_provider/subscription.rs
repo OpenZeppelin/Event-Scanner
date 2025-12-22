@@ -166,6 +166,7 @@ impl<N: Network> RobustSubscription<N> {
         }
     }
 
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     async fn switch_to_fallback(&mut self, last_error: CoreError) -> Result<(), Error> {
         // If we're on a fallback, try primary first before moving to next fallback
         if self.is_on_fallback() && self.try_reconnect_to_primary(true).await {
