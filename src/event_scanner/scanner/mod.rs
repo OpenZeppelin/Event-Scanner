@@ -39,11 +39,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    EventFilter, ScannerError,
-    block_range_scanner::{
-        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
-        RingBufferCapacity,
-    },
+    BlockRangeScannerBuilder, EventFilter, ScannerError,
+    block_range_scanner::{BlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, RingBufferCapacity},
     event_scanner::{EventScannerResult, listener::EventListener},
     robust_provider::IntoRobustProvider,
 };
@@ -164,7 +161,7 @@ impl Default for Live {
 #[derive(Debug)]
 pub struct EventScanner<Mode = Unspecified, N: Network = Ethereum> {
     config: Mode,
-    block_range_scanner: ConnectedBlockRangeScanner<N>,
+    block_range_scanner: BlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
@@ -172,7 +169,7 @@ pub struct EventScanner<Mode = Unspecified, N: Network = Ethereum> {
 #[derive(Default, Debug)]
 pub struct EventScannerBuilder<Mode> {
     pub(crate) config: Mode,
-    pub(crate) block_range_scanner: BlockRangeScanner,
+    pub(crate) block_range_scanner: BlockRangeScannerBuilder,
 }
 
 impl EventScannerBuilder<Unspecified> {
@@ -466,7 +463,7 @@ impl EventScannerBuilder<LatestEvents> {
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
                 max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
-            block_range_scanner: BlockRangeScanner::default(),
+            block_range_scanner: BlockRangeScannerBuilder::default(),
         }
     }
 }
@@ -480,7 +477,7 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
                 max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
-            block_range_scanner: BlockRangeScanner::default(),
+            block_range_scanner: BlockRangeScannerBuilder::default(),
         }
     }
 }
@@ -494,7 +491,7 @@ impl EventScannerBuilder<SyncFromBlock> {
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
                 max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
-            block_range_scanner: BlockRangeScanner::default(),
+            block_range_scanner: BlockRangeScannerBuilder::default(),
         }
     }
 }
@@ -605,7 +602,7 @@ mod tests {
         rpc::client::RpcClient,
     };
 
-    use crate::DEFAULT_STREAM_BUFFER_CAPACITY;
+    use crate::block_range_scanner::DEFAULT_STREAM_BUFFER_CAPACITY;
 
     use super::*;
 

@@ -1,11 +1,13 @@
+use std::ops::RangeInclusive;
+
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 use crate::{
-    ScannerError,
-    block_range_scanner::{BlockScannerResult, RangeIterator, reorg_handler::ReorgHandler},
+    ScannerError, ScannerMessage,
+    block_range_scanner::{range_iterator::RangeIterator, reorg_handler::ReorgHandler},
     robust_provider::{RobustProvider, RobustSubscription, subscription},
-    types::{Notification, TryStream},
+    types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 use alloy::{
     consensus::BlockHeader,
@@ -13,6 +15,39 @@ use alloy::{
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
+
+/// Default maximum number of blocks per streamed range.
+pub const DEFAULT_MAX_BLOCK_RANGE: u64 = 1000;
+
+/// Default confirmation depth used by scanners that accept a `block_confirmations` setting.
+pub const DEFAULT_BLOCK_CONFIRMATIONS: u64 = 0;
+
+/// Default per-stream buffer size used by scanners.
+pub const DEFAULT_STREAM_BUFFER_CAPACITY: usize = 50000;
+
+/// The result type yielded by block-range streams.
+pub type BlockScannerResult = ScannerResult<RangeInclusive<BlockNumber>>;
+
+/// Convenience alias for a streamed block-range message.
+pub type Message = ScannerMessage<RangeInclusive<BlockNumber>>;
+
+impl From<RangeInclusive<BlockNumber>> for Message {
+    fn from(range: RangeInclusive<BlockNumber>) -> Self {
+        Message::Data(range)
+    }
+}
+
+impl PartialEq<RangeInclusive<BlockNumber>> for Message {
+    fn eq(&self, other: &RangeInclusive<BlockNumber>) -> bool {
+        if let Message::Data(range) = self { range.eq(other) } else { false }
+    }
+}
+
+impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumber> {
+    fn into_scanner_message_result(self) -> BlockScannerResult {
+        Ok(Message::Data(self))
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_live_blocks<N: Network>(
