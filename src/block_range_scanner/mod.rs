@@ -2,6 +2,7 @@ mod builder;
 mod common;
 mod range_iterator;
 mod reorg_handler;
+mod rewind_handler;
 mod ring_buffer;
 mod scanner;
 mod sync_handler;
