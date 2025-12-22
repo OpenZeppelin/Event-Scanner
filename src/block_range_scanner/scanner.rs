@@ -303,14 +303,14 @@ impl<N: Network> BlockRangeScanner<N> {
     /// reorgs in [`EventScannerBuilder::latest`][latest mode] mode, i.e. to prepend reorged blocks
     /// to the result collection, which must maintain chronological order.
     ///
-    /// [latest mode]: crate::EventScannerBuilder::latest
-    /// [reorg]: crate::Notification::ReorgDetected
-    ///
     /// # Errors
     ///
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `start_id` or `end_id` cannot be resolved.
+    ///
+    /// [latest mode]: crate::EventScannerBuilder::latest
+    /// [reorg]: crate::Notification::ReorgDetected
     pub async fn stream_rewind(
         &self,
         start_id: impl Into<BlockId>,
