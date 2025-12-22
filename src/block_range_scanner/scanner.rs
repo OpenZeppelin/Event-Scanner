@@ -78,7 +78,7 @@
 //! ```
 
 use std::cmp::Ordering;
-use tokio::{sync::mpsc, try_join};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
@@ -323,25 +323,16 @@ impl<N: Network> BlockRangeScanner<N> {
 
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
-        let (start_block, end_block) =
-            try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
-
-        // normalize block range: from (higher) -> to (lower)
-        let (from, to) = match start_block.header().number().cmp(&end_block.header().number()) {
-            Ordering::Greater => (start_block, end_block),
-            _ => (end_block, start_block),
-        };
-
         let rewind_handler = RewindHandler::new(
             self.provider.clone(),
             self.max_block_range,
-            from,
-            to,
+            start_id,
+            end_id,
             self.past_blocks_storage_capacity,
             blocks_sender,
         );
 
-        rewind_handler.run();
+        rewind_handler.run().await?;
 
         Ok(ReceiverStream::new(blocks_receiver))
     }
