@@ -99,7 +99,7 @@ use alloy::{
     network::{BlockResponse, Network},
 };
 
-/// A [`BlockRangeScanner`](crate::BlockRangeScanner) connected to a provider.
+/// A [`BlockRangeScanner`] connected to a provider.
 #[derive(Debug)]
 pub struct BlockRangeScanner<N: Network> {
     pub(crate) provider: RobustProvider<N>,
