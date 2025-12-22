@@ -322,10 +322,7 @@ impl<N: Network> RobustProvider<N> {
             .await
     }
 
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", skip(self, operation, last_error))
-    )]
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self, operation)))]
     pub(crate) async fn try_fallback_providers_from<T: Debug, F, Fut>(
         &self,
         operation: F,
