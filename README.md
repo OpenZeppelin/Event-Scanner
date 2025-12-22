@@ -126,7 +126,7 @@ This will connect the `EventScanner` and allow you to create event streams and s
 
 ```rust
 use alloy::providers::{Provider, ProviderBuilder};
-use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+use event_scanner::robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
@@ -135,16 +135,14 @@ let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
 let scanner = EventScannerBuilder::live()
     .max_block_range(500)  // Optional: set max blocks per read (default: 1000)
     .block_confirmations(12)  // Optional: set block confirmations (default: 12)
-    .connect(provider.clone())
-    .await?;
+    .connect(provider.clone());
 
 // Historical block range mode
 let scanner = EventScannerBuilder::historic()
     .from_block(1_000_000)
     .to_block(2_000_000)
     .max_block_range(500)
-    .connect(provider.clone())
-    .await?;
+    .connect(provider.clone());
 
 // we can also wrap the provider in a RobustProvider
 // for more advanced configurations like retries and fallbacks
@@ -155,23 +153,20 @@ let scanner = EventScannerBuilder::latest(100)
     // .from_block(1_000_000)  // Optional: set start of search range
     // .to_block(2_000_000)    // Optional: set end of search range
     .max_block_range(500)
-    .connect(robust_provider.clone())
-    .await?;
+    .connect(robust_provider.clone());
 
 // Sync from block then switch to live mode
 let scanner = EventScannerBuilder::sync()
     .from_block(100)
     .max_block_range(500)
     .block_confirmations(12)
-    .connect(robust_provider.clone())
-    .await?;
+    .connect(robust_provider.clone());
 
 // Sync the latest 60 events then switch to live mode
 let scanner = EventScannerBuilder::sync()
     .from_latest(60)
     .block_confirmations(12)
-    .connect(robust_provider)
-    .await?;
+    .connect(robust_provider);
 ```
 
 Invoking `scanner.start()` starts the scanner in the specified mode.
