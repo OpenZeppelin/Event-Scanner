@@ -59,7 +59,7 @@ event-scanner = "0.9.0-alpha"
 Create an event stream for the given event filters registered with the `EventScanner`:
 
 ```rust
-use alloy::{network::Ethereum, providers::ProviderBuilder, sol_types::SolEvent};
+use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}, sol_types::SolEvent};
 use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
 use tokio_stream::StreamExt;
 use tracing::{error, info};
@@ -125,8 +125,8 @@ Once configured, connect using:
 This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ```rust
-use alloy::providers::ProviderBuilder;
-use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+use alloy::providers::{Provider, ProviderBuilder};
+use event_scanner::robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
@@ -135,16 +135,14 @@ let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
 let scanner = EventScannerBuilder::live()
     .max_block_range(500)  // Optional: set max blocks per read (default: 1000)
     .block_confirmations(12)  // Optional: set block confirmations (default: 12)
-    .connect(provider.clone())
-    .await?;
+    .connect(provider.clone());
 
 // Historical block range mode
 let scanner = EventScannerBuilder::historic()
     .from_block(1_000_000)
     .to_block(2_000_000)
     .max_block_range(500)
-    .connect(provider.clone())
-    .await?;
+    .connect(provider.clone());
 
 // we can also wrap the provider in a RobustProvider
 // for more advanced configurations like retries and fallbacks
@@ -155,23 +153,20 @@ let scanner = EventScannerBuilder::latest(100)
     // .from_block(1_000_000)  // Optional: set start of search range
     // .to_block(2_000_000)    // Optional: set end of search range
     .max_block_range(500)
-    .connect(robust_provider.clone())
-    .await?;
+    .connect(robust_provider.clone());
 
 // Sync from block then switch to live mode
 let scanner = EventScannerBuilder::sync()
     .from_block(100)
     .max_block_range(500)
     .block_confirmations(12)
-    .connect(robust_provider.clone())
-    .await?;
+    .connect(robust_provider.clone());
 
 // Sync the latest 60 events then switch to live mode
 let scanner = EventScannerBuilder::sync()
     .from_latest(60)
     .block_confirmations(12)
-    .connect(robust_provider)
-    .await?;
+    .connect(robust_provider);
 ```
 
 Invoking `scanner.start()` starts the scanner in the specified mode.
@@ -181,28 +176,25 @@ Invoking `scanner.start()` starts the scanner in the specified mode.
 Create an `EventFilter` for each event stream you wish to process. The filter specifies the contract address where events originated, and event signatures (tip: you can use the value stored in `SolEvent::SIGNATURE`).
 
 ```rust
-use alloy::sol_types::SolEvent;
-use event_scanner::EventFilter;
-
 // Track a SPECIFIC event from a SPECIFIC contract
 let specific_filter = EventFilter::new()
-    .contract_address(*my_contract.address())
-    .event(MyContract::SomeEvent::SIGNATURE);
+    .contract_address(*counter_contract.address())
+    .event(Counter::CountIncreased::SIGNATURE);
 
 // Track multiple events from a SPECIFIC contract
 let specific_filter = EventFilter::new()
-    .contract_address(*my_contract.address())
-    .event(MyContract::SomeEvent::SIGNATURE)
-    .event(MyContract::OtherEvent::SIGNATURE);
+    .contract_address(*counter_contract.address())
+    .event(Counter::CountIncreased::SIGNATURE)
+    .event(Counter::CountDecreased::SIGNATURE);
 
 // Track a SPECIFIC event from ALL contracts
 let specific_filter = EventFilter::new()
-    .event(MyContract::SomeEvent::SIGNATURE);
+    .event(Counter::CountIncreased::SIGNATURE);
 
 // Track ALL events from SPECIFIC contracts
 let all_contract_events_filter = EventFilter::new()
-    .contract_address(*my_contract.address())
-    .contract_address(*other_contract.address());
+    .contract_address(*counter_contract.address())
+    .contract_address(*other_counter_contract.address());
 
 // Track ALL events from ALL contracts
 let all_events_filter = EventFilter::new();
@@ -219,17 +211,17 @@ Batch builder examples:
 ```rust
 // Multiple contract addresses at once
 let multi_addr = EventFilter::new()
-    .contract_addresses([*my_contract.address(), *other_contract.address()]);
+    .contract_addresses([*counter_contract.address(), *other_counter_contract.address()]);
 
 // Multiple event names at once
 let multi_events = EventFilter::new()
-    .events([MyContract::SomeEvent::SIGNATURE, MyContract::OtherEvent::SIGNATURE]);
+    .events([Counter::CountIncreased::SIGNATURE, Counter::CountDecreased::SIGNATURE]);
 
 // Multiple event signature hashes at once
 let multi_sigs = EventFilter::new()
     .event_signatures([
-        MyContract::SomeEvent::SIGNATURE_HASH,
-        MyContract::OtherEvent::SIGNATURE_HASH,
+        Counter::CountIncreased::SIGNATURE_HASH,
+        Counter::CountDecreased::SIGNATURE_HASH,
     ]);
 ```
 
@@ -311,9 +303,6 @@ async fn example() -> anyhow::Result<()> {
         .subscription_timeout(Duration::from_secs(120))
         .build()
         .await?;
-
-    // ...
-
     Ok(())
 }
 ```
