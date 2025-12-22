@@ -132,7 +132,7 @@ impl<N: Network> BlockRangeScanner<N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     pub async fn stream_live(
-        &mut self,
+        &self,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         info!("Starting live stream");
@@ -185,7 +185,7 @@ impl<N: Network> BlockRangeScanner<N> {
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `start_id` or `end_id` cannot be resolved.
     pub async fn stream_historical(
-        &mut self,
+        &self,
         start_id: impl Into<BlockId>,
         end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
