@@ -15,5 +15,3 @@ pub use scanner::BlockRangeScanner;
 pub use common::{
     DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
 };
-
-pub(crate) use range_iterator::RangeIterator;

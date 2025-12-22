@@ -33,7 +33,6 @@ impl BlockRangeScannerBuilder {
     pub fn new() -> Self {
         Self {
             max_block_range: DEFAULT_MAX_BLOCK_RANGE,
-
             past_blocks_storage_capacity: RingBufferCapacity::Limited(10),
             buffer_capacity: DEFAULT_STREAM_BUFFER_CAPACITY,
         }

@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use crate::{
     Notification,
     block_range_scanner::{
-        RangeIterator, common::BlockScannerResult, reorg_handler::ReorgHandler,
+        common::BlockScannerResult, range_iterator::RangeIterator, reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
     robust_provider::RobustProvider,

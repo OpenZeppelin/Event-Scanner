@@ -43,14 +43,8 @@ impl From<CoreError> for Error {
 impl From<RecvError> for Error {
     fn from(err: RecvError) -> Self {
         match err {
-            RecvError::Closed => {
-                error!("Provider closed the subscription channel");
-                Error::Closed
-            }
-            RecvError::Lagged(count) => {
-                error!(skipped = count, "Receiver lagged");
-                Error::Lagged(count)
-            }
+            RecvError::Closed => Error::Closed,
+            RecvError::Lagged(count) => Error::Lagged(count),
         }
     }
 }
@@ -122,17 +116,7 @@ impl<N: Network> RobustSubscription<N> {
                         }
                         return Ok(header);
                     }
-                    Err(recv_error) => {
-                        match recv_error {
-                            RecvError::Closed => {
-                                error!("Provider closed the subscription channel");
-                            }
-                            RecvError::Lagged(count) => {
-                                error!(skipped = count, "Receiver lagged");
-                            }
-                        }
-                        return Err(recv_error.into());
-                    }
+                    Err(recv_error) => return Err(recv_error.into()),
                 },
                 Err(elapsed_err) => {
                     warn!(
@@ -148,6 +132,7 @@ impl<N: Network> RobustSubscription<N> {
 
     /// Try to reconnect to the primary provider if enough time has elapsed.
     /// Returns true if reconnection was successful, false if it's not time yet or if it failed.
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     async fn try_reconnect_to_primary(&mut self, force: bool) -> bool {
         // Check if we should attempt reconnection
         let should_reconnect = force ||
@@ -162,8 +147,6 @@ impl<N: Network> RobustSubscription<N> {
             return false;
         }
 
-        info!("Attempting to reconnect to primary provider");
-
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
 
@@ -171,22 +154,19 @@ impl<N: Network> RobustSubscription<N> {
         let subscription =
             self.robust_provider.try_provider_with_timeout(primary, &operation).await;
 
-        match subscription {
-            Ok(sub) => {
-                info!("Successfully reconnected to primary provider");
-                self.subscription = sub;
-                self.current_fallback_index = None;
-                self.last_reconnect_attempt = None;
-                true
-            }
-            Err(e) => {
-                self.last_reconnect_attempt = Some(Instant::now());
-                warn!(error = %e, "Failed to reconnect to primary provider");
-                false
-            }
+        if let Ok(sub) = subscription {
+            info!("Reconnected to primary provider");
+            self.subscription = sub;
+            self.current_fallback_index = None;
+            self.last_reconnect_attempt = None;
+            true
+        } else {
+            self.last_reconnect_attempt = Some(Instant::now());
+            false
         }
     }
 
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     async fn switch_to_fallback(&mut self, last_error: CoreError) -> Result<(), Error> {
         // If we're on a fallback, try primary first before moving to next fallback
         if self.is_on_fallback() && self.try_reconnect_to_primary(true).await {
