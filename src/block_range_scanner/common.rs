@@ -5,7 +5,7 @@ use tokio_stream::StreamExt;
 
 use crate::{
     ScannerError, ScannerMessage,
-    block_range_scanner::{RangeIterator, reorg_handler::ReorgHandler},
+    block_range_scanner::{range_iterator::RangeIterator, reorg_handler::ReorgHandler},
     robust_provider::{RobustProvider, RobustSubscription, subscription},
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };

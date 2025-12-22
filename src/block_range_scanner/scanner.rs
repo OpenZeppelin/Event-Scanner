@@ -84,8 +84,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{
-        RangeIterator, RingBufferCapacity,
+        RingBufferCapacity,
         common::{self, BlockScannerResult},
+        range_iterator::RangeIterator,
         reorg_handler::ReorgHandler,
         sync_handler::SyncHandler,
     },
