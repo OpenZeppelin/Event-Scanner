@@ -50,6 +50,10 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(
+    feature = "tracing",
+    tracing::instrument(level = "trace", skip(subscription, sender, provider, reorg_handler))
+)]
 pub(crate) async fn stream_live_blocks<N: Network>(
     stream_start: BlockNumber,
     subscription: RobustSubscription<N>,
@@ -69,6 +73,10 @@ pub(crate) async fn stream_live_blocks<N: Network>(
         return;
     };
 
+    // This check is necessary when running `sync` modes. It makes sense to stream this notification
+    // only once the first relevant block is received from the subscription, and not before that;
+    // otherwise callers might perform certain operations expecting the relevant blocks to start
+    // coming, when in fact they are not.
     if notify_after_first_block && !sender.try_stream(Notification::SwitchingToLive).await {
         return;
     }
@@ -119,7 +127,6 @@ async fn get_first_block<
                     subscription::Error::Lagged(_) => {
                         // scanner already accounts for skipped block numbers
                         // next block will be the actual incoming block
-                        info!("Skipping Error::Lagged, next block should be the first live block");
                     }
                     subscription::Error::Timeout => {
                         _ = sender.try_stream(ScannerError::Timeout).await;
@@ -154,8 +161,8 @@ fn skip_to_first_relevant_block<N: Network>(
     })
 }
 
-/// Initializes the streaming state after receiving the first block
-/// Returns None if the channel is closed
+/// Initializes the streaming state after receiving the first block.
+/// Returns None if the channel is closed.
 async fn initialize_live_streaming_state<N: Network>(
     first_block: N::HeaderResponse,
     stream_start: BlockNumber,
@@ -165,10 +172,7 @@ async fn initialize_live_streaming_state<N: Network>(
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<LiveStreamingState<N>> {
-    let incoming_block_num = first_block.number();
-    info!(block_number = incoming_block_num, "Received first block header");
-
-    let confirmed = incoming_block_num.saturating_sub(block_confirmations);
+    let confirmed = first_block.number().saturating_sub(block_confirmations);
 
     // The minimum common ancestor is the block before the stream start
     let min_common_ancestor = stream_start.saturating_sub(1);
@@ -207,13 +211,14 @@ async fn stream_blocks_continuously<
     reorg_handler: &mut ReorgHandler<N>,
 ) {
     while let Some(incoming_block) = stream.next().await {
+        trace!(received = incoming_block, "Received item from block subscription");
         let incoming_block = match incoming_block {
             Ok(block) => block,
             Err(e) => {
                 error!(error = %e, "Error receiving block from stream");
                 match e {
                     subscription::Error::Lagged(_) => {
-                        // scanner already accounts for skipped block numbers
+                        // scanner already accounts for skipped block numbers,
                         // next block will be the actual incoming block
                         continue;
                     }
@@ -234,7 +239,6 @@ async fn stream_blocks_continuously<
         };
 
         let incoming_block_num = incoming_block.number();
-        info!(block_number = incoming_block_num, "Received block header");
 
         let Some(previous_batch_end) = state.previous_batch_end.as_ref() else {
             // previously detected reorg wasn't fully handled
@@ -294,16 +298,10 @@ async fn handle_reorg_detected<N: Network>(
     // Reset streaming position based on common ancestor
     if ancestor_num < stream_start {
         // Reorg went before our starting point - restart from stream_start
-        info!(
-            ancestor_block = ancestor_num,
-            stream_start = stream_start,
-            "Reorg detected before stream start, resetting to stream start"
-        );
         state.batch_start = stream_start;
         state.previous_batch_end = None;
     } else {
         // Resume from after the common ancestor
-        info!(ancestor_block = ancestor_num, "Reorg detected, resuming from common ancestor");
         state.batch_start = ancestor_num + 1;
         state.previous_batch_end = Some(common_ancestor);
     }
@@ -361,6 +359,10 @@ struct LiveStreamingState<N: Network> {
 }
 
 #[must_use]
+#[cfg_attr(
+    feature = "tracing",
+    tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
+)]
 pub(crate) async fn stream_historical_range<N: Network>(
     start: BlockNumber,
     end: BlockNumber,
@@ -369,12 +371,11 @@ pub(crate) async fn stream_historical_range<N: Network>(
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<()> {
-    info!("Getting finalized block number");
     let finalized = match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await
     {
         Ok(block) => block,
         Err(e) => {
-            error!(error = %e, "Failed to get finalized block");
+            trace!("Failed to get finalized block");
             _ = sender.try_stream(e).await;
             return None;
         }
@@ -470,6 +471,5 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         last_batch_end = Some(batch_end);
     }
 
-    info!(batch_count = iter.batch_count(), "Historical sync completed");
     last_batch_end
 }
