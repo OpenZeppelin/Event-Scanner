@@ -135,7 +135,6 @@ impl<N: Network> BlockRangeScanner<N> {
         &self,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        info!("Starting live stream");
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
         let max_block_range = self.max_block_range;
@@ -149,8 +148,6 @@ impl<N: Network> BlockRangeScanner<N> {
         let range_start = (latest + 1).saturating_sub(block_confirmations);
 
         let subscription = self.provider.subscribe_blocks().await?;
-
-        info!("WebSocket connected for live blocks");
 
         tokio::spawn(async move {
             let mut reorg_handler =
@@ -192,8 +189,6 @@ impl<N: Network> BlockRangeScanner<N> {
         let start_id = start_id.into();
         let end_id = end_id.into();
 
-        info!(start_id = ?start_id, end_id = ?end_id, "Starting historical stream");
-
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
         let max_block_range = self.max_block_range;
@@ -210,12 +205,6 @@ impl<N: Network> BlockRangeScanner<N> {
             Ordering::Greater => (end_block_num, start_block_num),
             _ => (start_block_num, end_block_num),
         };
-
-        info!(
-            start_block = start_block_num,
-            end_block = end_block_num,
-            "Normalized the block range"
-        );
 
         tokio::spawn(async move {
             let mut reorg_handler =
@@ -253,8 +242,6 @@ impl<N: Network> BlockRangeScanner<N> {
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let start_id = start_id.into();
-
-        info!(start_id = ?start_id, "Starting streaming from");
 
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let sync_handler = SyncHandler::new(
@@ -318,8 +305,6 @@ impl<N: Network> BlockRangeScanner<N> {
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let start_id = start_id.into();
         let end_id = end_id.into();
-
-        info!(start_id = ?start_id, end_id = ?end_id, "Starting rewind");
 
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
