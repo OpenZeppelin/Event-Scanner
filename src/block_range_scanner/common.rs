@@ -211,7 +211,6 @@ async fn stream_blocks_continuously<
     reorg_handler: &mut ReorgHandler<N>,
 ) {
     while let Some(incoming_block) = stream.next().await {
-        trace!(received = incoming_block, "Received item from block subscription");
         let incoming_block = match incoming_block {
             Ok(block) => block,
             Err(e) => {
@@ -238,7 +237,8 @@ async fn stream_blocks_continuously<
             }
         };
 
-        let incoming_block_num = incoming_block.number();
+        let incoming_block = incoming_block.number();
+        trace!(received = incoming_block, "Received item from block subscription");
 
         let Some(previous_batch_end) = state.previous_batch_end.as_ref() else {
             // previously detected reorg wasn't fully handled
@@ -264,7 +264,7 @@ async fn stream_blocks_continuously<
         }
 
         // Stream the next batch of confirmed blocks
-        let batch_end_num = incoming_block_num.saturating_sub(block_confirmations);
+        let batch_end_num = incoming_block.saturating_sub(block_confirmations);
         if !stream_next_batch(
             batch_end_num,
             state,
