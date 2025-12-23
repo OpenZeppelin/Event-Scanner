@@ -134,8 +134,6 @@ impl<N: Network> RewindHandler<N> {
                 }
             }
         }
-
-        info!(batch_count = iter.batch_count(), "Rewind completed");
     }
 
     /// Handles re-scanning of reorged blocks.

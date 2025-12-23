@@ -74,14 +74,6 @@ impl RangeIterator<Reverse> {
     }
 }
 
-impl<D> RangeIterator<D> {
-    /// Returns the number of batches yielded so far.
-    #[must_use]
-    pub fn batch_count(&self) -> u64 {
-        self.batch_count
-    }
-}
-
 impl Iterator for RangeIterator<Forward> {
     type Item = RangeInclusive<BlockNumber>;
 
@@ -293,36 +285,5 @@ mod tests {
     #[should_panic(expected = "max_block_range must be at least 1")]
     fn reverse_zero_max_block_range_panics() {
         let _ = RangeIterator::reverse(200, 100, 0);
-    }
-
-    #[test]
-    fn batch_count_increments() {
-        let mut iter = RangeIterator::forward(100, 300, 50);
-        assert_eq!(iter.batch_count(), 0);
-
-        iter.next();
-        assert_eq!(iter.batch_count(), 1);
-
-        iter.next();
-        assert_eq!(iter.batch_count(), 2);
-
-        iter.next();
-        assert_eq!(iter.batch_count(), 3);
-    }
-
-    #[test]
-    fn batch_count_persists_after_reset() {
-        let mut iter = RangeIterator::forward(100, 300, 50);
-        iter.next();
-        iter.next();
-        assert_eq!(iter.batch_count(), 2);
-
-        iter.reset_to(150);
-
-        // batch_count is not reset
-        assert_eq!(iter.batch_count(), 2);
-
-        iter.next();
-        assert_eq!(iter.batch_count(), 3);
     }
 }
