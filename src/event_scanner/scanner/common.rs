@@ -152,7 +152,7 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
                         tx.send(message).await.expect("receiver dropped only if we exit this loop");
                     }
                     Err(RecvError::Closed) => {
-                        debug!("No more block ranges to receive");
+                        trace!("Block range stream closed");
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
@@ -230,7 +230,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                                 .expect("pending blocks not supported");
                             // Check if in reorg recovery and past the reorg range
                             if reorg_ancestor.is_some_and(|a| last_log_block_num <= a) {
-                                debug!(
+                                trace!(
                                     ancestor = reorg_ancestor,
                                     "Reorg recovery complete, resuming normal log collection"
                                 );
@@ -246,9 +246,9 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         Ok(ScannerMessage::Notification(Notification::ReorgDetected {
                             common_ancestor,
                         })) => {
-                            debug!(
+                            trace!(
                                 common_ancestor = common_ancestor,
-                                "Received ReorgDetected notification"
+                                "Reorg detected, rescanning new canonical blocks"
                             );
                             // Track reorg state for proper log ordering
                             reorg_ancestor = Some(common_ancestor);
@@ -260,7 +260,6 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                             // since logs haven't been sent yet
                         }
                         Ok(ScannerMessage::Notification(notification)) => {
-                            debug!(notification = ?notification, "Received notification");
                             if !listener.sender.try_stream(notification).await {
                                 return;
                             }
@@ -297,7 +296,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                         }
                     }
                     Err(RecvError::Closed) => {
-                        debug!("No more block ranges to receive");
+                        trace!("Block range stream closed");
                         break;
                     }
                     Err(RecvError::Lagged(skipped)) => {
@@ -318,12 +317,12 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
 }
 
 fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) -> Vec<Log> {
-    // Invalidate logs from reorged blocks
+    // Invalidates logs from orphaned blocks.
     // Logs are ordered newest -> oldest, so skip logs with
     // block_number > common_ancestor at the front
-    // NOTE: Pending logs are not supported therefore this filter
-    // works for now (may need to update once they are). Tracked in
-    // <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
+    // NOTE: Pending blocks aren't supported therefore this filter
+    // works for now (may need to update once they are).
+    // Tracked in <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     let before_count = collected.len();
     let collected = collected
         .into_iter()
@@ -336,10 +335,10 @@ fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) 
         .collect::<Vec<_>>();
     let removed_count = before_count - collected.len();
     if removed_count > 0 {
-        debug!(
+        trace!(
             removed_count = removed_count,
             remaining_count = collected.len(),
-            "Invalidated logs from reorged blocks"
+            "Invalidated logs from orphaned blocks"
         );
     }
     collected
