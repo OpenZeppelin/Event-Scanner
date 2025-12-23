@@ -102,7 +102,6 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
         let EventListener { filter, sender } = listener;
 
         let provider = provider.clone();
-        let base_filter = Filter::from(&filter);
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
@@ -117,12 +116,10 @@ fn spawn_log_consumers_in_stream_mode<N: Network>(
             tokio::spawn(async move {
                 let mut stream = ReceiverStream::new(rx)
                     .map(async |message| match message {
-                        Ok(ScannerMessage::Data(range)) => {
-                            get_logs(range, &filter, &base_filter, &provider)
-                                .await
-                                .map(Message::from)
-                                .map_err(ScannerError::from)
-                        }
+                        Ok(ScannerMessage::Data(range)) => get_logs(range, &filter, &provider)
+                            .await
+                            .map(Message::from)
+                            .map_err(ScannerError::from),
                         Ok(ScannerMessage::Notification(notification)) => Ok(notification.into()),
                         // No need to stop the stream on an error, because there will be no more
                         // values received from the range stream.
@@ -182,7 +179,6 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
 ) -> JoinSet<()> {
     listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
         let provider = provider.clone();
-        let base_filter = Filter::from(&listener.filter);
         let mut range_rx = range_tx.subscribe();
 
         set.spawn(async move {
@@ -198,7 +194,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 let mut stream = ReceiverStream::new(rx)
                     .map(async |message| match message {
                         Ok(ScannerMessage::Data(range)) => {
-                            get_logs(range, &listener.filter, &base_filter, &provider)
+                            get_logs(range, &listener.filter, &provider)
                                 .await
                                 .map(Message::from)
                                 .map_err(ScannerError::from)
@@ -370,32 +366,17 @@ fn collect_logs<T>(collected: &mut Vec<T>, logs: Vec<T>, count: usize, prepend: 
 async fn get_logs<N: Network>(
     range: RangeInclusive<u64>,
     event_filter: &EventFilter,
-    log_filter: &Filter,
     provider: &RobustProvider<N>,
 ) -> Result<Vec<Log>, RobustProviderError> {
-    let log_filter = log_filter.clone().from_block(*range.start()).to_block(*range.end());
+    let log_filter = Filter::from(event_filter).from_block(*range.start()).to_block(*range.end());
 
     match provider.get_logs(&log_filter).await {
-        Ok(logs) => {
-            if logs.is_empty() {
-                return Ok(logs);
-            }
-
-            info!(
-                filter = %event_filter,
-                log_count = logs.len(),
-                block_range = ?range,
-                "found logs for event in block range"
-            );
-
-            Ok(logs)
-        }
+        Ok(logs) => Ok(logs),
         Err(e) => {
             error!(
                 filter = %event_filter,
-                error = %e,
                 block_range = ?range,
-                "failed to get logs for block range"
+                "Failed to get logs for block range"
             );
 
             Err(e)
