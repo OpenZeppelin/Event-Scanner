@@ -81,8 +81,6 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let buffer_capacity = self.buffer_capacity();
 
-        info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
-
         // Fetch the latest block number.
         // This is used to determine the starting point for the rewind stream and the live
         // stream. We do this before starting the streams to avoid a race condition
