@@ -274,7 +274,7 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 }
 
                 if collected.is_empty() {
-                    debug!("No logs found");
+                    trace!("No logs found");
                     _ = listener.sender.try_stream(Notification::NoPastLogsFound).await;
                     return;
                 }
@@ -282,7 +282,6 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
                 trace!(count = collected.len(), "Logs found");
                 collected.reverse(); // restore chronological order
 
-                trace!("Sending collected logs to consumer");
                 _ = listener.sender.try_stream(collected).await;
             });
 
