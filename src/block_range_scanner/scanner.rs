@@ -185,20 +185,21 @@ impl<N: Network> BlockRangeScanner<N> {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn stream_historical(
         &self,
-        start_id: impl Into<BlockId>,
-        end_id: impl Into<BlockId>,
+        #[cfg(feature = "tracing")] start_id: impl Into<BlockId> + Debug,
+        #[cfg(not(feature = "tracing"))] start_id: impl Into<BlockId>,
+        #[cfg(feature = "tracing")] end_id: impl Into<BlockId> + Debug,
+        #[cfg(not(feature = "tracing"))] end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let start_id = start_id.into();
-        let end_id = end_id.into();
-
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
         let max_block_range = self.max_block_range;
         let past_blocks_storage_capacity = self.past_blocks_storage_capacity;
         let provider = self.provider.clone();
 
-        let (start_block, end_block) =
-            tokio::try_join!(self.provider.get_block(start_id), self.provider.get_block(end_id))?;
+        let (start_block, end_block) = tokio::try_join!(
+            self.provider.get_block(start_id.into()),
+            self.provider.get_block(end_id.into())
+        )?;
 
         let start_block_num = start_block.header().number();
         let end_block_num = end_block.header().number();
@@ -241,16 +242,15 @@ impl<N: Network> BlockRangeScanner<N> {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn stream_from(
         &self,
-        start_id: impl Into<BlockId>,
+        #[cfg(feature = "tracing")] start_id: impl Into<BlockId> + Debug,
+        #[cfg(not(feature = "tracing"))] start_id: impl Into<BlockId>,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let start_id = start_id.into();
-
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
         let sync_handler = SyncHandler::new(
             self.provider.clone(),
             self.max_block_range,
-            start_id,
+            start_id.into(),
             block_confirmations,
             self.past_blocks_storage_capacity,
             blocks_sender,
@@ -304,19 +304,18 @@ impl<N: Network> BlockRangeScanner<N> {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn stream_rewind(
         &self,
-        start_id: impl Into<BlockId>,
-        end_id: impl Into<BlockId>,
+        #[cfg(feature = "tracing")] start_id: impl Into<BlockId> + Debug,
+        #[cfg(not(feature = "tracing"))] start_id: impl Into<BlockId>,
+        #[cfg(feature = "tracing")] end_id: impl Into<BlockId> + Debug,
+        #[cfg(not(feature = "tracing"))] end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
-        let start_id = start_id.into();
-        let end_id = end_id.into();
-
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
         let rewind_handler = RewindHandler::new(
             self.provider.clone(),
             self.max_block_range,
-            start_id,
-            end_id,
+            start_id.into(),
+            end_id.into(),
             self.past_blocks_storage_capacity,
             blocks_sender,
         );
