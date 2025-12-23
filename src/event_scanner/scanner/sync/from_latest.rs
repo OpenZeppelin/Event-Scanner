@@ -119,7 +119,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             {
                 Ok(stream) => stream,
                 Err(e) => {
-                    error!(error = %e, "Error during sync mode setup");
+                    error!("Error during sync mode setup");
                     for listener in listeners {
                         _ = listener.sender.try_stream(e.clone()).await;
                     }

@@ -212,7 +212,6 @@ async fn stream_blocks_continuously<
         let incoming_block = match incoming_block {
             Ok(block) => block,
             Err(e) => {
-                error!(error = %e, "Error receiving block from stream");
                 match e {
                     subscription::Error::Lagged(_) => {
                         // scanner already accounts for skipped block numbers,
@@ -246,7 +245,7 @@ async fn stream_blocks_continuously<
         let common_ancestor = match reorg_handler.check(previous_batch_end).await {
             Ok(reorg_opt) => reorg_opt,
             Err(e) => {
-                error!(error = %e, "Failed to perform reorg check");
+                error!("Failed to perform reorg check");
                 _ = sender.try_stream(e).await;
                 return;
             }
@@ -439,7 +438,11 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         let batch_end = match provider.get_block_by_number(batch_end_num.into()).await {
             Ok(block) => block,
             Err(e) => {
-                error!(batch_start = batch.start(), batch_end = batch_end_num, error = %e, "Failed to get ending block of the current batch");
+                error!(
+                    batch_start = batch.start(),
+                    batch_end = batch_end_num,
+                    "Failed to get ending block of the current batch"
+                );
                 _ = sender.try_stream(e).await;
                 return None;
             }
@@ -452,7 +455,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
         let reorged_opt = match reorg_handler.check(&batch_end).await {
             Ok(opt) => opt,
             Err(e) => {
-                error!(error = %e, "Failed to perform reorg check");
+                error!("Failed to perform reorg check");
                 _ = sender.try_stream(e).await;
                 return None;
             }

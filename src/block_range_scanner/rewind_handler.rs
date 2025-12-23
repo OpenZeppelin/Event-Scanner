@@ -118,7 +118,7 @@ impl<N: Network> RewindHandler<N> {
                 let reorg = match reorg_handler.check(&tip).await {
                     Ok(opt) => opt,
                     Err(e) => {
-                        error!("RPC call failed when checking for reorgs");
+                        error!("Failed to perform reorg check");
                         _ = sender.try_stream(e).await;
                         return;
                     }
@@ -162,9 +162,11 @@ impl<N: Network> RewindHandler<N> {
             Ok(block) => block,
             Err(e) => {
                 if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
-                    error!("Unexpected error: pre-reorg chain tip should exist on a reorged chain");
+                    error!(
+                        "Unexpected error: chain height should be the same or greater on the new canonical chain"
+                    );
                 } else {
-                    error!(error = %e, "Terminal RPC call error, shutting down");
+                    error!("Failed to fetch block at the range tip height");
                 }
                 _ = sender.try_stream(e).await;
                 return false;
