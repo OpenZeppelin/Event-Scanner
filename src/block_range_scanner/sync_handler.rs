@@ -12,14 +12,6 @@ use crate::{
     types::TryStream,
 };
 
-/// Represents the initial state when starting a sync operation
-enum SyncState {
-    /// Start block is already at or beyond the confirmed tip - go straight to live
-    AlreadyLive { start_block: BlockNumber },
-    /// Start block is behind - need to catch up first, then go live
-    NeedsCatchup { start_block: BlockNumber, confirmed_tip: BlockNumber },
-}
-
 pub(crate) struct SyncHandler<N: Network> {
     provider: RobustProvider<N>,
     max_block_range: u64,
@@ -43,41 +35,28 @@ impl<N: Network> SyncHandler<N> {
     }
 
     pub async fn run(mut self) -> Result<(), ScannerError> {
-        let sync_state = self.determine_sync_state().await?;
-
-        match sync_state {
-            SyncState::AlreadyLive { start_block } => {
-                info!(
-                    start_block = start_block,
-                    "Start block is beyond confirmed tip, waiting until starting block is confirmed before starting live stream"
-                );
-                self.spawn_live_only(start_block).await?;
-            }
-            SyncState::NeedsCatchup { start_block, confirmed_tip } => {
-                info!(
-                    start_block = start_block,
-                    confirmed_tip = confirmed_tip,
-                    "Start block is behind confirmed tip, catching up then transitioning to live"
-                );
-                self.spawn_catchup_then_live(start_block, confirmed_tip);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Determines whether we need to catch up or can start live immediately
-    async fn determine_sync_state(&self) -> Result<SyncState, ScannerError> {
         let (start_block, confirmed_tip) = tokio::try_join!(
             self.provider.get_block_number_by_id(self.start_id),
             self.provider.get_latest_confirmed(self.block_confirmations)
         )?;
 
         if start_block > confirmed_tip {
-            Ok(SyncState::AlreadyLive { start_block })
+            trace!(
+                start_block = start_block,
+                confirmed_tip = confirmed_tip,
+                "Start block is beyond confirmed tip, waiting until starting block is confirmed before starting live stream"
+            );
+            self.spawn_live_only(start_block).await?;
         } else {
-            Ok(SyncState::NeedsCatchup { start_block, confirmed_tip })
+            trace!(
+                start_block = start_block,
+                confirmed_tip = confirmed_tip,
+                "Start block is at or behind confirmed tip, catching up before transitioning to live"
+            );
+            self.spawn_catchup_then_live(start_block, confirmed_tip);
         }
+
+        Ok(())
     }
 
     /// Spawns a task that only streams live blocks (no historical catchup needed)
@@ -184,8 +163,6 @@ impl<N: Network> SyncHandler<N> {
             confirmed_tip = latest.saturating_sub(block_confirmations);
         }
 
-        info!("Historical catchup complete, ready to transition to live");
-
         Ok(Some(start_block))
     }
 
@@ -210,8 +187,6 @@ impl<N: Network> SyncHandler<N> {
         if !sender.try_stream(Notification::SwitchingToLive).await {
             return;
         }
-
-        info!("Successfully transitioned from historical to live streaming");
 
         common::stream_live_blocks(
             start_block,
