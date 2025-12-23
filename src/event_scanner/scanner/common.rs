@@ -76,8 +76,7 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     };
 
     while let Some(message) = stream.next().await {
-        if let Err(err) = range_tx.send(message) {
-            warn!(error = %err, "No log consumers, stopping stream");
+        if range_tx.send(message).is_err() {
             break;
         }
     }

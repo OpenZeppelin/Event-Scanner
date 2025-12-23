@@ -108,8 +108,6 @@ pub(crate) async fn stream_live_blocks<N: Network>(
         reorg_handler,
     )
     .await;
-
-    warn!("Live block subscription ended");
 }
 
 async fn get_first_block<

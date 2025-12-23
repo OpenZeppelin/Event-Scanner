@@ -119,7 +119,7 @@ impl<N: Network> RobustSubscription<N> {
                     Err(recv_error) => return Err(recv_error.into()),
                 },
                 Err(elapsed_err) => {
-                    warn!(
+                    tracing::warn!(
                         timeout_secs = subscription_timeout.as_secs(),
                         "Subscription timeout - no block received, switching provider"
                     );
