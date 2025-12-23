@@ -310,6 +310,11 @@ impl EventScannerBuilder<Unspecified> {
     /// 3. Re-emits events from the corrected confirmed block range
     /// 4. Continues streaming from the new chain state
     ///
+    /// **Important**: If a reorg occurs, the scanner will only restream blocks from the new
+    /// canonical chain that have block numbers greater than or equal to the block number that was
+    /// the "latest block" at the time when the live stream was first started. Blocks with lower
+    /// block numbers will not be restreamed, even if they are part of the new canonical chain.
+    ///
     /// [reorg]: crate::types::Notification::ReorgDetected
     #[must_use]
     pub fn live() -> EventScannerBuilder<Live> {
