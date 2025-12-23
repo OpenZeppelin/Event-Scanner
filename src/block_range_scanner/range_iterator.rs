@@ -90,14 +90,10 @@ impl Iterator for RangeIterator<Forward> {
             return None;
         }
 
-        self.batch_count += 1;
-        if self.batch_count % 10 == 0 {
-            debug!(batch_count = self.batch_count, "Processed batches");
-        }
-
         let batch_start = self.current;
         let batch_end = batch_start.saturating_add(self.range_size - 1).min(self.end);
         self.current = batch_end + 1;
+        self.batch_count += 1;
 
         Some(batch_start..=batch_end)
     }
@@ -117,14 +113,10 @@ impl Iterator for RangeIterator<Reverse> {
             return None;
         }
 
-        self.batch_count += 1;
-        if self.batch_count % 10 == 0 {
-            debug!(batch_count = self.batch_count, "Processed batches");
-        }
-
         let batch_high = self.current;
         let batch_low = batch_high.saturating_sub(self.range_size - 1).max(self.end);
         self.current = batch_low.saturating_sub(1);
+        self.batch_count += 1;
 
         Some(batch_low..=batch_high)
     }
