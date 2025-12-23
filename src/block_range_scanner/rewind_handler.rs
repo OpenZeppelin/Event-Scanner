@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use alloy::{
     consensus::BlockHeader,
     eips::{BlockId, BlockNumberOrTag},
-    network::{BlockResponse, Network, primitives::HeaderResponse},
+    network::{BlockResponse, Network},
 };
 use tokio::{sync::mpsc, try_join};
 
@@ -74,6 +74,10 @@ impl<N: Network> RewindHandler<N> {
     }
 
     /// Streams blocks in reverse order from `from` to `to`.
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
+    )]
     async fn handle_stream_rewind(
         from: N::BlockResponse,
         to: N::BlockResponse,
@@ -92,7 +96,7 @@ impl<N: Network> RewindHandler<N> {
         {
             Ok(block) => block,
             Err(e) => {
-                error!(error = %e, "Failed to get finalized block");
+                error!("RPC call to get finalized block failed");
                 _ = sender.try_stream(e).await;
                 return;
             }
@@ -114,7 +118,7 @@ impl<N: Network> RewindHandler<N> {
                 let reorg = match reorg_handler.check(&tip).await {
                     Ok(opt) => opt,
                     Err(e) => {
-                        error!(error = %e, "Terminal RPC call error, shutting down");
+                        error!("RPC call failed when checking for reorgs");
                         _ = sender.try_stream(e).await;
                         return;
                     }
@@ -148,12 +152,6 @@ impl<N: Network> RewindHandler<N> {
     ) -> bool {
         let tip_number = tip.header().number();
         let common_ancestor = common_ancestor.header().number();
-        info!(
-            block_number = %tip_number,
-            hash = %HeaderResponse::hash(tip.header()),
-            common_ancestor = %common_ancestor,
-            "Reorg detected"
-        );
 
         if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
             return false;
