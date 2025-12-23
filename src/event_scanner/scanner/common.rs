@@ -316,13 +316,10 @@ fn spawn_log_consumers_in_collection_mode<N: Network>(
     })
 }
 
+/// Invalidates logs from orphaned blocks.
 fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) -> Vec<Log> {
-    // Invalidates logs from orphaned blocks.
     // Logs are ordered newest -> oldest, so skip logs with
     // block_number > common_ancestor at the front
-    // NOTE: Pending blocks aren't supported therefore this filter
-    // works for now (may need to update once they are).
-    // Tracked in <https://github.com/OpenZeppelin/Event-Scanner/issues/244>
     let before_count = collected.len();
     let collected = collected
         .into_iter()
