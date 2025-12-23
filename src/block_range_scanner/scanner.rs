@@ -131,6 +131,7 @@ impl<N: Network> BlockRangeScanner<N> {
     ///
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn stream_live(
         &self,
         block_confirmations: u64,
@@ -181,6 +182,7 @@ impl<N: Network> BlockRangeScanner<N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `start_id` or `end_id` cannot be resolved.
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn stream_historical(
         &self,
         start_id: impl Into<BlockId>,
@@ -236,6 +238,7 @@ impl<N: Network> BlockRangeScanner<N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `start_id` cannot be resolved.
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn stream_from(
         &self,
         start_id: impl Into<BlockId>,
@@ -298,6 +301,7 @@ impl<N: Network> BlockRangeScanner<N> {
     ///
     /// [latest mode]: crate::EventScannerBuilder::latest
     /// [reorg]: crate::Notification::ReorgDetected
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn stream_rewind(
         &self,
         start_id: impl Into<BlockId>,
