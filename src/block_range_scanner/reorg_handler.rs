@@ -71,17 +71,35 @@ impl<N: Network> ReorgHandler<N> {
             // store the incoming block's hash for future reference
             if !matches!(self.buffer.back(), Some(&hash) if hash == block_hash) {
                 self.buffer.push(block_hash);
+                trace!(
+                    block_number = block.number(),
+                    block_hash = %block_hash,
+                    "Block hash added to reorg buffer"
+                );
             }
             return Ok(None);
         }
 
-        trace!("Reorg detected, searching for common ancestor");
+        debug!(
+            block_number = block.number(),
+            block_hash = %block.hash(),
+            "Reorg detected, searching for common ancestor"
+        );
 
         while let Some(&block_hash) = self.buffer.back() {
+            trace!(block_hash = %block_hash, "Checking if buffered block exists on chain");
             match self.provider.get_block_by_hash(block_hash).await {
-                Ok(common_ancestor) => return self.return_common_ancestor(common_ancestor).await,
+                Ok(common_ancestor) => {
+                    debug!(
+                        common_ancestor_hash = %block_hash,
+                        common_ancestor_number = common_ancestor.header().number(),
+                        "Found common ancestor"
+                    );
+                    return self.return_common_ancestor(common_ancestor).await;
+                }
                 Err(robust_provider::Error::BlockNotFound(_)) => {
                     // block was reorged
+                    trace!(block_hash = %block_hash, "Buffered block was reorged, removing from buffer");
                     _ = self.buffer.pop_back();
                 }
                 Err(e) => return Err(e.into()),
@@ -93,7 +111,7 @@ impl<N: Network> ReorgHandler<N> {
         // no need to store finalized block's hash in the buffer, as it is returned by default only
         // if not buffered hashes exist on-chain
 
-        tracing::warn!("No common ancestors found, falling back to finalized block");
+        info!("No common ancestors found in buffer, falling back to finalized block");
 
         let finalized = self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
 
@@ -118,10 +136,19 @@ impl<N: Network> ReorgHandler<N> {
         let finalized_header = finalized.header();
 
         let common_ancestor = if finalized_header.number() <= common_ancestor_header.number() {
+            debug!(
+                common_ancestor_number = common_ancestor_header.number(),
+                common_ancestor_hash = %common_ancestor_header.hash(),
+                "Returning common ancestor"
+            );
             common_ancestor
         } else {
-            tracing::warn!(
-                common_ancestor = %common_ancestor_header.hash(), finalized = %finalized_header.hash(), "Found common ancestor predates finalized block, falling back to finalized"
+            warn!(
+                common_ancestor_number = common_ancestor_header.number(),
+                common_ancestor_hash = %common_ancestor_header.hash(),
+                finalized_number = finalized_header.number(),
+                finalized_hash = %finalized_header.hash(),
+                "Found common ancestor predates finalized block, falling back to finalized"
             );
             // all buffered blocks are finalized, so no more need to track them
             self.buffer.clear();
