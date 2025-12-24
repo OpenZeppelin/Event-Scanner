@@ -76,6 +76,13 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` cannot be resolved.
     pub async fn start(self) -> Result<(), ScannerError> {
+        info!(
+            from_block = ?self.config.from_block,
+            block_confirmations = self.config.block_confirmations,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in SyncFromBlock mode"
+        );
+
         let stream = self
             .block_range_scanner
             .stream_from(self.config.from_block, self.config.block_confirmations)
