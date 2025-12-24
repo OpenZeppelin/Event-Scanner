@@ -109,15 +109,13 @@ impl<N: Network> RobustSubscription<N> {
         loop {
             let recv_result = timeout(subscription_timeout, self.subscription.recv()).await;
             match recv_result {
-                Ok(recv_result) => match recv_result {
-                    Ok(header) => {
-                        if self.is_on_fallback() {
-                            self.try_reconnect_to_primary(false).await;
-                        }
-                        return Ok(header);
+                Ok(Ok(header)) => {
+                    if self.is_on_fallback() {
+                        self.try_reconnect_to_primary(false).await;
                     }
-                    Err(recv_error) => return Err(recv_error.into()),
-                },
+                    return Ok(header);
+                }
+                Ok(Err(recv_error)) => return Err(recv_error.into()),
                 Err(_) => {
                     warn!(
                         timeout_secs = subscription_timeout.as_secs(),
