@@ -322,7 +322,6 @@ impl<N: Network> RobustProvider<N> {
             .await
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self, operation)))]
     pub(crate) async fn try_fallback_providers_from<T: Debug, F, Fut>(
         &self,
         operation: F,
@@ -336,39 +335,50 @@ impl<N: Network> RobustProvider<N> {
     {
         let num_fallbacks = self.fallback_providers.len();
 
+        debug!(
+            start_index = start_index,
+            total_fallbacks = num_fallbacks,
+            require_pubsub = require_pubsub,
+            "Primary provider failed, attempting fallback providers"
+        );
+
         let fallback_providers = self.fallback_providers.iter().enumerate().skip(start_index);
         for (fallback_idx, provider) in fallback_providers {
             if require_pubsub && !Self::supports_pubsub(provider) {
-                trace!(
-                    provider_num = fallback_idx + 1,
-                    "Fallback provider doesn't support pubsub, skipping"
+                debug!(
+                    provider_index = fallback_idx,
+                    "Skipping fallback provider: pubsub not supported"
                 );
                 continue;
             }
 
             trace!(
-                fallback_provider_index = fallback_idx + 1,
-                total_num_fallbacks = num_fallbacks,
+                fallback_index = fallback_idx,
+                total_fallbacks = num_fallbacks,
                 "Attempting fallback provider"
             );
 
             match self.try_provider_with_timeout(provider, &operation).await {
                 Ok(value) => {
                     info!(
-                        provider_num = fallback_idx + 1,
+                        fallback_index = fallback_idx,
                         total_fallbacks = num_fallbacks,
                         "Switched to fallback provider"
                     );
                     return Ok((value, fallback_idx));
                 }
                 Err(e) => {
-                    tracing::warn!(provider_num = fallback_idx + 1, err = %e, "Fallback provider failed");
+                    warn!(
+                        fallback_index = fallback_idx,
+                        error = %e,
+                        "Fallback provider failed"
+                    );
                     last_error = e;
                 }
             }
         }
 
-        tracing::error!("All providers failed");
+        error!(attempted_providers = num_fallbacks + 1, "All providers exhausted");
 
         Err(last_error)
     }
