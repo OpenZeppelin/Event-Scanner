@@ -77,7 +77,7 @@
 //! }
 //! ```
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt::Debug};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -131,7 +131,7 @@ impl<N: Network> BlockRangeScanner<N> {
     ///
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip_all))]
     pub async fn stream_live(
         &self,
         block_confirmations: u64,
@@ -146,7 +146,15 @@ impl<N: Network> BlockRangeScanner<N> {
         // the next block returned by the underlying subscription will always be `latest + 1`,
         // because `latest` was already mined and subscription by definition only streams after new
         // blocks have been mined
-        let range_start = (latest + 1).saturating_sub(block_confirmations);
+        let start_block = (latest + 1).saturating_sub(block_confirmations);
+
+        debug!(
+            latest_block = latest,
+            start_block = start_block,
+            block_confirmations = block_confirmations,
+            max_block_range = max_block_range,
+            "Starting live block stream"
+        );
 
         let subscription = self.provider.subscribe_blocks().await?;
 
@@ -155,7 +163,7 @@ impl<N: Network> BlockRangeScanner<N> {
                 ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
             common::stream_live_blocks(
-                range_start,
+                start_block,
                 subscription,
                 &blocks_sender,
                 &provider,
@@ -165,6 +173,8 @@ impl<N: Network> BlockRangeScanner<N> {
                 false, // (notification unnecessary)
             )
             .await;
+
+            debug!("Live block stream ended");
         });
 
         Ok(ReceiverStream::new(blocks_receiver))
@@ -182,13 +192,11 @@ impl<N: Network> BlockRangeScanner<N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `start_id` or `end_id` cannot be resolved.
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip_all))]
     pub async fn stream_historical(
         &self,
-        #[cfg(feature = "tracing")] start_id: impl Into<BlockId> + Debug,
-        #[cfg(not(feature = "tracing"))] start_id: impl Into<BlockId>,
-        #[cfg(feature = "tracing")] end_id: impl Into<BlockId> + Debug,
-        #[cfg(not(feature = "tracing"))] end_id: impl Into<BlockId>,
+        start_id: impl Into<BlockId>,
+        end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
 
@@ -209,6 +217,15 @@ impl<N: Network> BlockRangeScanner<N> {
             _ => (start_block_num, end_block_num),
         };
 
+        let total_blocks = end_block_num.saturating_sub(start_block_num) + 1;
+        debug!(
+            from_block = start_block_num,
+            to_block = end_block_num,
+            total_blocks = total_blocks,
+            max_block_range = max_block_range,
+            "Starting historical block stream"
+        );
+
         tokio::spawn(async move {
             let mut reorg_handler =
                 ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
@@ -222,6 +239,8 @@ impl<N: Network> BlockRangeScanner<N> {
                 &mut reorg_handler,
             )
             .await;
+
+            debug!("Historical block stream completed");
         });
 
         Ok(ReceiverStream::new(blocks_receiver))
@@ -239,18 +258,26 @@ impl<N: Network> BlockRangeScanner<N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `start_id` cannot be resolved.
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip_all))]
     pub async fn stream_from(
         &self,
-        #[cfg(feature = "tracing")] start_id: impl Into<BlockId> + Debug,
-        #[cfg(not(feature = "tracing"))] start_id: impl Into<BlockId>,
+        start_id: impl Into<BlockId>,
         block_confirmations: u64,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
+
+        let start_id = start_id.into();
+        debug!(
+            start_block = ?start_id,
+            block_confirmations = block_confirmations,
+            max_block_range = self.max_block_range,
+            "Starting sync block stream"
+        );
+
         let sync_handler = SyncHandler::new(
             self.provider.clone(),
             self.max_block_range,
-            start_id.into(),
+            start_id,
             block_confirmations,
             self.past_blocks_storage_capacity,
             blocks_sender,
@@ -301,21 +328,28 @@ impl<N: Network> BlockRangeScanner<N> {
     ///
     /// [latest mode]: crate::EventScannerBuilder::latest
     /// [reorg]: crate::Notification::ReorgDetected
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip_all))]
     pub async fn stream_rewind(
         &self,
-        #[cfg(feature = "tracing")] start_id: impl Into<BlockId> + Debug,
-        #[cfg(not(feature = "tracing"))] start_id: impl Into<BlockId>,
-        #[cfg(feature = "tracing")] end_id: impl Into<BlockId> + Debug,
-        #[cfg(not(feature = "tracing"))] end_id: impl Into<BlockId>,
+        start_id: impl Into<BlockId>,
+        end_id: impl Into<BlockId>,
     ) -> Result<ReceiverStream<BlockScannerResult>, ScannerError> {
         let (blocks_sender, blocks_receiver) = mpsc::channel(self.buffer_capacity);
+
+        let start_id = start_id.into();
+        let end_id = end_id.into();
+        debug!(
+            from_block = ?start_id,
+            to_block = ?end_id,
+            max_block_range = self.max_block_range,
+            "Starting rewind block stream"
+        );
 
         let rewind_handler = RewindHandler::new(
             self.provider.clone(),
             self.max_block_range,
-            start_id.into(),
-            end_id.into(),
+            start_id,
+            end_id,
             self.past_blocks_storage_capacity,
             blocks_sender,
         );
