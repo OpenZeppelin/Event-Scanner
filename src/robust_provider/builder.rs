@@ -134,8 +134,8 @@ impl<N: Network, P: IntoRootProvider<N>> RobustProviderBuilder<N, P> {
     /// Returns an error if any of the providers fail to connect.
     pub async fn build(self) -> Result<RobustProvider<N>, Error> {
         debug!(
-            call_timeout_ms = self.call_timeout.as_millis() as u64,
-            subscription_timeout_ms = self.subscription_timeout.as_millis() as u64,
+            call_timeout_ms = self.call_timeout.as_millis(),
+            subscription_timeout_ms = self.subscription_timeout.as_millis(),
             max_retries = self.max_retries,
             fallback_count = self.fallback_providers.len(),
             "Building RobustProvider"
