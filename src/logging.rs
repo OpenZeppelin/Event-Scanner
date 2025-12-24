@@ -1,8 +1,13 @@
+//! Internal logging macros that wrap `tracing` when the feature is enabled.
+//!
+//! When the `tracing` feature is disabled, all logging calls compile to no-ops,
+//! ensuring zero runtime cost for users who don't need observability.
+
 #[cfg(feature = "tracing")]
 #[allow(unused_macros)]
 macro_rules! error {
     ($($arg:tt)*) => {
-        tracing::error!($($arg)*)
+        tracing::error!(target: "event_scanner", $($arg)*)
     };
 }
 
@@ -18,7 +23,7 @@ macro_rules! error {
 #[allow(unused_macros)]
 macro_rules! warn {
     ($($arg:tt)*) => {
-        tracing::warn!($($arg)*)
+        tracing::warn!(target: "event_scanner", $($arg)*)
     };
 }
 
@@ -34,7 +39,7 @@ macro_rules! warn {
 #[allow(unused_macros)]
 macro_rules! info {
     ($($arg:tt)*) => {
-        tracing::info!($($arg)*)
+        tracing::info!(target: "event_scanner", $($arg)*)
     };
 }
 
@@ -50,7 +55,7 @@ macro_rules! info {
 #[allow(unused_macros)]
 macro_rules! debug {
     ($($arg:tt)*) => {
-        tracing::debug!($($arg)*)
+        tracing::debug!(target: "event_scanner", $($arg)*)
     };
 }
 
@@ -66,7 +71,7 @@ macro_rules! debug {
 #[allow(unused_macros)]
 macro_rules! trace {
     ($($arg:tt)*) => {
-        tracing::trace!($($arg)*)
+        tracing::trace!(target: "event_scanner", $($arg)*)
     };
 }
 
