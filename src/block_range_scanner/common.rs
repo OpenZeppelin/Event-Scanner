@@ -394,7 +394,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     {
         Ok(block) => block,
         Err(e) => {
-            warn!("Failed to get finalized block");
+            error!("Failed to get finalized block");
             _ = sender.try_stream(e).await;
             return None;
         }
