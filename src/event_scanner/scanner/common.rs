@@ -57,6 +57,13 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     max_concurrent_fetches: usize,
     buffer_capacity: usize,
 ) {
+    debug!(
+        mode = ?mode,
+        listener_count = listeners.len(),
+        max_concurrent_fetches = max_concurrent_fetches,
+        "Starting event stream handler"
+    );
+
     let (range_tx, _) = broadcast::channel::<BlockScannerResult>(buffer_capacity);
 
     let consumers = match mode {
@@ -77,9 +84,12 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
 
     while let Some(message) = stream.next().await {
         if range_tx.send(message).is_err() {
+            debug!("All consumers dropped, stopping stream handler");
             break;
         }
     }
+
+    debug!("Block range stream ended, waiting for consumers");
 
     // Close the channel sender to signal to the log consumers that streaming is done.
     drop(range_tx);
@@ -88,6 +98,8 @@ pub(crate) async fn handle_stream<N: Network, S: Stream<Item = BlockScannerResul
     // finishes its log processing before the next consumer set can be spawned in a subsequent
     // `handle_stream` invocation.
     consumers.join_all().await;
+
+    debug!("All event consumers finished");
 }
 
 #[must_use]
@@ -369,12 +381,24 @@ async fn get_logs<N: Network>(
 ) -> Result<Vec<Log>, RobustProviderError> {
     let log_filter = Filter::from(event_filter).from_block(*range.start()).to_block(*range.end());
 
+    trace!(from_block = *range.start(), to_block = *range.end(), "Fetching logs for block range");
+
     match provider.get_logs(&log_filter).await {
-        Ok(logs) => Ok(logs),
+        Ok(logs) => {
+            if !logs.is_empty() {
+                debug!(
+                    from_block = *range.start(),
+                    to_block = *range.end(),
+                    log_count = logs.len(),
+                    "Found logs in block range"
+                );
+            }
+            Ok(logs)
+        }
         Err(e) => {
             error!(
-                filter = %event_filter,
-                block_range = ?range,
+                from_block = *range.start(),
+                to_block = *range.end(),
                 "Failed to get logs for block range"
             );
 
