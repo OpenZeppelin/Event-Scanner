@@ -68,6 +68,12 @@ impl<N: Network> EventScanner<Live, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     pub async fn start(self) -> Result<(), ScannerError> {
+        info!(
+            block_confirmations = self.config.block_confirmations,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in Live mode"
+        );
+
         let stream = self.block_range_scanner.stream_live(self.config.block_confirmations).await?;
         let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let provider = self.block_range_scanner.provider().clone();
