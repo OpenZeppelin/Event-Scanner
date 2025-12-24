@@ -106,9 +106,9 @@ impl<N: Network> RobustSubscription<N> {
     /// * If all providers have been exhausted and failed, returns the last attempt's error.
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         let subscription_timeout = self.robust_provider.subscription_timeout;
+
         loop {
-            let recv_result = timeout(subscription_timeout, self.subscription.recv()).await;
-            match recv_result {
+            match timeout(subscription_timeout, self.subscription.recv()).await {
                 Ok(Ok(header)) => {
                     if self.is_on_fallback() {
                         self.try_reconnect_to_primary(false).await;
@@ -116,12 +116,11 @@ impl<N: Network> RobustSubscription<N> {
                     return Ok(header);
                 }
                 Ok(Err(recv_error)) => return Err(recv_error.into()),
-                Err(_) => {
+                Err(_elapsed) => {
                     warn!(
                         timeout_secs = subscription_timeout.as_secs(),
                         "Subscription timeout - no block received, switching provider"
                     );
-
                     self.switch_to_fallback(CoreError::Timeout).await?;
                 }
             }
