@@ -58,6 +58,15 @@ impl<N: Network> RewindHandler<N> {
             _ => (end_block, start_block),
         };
 
+        let from_num = from.header().number();
+        let to_num = to.header().number();
+        info!(
+            from_block = from_num,
+            to_block = to_num,
+            total_blocks = from_num.saturating_sub(to_num) + 1,
+            "Starting rewind stream"
+        );
+
         tokio::spawn(async move {
             Self::handle_stream_rewind(
                 from,
@@ -68,6 +77,7 @@ impl<N: Network> RewindHandler<N> {
                 &mut reorg_handler,
             )
             .await;
+            debug!("Rewind stream ended");
         });
 
         Ok(())
@@ -96,7 +106,7 @@ impl<N: Network> RewindHandler<N> {
         {
             Ok(block) => block,
             Err(e) => {
-                error!("RPC call to get finalized block failed");
+                error!("Failed to get finalized block for rewind");
                 _ = sender.try_stream(e).await;
                 return;
             }
@@ -106,6 +116,13 @@ impl<N: Network> RewindHandler<N> {
 
         // only check reorg if our tip is after the finalized block
         let check_reorg = tip.header().number() > finalized_number;
+        debug!(
+            from = from,
+            to = to,
+            finalized = finalized_number,
+            check_reorg = check_reorg,
+            "Rewind stream configuration"
+        );
 
         let mut iter = RangeIterator::reverse(from, to, max_block_range);
         for range in &mut iter {
@@ -124,8 +141,13 @@ impl<N: Network> RewindHandler<N> {
                     }
                 };
 
-                if let Some(common_ancestor) = reorg &&
-                    !Self::handle_reorg_rescan(
+                if let Some(common_ancestor) = reorg {
+                    info!(
+                        common_ancestor = common_ancestor.header().number(),
+                        tip = tip.header().number(),
+                        "Reorg detected during rewind, rescanning affected blocks"
+                    );
+                    if !Self::handle_reorg_rescan(
                         &mut tip,
                         common_ancestor,
                         max_block_range,
@@ -133,8 +155,9 @@ impl<N: Network> RewindHandler<N> {
                         provider,
                     )
                     .await
-                {
-                    return;
+                    {
+                        return;
+                    }
                 }
             }
         }
@@ -153,20 +176,32 @@ impl<N: Network> RewindHandler<N> {
         let tip_number = tip.header().number();
         let common_ancestor = common_ancestor.header().number();
 
+        debug!(
+            tip_number = tip_number,
+            common_ancestor = common_ancestor,
+            blocks_to_rescan = tip_number.saturating_sub(common_ancestor),
+            "Rescanning reorged blocks"
+        );
+
         if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
             return false;
         }
 
         // Get the new tip block (same height as original tip, but new hash)
         *tip = match provider.get_block_by_number(tip_number.into()).await {
-            Ok(block) => block,
+            Ok(block) => {
+                trace!(
+                    new_tip_number = block.header().number(),
+                    "Fetched new tip block after reorg"
+                );
+                block
+            }
             Err(e) => {
                 if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
                     error!(
-                        "Unexpected error: chain height should be the same or greater on the new canonical chain"
+                        tip_number = tip_number,
+                        "Unexpected: chain height decreased after reorg"
                     );
-                } else {
-                    error!("Failed to fetch block at the range tip height");
                 }
                 _ = sender.try_stream(e).await;
                 return false;
@@ -177,6 +212,7 @@ impl<N: Network> RewindHandler<N> {
         let rescan_from = common_ancestor + 1;
 
         for batch in RangeIterator::forward(rescan_from, tip_number, max_block_range) {
+            trace!(range_start = *batch.start(), range_end = *batch.end(), "Rescanning batch");
             if !sender.try_stream(batch).await {
                 return false;
             }
