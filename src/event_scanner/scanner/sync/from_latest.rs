@@ -75,6 +75,13 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     #[allow(clippy::missing_panics_doc)]
     pub async fn start(self) -> Result<(), ScannerError> {
+        info!(
+            event_count = self.config.count,
+            block_confirmations = self.config.block_confirmations,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in SyncFromLatestEvents mode"
+        );
+
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
@@ -95,6 +102,12 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
 
         // Start streaming...
         tokio::spawn(async move {
+            debug!(
+                latest_block = latest_block,
+                count = count,
+                "Phase 1: Collecting latest events via rewind"
+            );
+
             // Since both rewind and live log consumers are ultimately streaming to the same
             // channel, we must ensure that all latest events are streamed before
             // consuming the live stream, otherwise the log consumers may send events out
@@ -109,6 +122,11 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             )
             .await;
 
+            debug!(
+                start_block = latest_block + 1,
+                "Phase 2: Catching up and transitioning to live mode"
+            );
+
             // We actually rely on the sync mode for the live stream, as more blocks could have been
             // minted while the scanner was collecting the latest `count` events.
             // Note: Sync mode will notify the client when it switches to live streaming.
@@ -119,7 +137,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             {
                 Ok(stream) => stream,
                 Err(e) => {
-                    error!("Error during sync mode setup");
+                    error!("Failed to setup sync stream after collecting latest events");
                     for listener in listeners {
                         _ = listener.sender.try_stream(e.clone()).await;
                     }
@@ -137,6 +155,8 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 buffer_capacity,
             )
             .await;
+
+            debug!("SyncFromLatestEvents stream ended");
         });
 
         Ok(())
