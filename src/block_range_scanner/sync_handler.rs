@@ -41,17 +41,19 @@ impl<N: Network> SyncHandler<N> {
         )?;
 
         if start_block > confirmed_tip {
-            trace!(
+            debug!(
                 start_block = start_block,
                 confirmed_tip = confirmed_tip,
+                block_confirmations = self.block_confirmations,
                 "Start block is beyond confirmed tip, waiting until starting block is confirmed before starting live stream"
             );
             self.spawn_live_only(start_block).await?;
         } else {
-            trace!(
+            debug!(
                 start_block = start_block,
                 confirmed_tip = confirmed_tip,
-                "Start block is at or behind confirmed tip, catching up before transitioning to live"
+                blocks_behind = confirmed_tip.saturating_sub(start_block),
+                "Start block is behind confirmed tip, catching up before live mode"
             );
             self.spawn_catchup_then_live(start_block, confirmed_tip);
         }
@@ -67,6 +69,7 @@ impl<N: Network> SyncHandler<N> {
         let sender = self.sender.clone();
         let mut reorg_handler = self.reorg_handler.clone();
 
+        info!(start_block = start_block, "Starting live-only sync mode");
         let subscription = provider.subscribe_blocks().await?;
 
         tokio::spawn(async move {
@@ -81,6 +84,7 @@ impl<N: Network> SyncHandler<N> {
                 true,
             )
             .await;
+            debug!("Live-only sync stream ended");
         });
 
         Ok(())
@@ -93,6 +97,12 @@ impl<N: Network> SyncHandler<N> {
         let provider = self.provider.clone();
         let mut reorg_handler = self.reorg_handler.clone();
         let sender = self.sender.clone();
+
+        info!(
+            start_block = start_block,
+            confirmed_tip = confirmed_tip,
+            "Starting catchup-then-live sync mode"
+        );
 
         tokio::spawn(async move {
             // Phase 1: Catch up on any blocks that have been minted during the historical sync
@@ -109,6 +119,7 @@ impl<N: Network> SyncHandler<N> {
             {
                 Ok(Some(start_block)) => start_block,
                 Ok(None) => {
+                    debug!("Channel closed during historical catchup");
                     return; // channel closed
                 }
                 Err(e) => {
@@ -119,6 +130,7 @@ impl<N: Network> SyncHandler<N> {
             };
 
             // Phase 2: Transition to live streaming
+            debug!(start_block = start_block, "Phase 2: Transitioning to live streaming");
             Self::transition_to_live(
                 start_block,
                 block_confirmations,
@@ -128,6 +140,8 @@ impl<N: Network> SyncHandler<N> {
                 &mut reorg_handler,
             )
             .await;
+
+            debug!("Sync stream ended");
         });
     }
 
@@ -178,13 +192,14 @@ impl<N: Network> SyncHandler<N> {
         let subscription = match provider.subscribe_blocks().await {
             Ok(sub) => sub,
             Err(e) => {
-                error!("Error subscribing to live blocks");
+                error!("Failed to subscribe to live blocks");
                 _ = sender.try_stream(e).await;
                 return;
             }
         };
 
         if !sender.try_stream(Notification::SwitchingToLive).await {
+            debug!("Channel closed before live streaming could start");
             return;
         }
 
