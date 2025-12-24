@@ -73,6 +73,12 @@ pub(crate) async fn stream_live_blocks<N: Network>(
         return;
     };
 
+    debug!(
+        first_block = first_block.number(),
+        stream_start = stream_start,
+        "Received first relevant block, starting live streaming"
+    );
+
     // This check is necessary when running `sync` modes. It makes sense to stream this notification
     // only once the first relevant block is received from the subscription, and not before that;
     // otherwise callers might perform certain operations expecting the relevant blocks to start
@@ -288,6 +294,12 @@ async fn handle_reorg_detected<N: Network>(
 ) -> bool {
     let ancestor_num = common_ancestor.header().number();
 
+    info!(
+        common_ancestor = ancestor_num,
+        stream_start = stream_start,
+        "Reorg detected during live streaming"
+    );
+
     if !sender.try_stream(Notification::ReorgDetected { common_ancestor: ancestor_num }).await {
         return false;
     }
@@ -295,10 +307,20 @@ async fn handle_reorg_detected<N: Network>(
     // Reset streaming position based on common ancestor
     if ancestor_num < stream_start {
         // Reorg went before our starting point - restart from stream_start
+        debug!(
+            common_ancestor = ancestor_num,
+            stream_start = stream_start,
+            "Reorg predates stream start, restarting from stream_start"
+        );
         state.batch_start = stream_start;
         state.previous_batch_end = None;
     } else {
         // Resume from after the common ancestor
+        debug!(
+            common_ancestor = ancestor_num,
+            resume_from = ancestor_num + 1,
+            "Resuming from after common ancestor"
+        );
         state.batch_start = ancestor_num + 1;
         state.previous_batch_end = Some(common_ancestor);
     }
@@ -372,15 +394,27 @@ pub(crate) async fn stream_historical_range<N: Network>(
     {
         Ok(block) => block,
         Err(e) => {
-            trace!("Failed to get finalized block");
+            warn!("Failed to get finalized block");
             _ = sender.try_stream(e).await;
             return None;
         }
     };
 
+    debug!(finalized_block = finalized, "Got finalized block for historical range");
+
     // no reorg check for finalized blocks
     let finalized_batch_end = finalized.min(end);
+    let finalized_range_count =
+        RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
+    trace!(
+        start = start,
+        finalized_batch_end = finalized_batch_end,
+        batch_count = finalized_range_count,
+        "Streaming finalized blocks (no reorg check)"
+    );
+
     for range in RangeIterator::forward(start, finalized_batch_end, max_block_range) {
+        trace!(range_start = *range.start(), range_end = *range.end(), "Streaming finalized range");
         if !sender.try_stream(range).await {
             return None; // channel closed
         }
@@ -421,6 +455,10 @@ pub(crate) async fn stream_historical_range<N: Network>(
 }
 
 /// Assumes that `min_common_ancestor <= next_start_block <= end`, performs no internal checks.
+#[cfg_attr(
+    feature = "tracing",
+    tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
+)]
 pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
     min_common_ancestor: BlockNumber,
     next_start_block: BlockNumber,
@@ -463,10 +501,16 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
 
         if let Some(common_ancestor) = reorged_opt {
             let common_ancestor = common_ancestor.header().number();
+            info!(
+                common_ancestor = common_ancestor,
+                "Reorg detected during historical streaming, resetting range iterator"
+            );
             if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
                 return None;
             }
-            iter.reset_to((common_ancestor + 1).max(min_common_ancestor));
+            let reset_to = (common_ancestor + 1).max(min_common_ancestor);
+            debug!(reset_to = reset_to, "Resetting range iterator after reorg");
+            iter.reset_to(reset_to);
         }
 
         last_batch_end = Some(batch_end);
