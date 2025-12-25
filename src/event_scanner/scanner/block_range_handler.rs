@@ -1,3 +1,10 @@
+//! Block-range handler implementations used by the event scanner.
+//!
+//! This module defines the [`BlockRangeHandler`] abstraction and concrete handlers:
+//!
+//! * [`StreamHandler`]
+//! * [`LatestEventsHandler`]
+
 use std::ops::RangeInclusive;
 
 use crate::{
@@ -23,6 +30,9 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 /// Handles a stream of scanned block ranges.
 pub trait BlockRangeHandler {
+    /// Consumes a stream of scanned block-range results.
+    ///
+    /// Implementations typically forward data and notifications to registered listeners.
     fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(
         &self,
         stream: S,
