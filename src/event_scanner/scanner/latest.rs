@@ -8,7 +8,7 @@ use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{
         EventScanner, LatestEvents,
-        scanner::block_range_handler::{BlockRangeHandler, CollectionHandler},
+        scanner::block_range_handler::{BlockRangeHandler, LatestEventsHandler},
     },
     robust_provider::IntoRobustProvider,
 };
@@ -154,7 +154,7 @@ impl<N: Network> EventScanner<LatestEvents, N> {
 
         let buffer_capacity = self.buffer_capacity();
 
-        let handler = CollectionHandler::new(
+        let handler = LatestEventsHandler::new(
             self.block_range_scanner.provider().clone(),
             self.listeners.clone(),
             self.config.max_concurrent_fetches,

@@ -21,10 +21,19 @@ use tokio::{
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 
+/// Spawns handlers that consume scanned block ranges.
+///
+/// Implementations are responsible for subscribing to the provided broadcast channel and
+/// forwarding results to the listener streams.
 pub trait ConsumerSpawner {
+    /// Spawns consumer tasks and returns a [`JoinSet`] tracking them.
+    ///
+    /// The returned join set is awaited by [`BlockRangeHandler::handle`] to ensure all consumers
+    /// finish processing before returning.
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()>;
 }
 
+/// Handles a stream of scanned block ranges.
 pub trait BlockRangeHandler: ConsumerSpawner {
     fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(
         &self,
@@ -60,6 +69,11 @@ pub trait BlockRangeHandler: ConsumerSpawner {
     }
 }
 
+/// Streams logs to listeners as soon as each scanned block range is processed.
+///
+/// This handler fetches logs per listener and forwards each non-empty result immediately. It is
+/// used by scanner modes that operate as continuous streams (e.g. historic/live scanning), where
+/// incremental delivery is preferred over collecting a fixed-size window.
 #[derive(Debug)]
 pub struct StreamHandler<N: Network> {
     provider: RobustProvider<N>,
@@ -68,6 +82,14 @@ pub struct StreamHandler<N: Network> {
 }
 
 impl<N: Network> StreamHandler<N> {
+    /// Creates a [`StreamHandler`].
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The robust provider for making RPC calls
+    /// * `listeners` - The list of event listeners to stream logs to
+    /// * `max_concurrent_fetches` - Limits how many log-fetching RPC requests can be in-flight per
+    ///   listener at once.
     pub fn new(
         provider: RobustProvider<N>,
         listeners: Vec<EventListener>,
@@ -164,15 +186,28 @@ impl<N: Network> ConsumerSpawner for StreamHandler<N> {
 
 impl<N: Network> BlockRangeHandler for StreamHandler<N> {}
 
+/// Collects the latest `count` logs per listener before emitting them.
+///
+/// This handler performs a reverse scan (newest-to-oldest) while buffering logs locally. Once
+/// `count` matching logs are collected (or the scan finishes), it emits the collected logs in
+/// chronological order (oldest-to-newest) and stops.
+///
+/// During reorg recovery it prepends newly fetched logs so that the newest-first buffer remains
+/// correctly ordered.
 #[derive(Debug)]
-pub struct CollectionHandler<N: Network> {
+pub struct LatestEventsHandler<N: Network> {
     provider: RobustProvider<N>,
     listeners: Vec<EventListener>,
     max_concurrent_fetches: usize,
     count: usize,
 }
 
-impl<N: Network> CollectionHandler<N> {
+impl<N: Network> LatestEventsHandler<N> {
+    /// Creates a [`LatestEventsHandler`].
+    ///
+    /// `count` is the maximum number of logs to collect per listener before emitting.
+    /// `max_concurrent_fetches` limits how many log-fetching RPC requests can be in-flight per
+    /// listener at once.
     pub fn new(
         provider: RobustProvider<N>,
         listeners: Vec<EventListener>,
@@ -183,7 +218,7 @@ impl<N: Network> CollectionHandler<N> {
     }
 }
 
-impl<N: Network> ConsumerSpawner for CollectionHandler<N> {
+impl<N: Network> ConsumerSpawner for LatestEventsHandler<N> {
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
         debug!(
             listener_count = self.listeners.len(),
@@ -332,7 +367,7 @@ impl<N: Network> ConsumerSpawner for CollectionHandler<N> {
     }
 }
 
-impl<N: Network> BlockRangeHandler for CollectionHandler<N> {}
+impl<N: Network> BlockRangeHandler for LatestEventsHandler<N> {}
 
 /// Invalidates logs from orphaned blocks.
 fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) -> Vec<Log> {
@@ -559,7 +594,7 @@ mod tests {
         let provider = RobustProviderBuilder::fragile(provider).build().await?;
         let (sender, mut receiver) = mpsc::channel(1);
 
-        let handler = CollectionHandler {
+        let handler = LatestEventsHandler {
             provider,
             listeners: vec![EventListener { filter: EventFilter::new(), sender }],
             max_concurrent_fetches: 1,

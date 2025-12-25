@@ -6,7 +6,7 @@ use crate::{
         EventScanner,
         scanner::{
             SyncFromLatestEvents,
-            block_range_handler::{BlockRangeHandler, CollectionHandler, StreamHandler},
+            block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
         },
     },
     robust_provider::IntoRobustProvider,
@@ -99,7 +99,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             .stream_rewind(latest_block, BlockNumberOrTag::Earliest)
             .await?;
 
-        let collection_handler = CollectionHandler::new(
+        let collection_handler = LatestEventsHandler::new(
             self.block_range_scanner.provider().clone(),
             listeners.clone(),
             self.config.max_concurrent_fetches,
