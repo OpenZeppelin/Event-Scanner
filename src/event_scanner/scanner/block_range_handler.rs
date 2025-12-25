@@ -143,10 +143,6 @@ impl<N: Network> StreamHandler<N> {
                         }
                     }
                 }
-
-                // Drop the local channel sender to signal to the range processor that streaming
-                // is done.
-                drop(tx);
             });
         }
 
@@ -343,10 +339,6 @@ impl<N: Network> LatestEventsHandler<N> {
                         }
                     }
                 }
-
-                // Drop the local channel sender to signal to the range processor that streaming is
-                // done.
-                drop(tx);
             });
         }
 
