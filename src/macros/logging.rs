@@ -3,6 +3,7 @@
 //! When the `tracing` feature is disabled, all logging calls compile to no-ops,
 //! ensuring zero runtime cost for users who don't need observability.
 
+#[macro_export]
 #[allow(unused_macros)]
 macro_rules! error {
     ($($arg:tt)*) => {
@@ -12,6 +13,7 @@ macro_rules! error {
     };
 }
 
+#[macro_export]
 #[allow(unused_macros)]
 macro_rules! warn {
     ($($arg:tt)*) => {
@@ -21,6 +23,7 @@ macro_rules! warn {
     };
 }
 
+#[macro_export]
 #[allow(unused_macros)]
 macro_rules! info {
     ($($arg:tt)*) => {
@@ -30,6 +33,7 @@ macro_rules! info {
     };
 }
 
+#[macro_export]
 #[allow(unused_macros)]
 macro_rules! debug {
     ($($arg:tt)*) => {
@@ -39,6 +43,7 @@ macro_rules! debug {
     };
 }
 
+#[macro_export]
 #[allow(unused_macros)]
 macro_rules! trace {
     ($($arg:tt)*) => {
