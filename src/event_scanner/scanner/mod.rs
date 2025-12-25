@@ -45,7 +45,8 @@ use crate::{
     robust_provider::IntoRobustProvider,
 };
 
-mod common;
+pub mod block_range_handler;
+
 mod historic;
 mod latest;
 mod live;
