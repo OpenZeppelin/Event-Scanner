@@ -4,10 +4,12 @@ use alloy::{
     network::{BlockResponse, Network},
 };
 
-use super::common::{ConsumerMode, handle_stream};
 use crate::{
     EventScannerBuilder, ScannerError,
-    event_scanner::{EventScanner, LatestEvents},
+    event_scanner::{
+        EventScanner, LatestEvents,
+        scanner::block_range_handler::{BlockRangeHandler, CollectionHandler},
+    },
     robust_provider::IntoRobustProvider,
 };
 
@@ -150,21 +152,17 @@ impl<N: Network> EventScanner<LatestEvents, N> {
             .stream_rewind(self.config.from_block, self.config.to_block)
             .await?;
 
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let provider = self.block_range_scanner.provider().clone();
-        let listeners = self.listeners.clone();
         let buffer_capacity = self.buffer_capacity();
 
+        let handler = CollectionHandler::new(
+            self.block_range_scanner.provider().clone(),
+            self.listeners.clone(),
+            self.config.max_concurrent_fetches,
+            self.config.count,
+        );
+
         tokio::spawn(async move {
-            handle_stream(
-                stream,
-                &provider,
-                &listeners,
-                ConsumerMode::CollectLatest { count: self.config.count },
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            handler.handle(stream, buffer_capacity).await;
         });
 
         Ok(())

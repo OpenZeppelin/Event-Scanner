@@ -6,7 +6,7 @@ use crate::{
         EventScanner,
         scanner::{
             SyncFromLatestEvents,
-            common::{ConsumerMode, handle_stream},
+            block_range_handler::{BlockRangeHandler, CollectionHandler, StreamHandler},
         },
     },
     robust_provider::IntoRobustProvider,
@@ -85,7 +85,6 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
         let buffer_capacity = self.buffer_capacity();
 
         // Fetch the latest block number.
@@ -100,6 +99,18 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             .stream_rewind(latest_block, BlockNumberOrTag::Earliest)
             .await?;
 
+        let collection_handler = CollectionHandler::new(
+            self.block_range_scanner.provider().clone(),
+            listeners.clone(),
+            self.config.max_concurrent_fetches,
+            self.config.count,
+        );
+        let stream_handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            listeners.clone(),
+            self.config.max_concurrent_fetches,
+        );
+
         // Start streaming...
         tokio::spawn(async move {
             debug!(
@@ -112,15 +123,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             // channel, we must ensure that all latest events are streamed before
             // consuming the live stream, otherwise the log consumers may send events out
             // of order.
-            handle_stream(
-                rewind_stream,
-                &provider,
-                &listeners,
-                ConsumerMode::CollectLatest { count },
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            collection_handler.handle(rewind_stream, buffer_capacity).await;
 
             debug!(
                 start_block = latest_block + 1,
@@ -138,6 +141,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 Ok(stream) => stream,
                 Err(e) => {
                     error!("Failed to setup sync stream after collecting latest events");
+                    // notify all active listeners about the error before dropping the stream
                     for listener in listeners {
                         _ = listener.sender.try_stream(e.clone()).await;
                     }
@@ -146,15 +150,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             };
 
             // Start the live (sync) stream.
-            handle_stream(
-                sync_stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            stream_handler.handle(sync_stream, buffer_capacity).await;
 
             debug!("SyncFromLatestEvents stream ended");
         });

@@ -91,11 +91,11 @@ impl BlockRangeScannerBuilder {
             return Err(ScannerError::InvalidBufferCapacity);
         }
         let provider = provider.into_robust_provider().await?;
-        Ok(BlockRangeScanner {
+        Ok(BlockRangeScanner::new(
             provider,
-            max_block_range: self.max_block_range,
-            past_blocks_storage_capacity: self.past_blocks_storage_capacity,
-            buffer_capacity: self.buffer_capacity,
-        })
+            self.max_block_range,
+            self.past_blocks_storage_capacity,
+            self.buffer_capacity,
+        ))
     }
 }
