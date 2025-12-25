@@ -73,34 +73,38 @@ impl<N: Network> StreamHandler<N> {
     }
 
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
-        self.listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
-            let EventListener { filter, sender } = listener;
+        let mut join_set = JoinSet::new();
 
+        for listener in self.listeners.iter().cloned() {
             let max_concurrent_fetches = self.max_concurrent_fetches;
             let provider = self.provider.clone();
             let mut range_rx = range_tx.subscribe();
 
-            set.spawn(async move {
-                // We use a channel and convert the receiver to a stream because it already has a
-                // convenience function `buffered` for concurrently handling block ranges, while
-                // outputting results in the same order as they were received.
+            join_set.spawn(async move {
+                // We use a channel and convert the receiver to a stream because it already has
+                // a convenience function `buffered` for concurrently
+                // handling block ranges, while outputting results in the
+                // same order as they were received.
                 let (tx, rx) = mpsc::channel::<BlockScannerResult>(max_concurrent_fetches);
 
-                // Process block ranges concurrently in a separate thread so that the current thread
-                // can continue receiving and buffering subsequent block ranges
-                // while the previous ones are being processed.
+                // Process block ranges concurrently in a separate thread so that the current
+                // thread can continue receiving and buffering subsequent
+                // block ranges while the previous ones are being processed.
                 tokio::spawn(async move {
                     let mut stream = ReceiverStream::new(rx)
                         .map(async |message| match message {
-                            Ok(ScannerMessage::Data(range)) => get_logs(range, &filter, &provider)
-                                .await
-                                .map(Message::from)
-                                .map_err(ScannerError::from),
+                            Ok(ScannerMessage::Data(range)) => {
+                                get_logs(range, &listener.filter, &provider)
+                                    .await
+                                    .map(Message::from)
+                                    .map_err(ScannerError::from)
+                            }
                             Ok(ScannerMessage::Notification(notification)) => {
                                 Ok(notification.into())
                             }
-                            // No need to stop the stream on an error, because there will be no more
-                            // values received from the range stream.
+                            // No need to stop the stream on an error, because there will be no
+                            // more values received from the
+                            // range stream.
                             Err(e) => Err(e),
                         })
                         .buffered(max_concurrent_fetches);
@@ -113,7 +117,7 @@ impl<N: Network> StreamHandler<N> {
                             continue;
                         }
 
-                        if !sender.try_stream(result).await {
+                        if !listener.sender.try_stream(result).await {
                             return;
                         }
                     }
@@ -140,13 +144,13 @@ impl<N: Network> StreamHandler<N> {
                     }
                 }
 
-                // Drop the local channel sender to signal to the range processor that streaming is
-                // done.
+                // Drop the local channel sender to signal to the range processor that streaming
+                // is done.
                 drop(tx);
             });
+        }
 
-            set
-        })
+        join_set
     }
 }
 
@@ -208,13 +212,15 @@ impl<N: Network> LatestEventsHandler<N> {
     }
 
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
-        self.listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
+        let mut join_set = JoinSet::new();
+
+        for listener in self.listeners.iter().cloned() {
             let max_concurrent_fetches = self.max_concurrent_fetches;
             let count = self.count;
             let provider = self.provider.clone();
             let mut range_rx = range_tx.subscribe();
 
-            set.spawn(async move {
+            join_set.spawn(async move {
                 // We use a channel and convert the receiver to a stream because it already has a
                 // convenience function `buffered` for concurrently handling block ranges, while
                 // outputting results in the same order as they were received.
@@ -342,9 +348,9 @@ impl<N: Network> LatestEventsHandler<N> {
                 // done.
                 drop(tx);
             });
+        }
 
-            set
-        })
+        join_set
     }
 }
 
