@@ -21,52 +21,12 @@ use tokio::{
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 
-/// Spawns handlers that consume scanned block ranges.
-///
-/// Implementations are responsible for subscribing to the provided broadcast channel and
-/// forwarding results to the listener streams.
-pub trait ConsumerSpawner {
-    /// Spawns consumer tasks and returns a [`JoinSet`] tracking them.
-    ///
-    /// The returned join set is awaited by [`BlockRangeHandler::handle`] to ensure all consumers
-    /// finish processing before returning.
-    fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()>;
-}
-
 /// Handles a stream of scanned block ranges.
-pub trait BlockRangeHandler: ConsumerSpawner {
+pub trait BlockRangeHandler {
     fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(
         &self,
-        mut stream: S,
-        broadcast_channel_capacity: usize,
-    ) -> impl std::future::Future<Output = ()> + Send {
-        trace!("Starting log stream handler");
-
-        let (range_tx, _) = broadcast::channel::<BlockScannerResult>(broadcast_channel_capacity);
-
-        let consumers = self.spawn(&range_tx);
-
-        async move {
-            while let Some(message) = stream.next().await {
-                if range_tx.send(message).is_err() {
-                    debug!("All consumers dropped, stopping stream handler");
-                    break;
-                }
-            }
-
-            debug!("Block range stream ended, waiting for consumers");
-
-            // Close the channel sender to signal to the log consumers that streaming is done.
-            drop(range_tx);
-
-            // ensure all consumers finish before they're dropped - this is to ensure that this
-            // consumer set finishes its log processing before the next consumer set can
-            // be spawned in a subsequent `handle_stream` invocation.
-            consumers.join_all().await;
-
-            debug!("All event consumers finished");
-        }
-    }
+        stream: S,
+    ) -> impl std::future::Future<Output = ()> + Send;
 }
 
 /// Streams logs to listeners as soon as each scanned block range is processed.
@@ -79,6 +39,7 @@ pub struct StreamHandler<N: Network> {
     provider: RobustProvider<N>,
     listeners: Vec<EventListener>,
     max_concurrent_fetches: usize,
+    broadcast_channel_capacity: usize,
 }
 
 impl<N: Network> StreamHandler<N> {
@@ -90,23 +51,18 @@ impl<N: Network> StreamHandler<N> {
     /// * `listeners` - The list of event listeners to stream logs to
     /// * `max_concurrent_fetches` - Limits how many log-fetching RPC requests can be in-flight per
     ///   listener at once.
+    /// * `broadcast_channel_capacity` - Capacity for the broadcast channel used to distribute block
+    ///   ranges to consumers.
     pub fn new(
         provider: RobustProvider<N>,
         listeners: Vec<EventListener>,
         max_concurrent_fetches: usize,
+        broadcast_channel_capacity: usize,
     ) -> Self {
-        Self { provider, listeners, max_concurrent_fetches }
+        Self { provider, listeners, max_concurrent_fetches, broadcast_channel_capacity }
     }
-}
 
-impl<N: Network> ConsumerSpawner for StreamHandler<N> {
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
-        debug!(
-            listener_count = self.listeners.len(),
-            max_concurrent_fetches = self.max_concurrent_fetches,
-            "Spawning log consumers that stream logs as they receive them"
-        );
-
         self.listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
             let EventListener { filter, sender } = listener;
 
@@ -184,7 +140,24 @@ impl<N: Network> ConsumerSpawner for StreamHandler<N> {
     }
 }
 
-impl<N: Network> BlockRangeHandler for StreamHandler<N> {}
+impl<N: Network> BlockRangeHandler for StreamHandler<N> {
+    async fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(&self, stream: S) {
+        debug!(
+            listener_count = self.listeners.len(),
+            max_concurrent_fetches = self.max_concurrent_fetches,
+            broadcast_channel_capacity = self.broadcast_channel_capacity,
+            max_concurrent_fetches = self.max_concurrent_fetches,
+            "Starting block range handler that forwards logs as they are received"
+        );
+
+        let (range_tx, _) =
+            broadcast::channel::<BlockScannerResult>(self.broadcast_channel_capacity);
+
+        let consumers = self.spawn(&range_tx);
+
+        broadcast_stream(stream, range_tx, consumers).await;
+    }
+}
 
 /// Collects the latest `count` logs per listener before streaming them.
 ///
@@ -200,6 +173,7 @@ pub struct LatestEventsHandler<N: Network> {
     listeners: Vec<EventListener>,
     max_concurrent_fetches: usize,
     count: usize,
+    broadcast_channel_capacity: usize,
 }
 
 impl<N: Network> LatestEventsHandler<N> {
@@ -212,25 +186,18 @@ impl<N: Network> LatestEventsHandler<N> {
     /// * `max_concurrent_fetches` - Maximum number of concurrent log-fetching RPC requests per
     ///   listener
     /// * `count` - Maximum number of logs to collect per listener before streaming
+    /// * `broadcast_channel_capacity` - Capacity of the broadcast channel for forwarding results
     pub fn new(
         provider: RobustProvider<N>,
         listeners: Vec<EventListener>,
         max_concurrent_fetches: usize,
         count: usize,
+        broadcast_channel_capacity: usize,
     ) -> Self {
-        Self { provider, listeners, max_concurrent_fetches, count }
+        Self { provider, listeners, max_concurrent_fetches, count, broadcast_channel_capacity }
     }
-}
 
-impl<N: Network> ConsumerSpawner for LatestEventsHandler<N> {
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
-        debug!(
-            listener_count = self.listeners.len(),
-            max_concurrent_fetches = self.max_concurrent_fetches,
-            count = self.count,
-            "Spawning log consumers that collect logs before streaming them"
-        );
-
         self.listeners.iter().cloned().fold(JoinSet::new(), |mut set, listener| {
             let max_concurrent_fetches = self.max_concurrent_fetches;
             let count = self.count;
@@ -371,7 +338,50 @@ impl<N: Network> ConsumerSpawner for LatestEventsHandler<N> {
     }
 }
 
-impl<N: Network> BlockRangeHandler for LatestEventsHandler<N> {}
+impl<N: Network> BlockRangeHandler for LatestEventsHandler<N> {
+    async fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(&self, stream: S) {
+        debug!(
+            listener_count = self.listeners.len(),
+            max_concurrent_fetches = self.max_concurrent_fetches,
+            broadcast_channel_capacity = self.broadcast_channel_capacity,
+            max_concurrent_fetches = self.max_concurrent_fetches,
+            count = self.count,
+            "Starting block range handler that collects logs before streaming them, as required by the latest events mode"
+        );
+
+        let (range_tx, _) =
+            broadcast::channel::<BlockScannerResult>(self.broadcast_channel_capacity);
+
+        let consumers = self.spawn(&range_tx);
+
+        broadcast_stream(stream, range_tx, consumers).await;
+    }
+}
+
+async fn broadcast_stream<S: Stream<Item = BlockScannerResult> + Unpin + Send>(
+    mut stream: S,
+    range_tx: Sender<Result<ScannerMessage<RangeInclusive<u64>>, ScannerError>>,
+    consumers: JoinSet<()>,
+) {
+    while let Some(message) = stream.next().await {
+        if range_tx.send(message).is_err() {
+            debug!("All consumers dropped, stopping stream handler");
+            break;
+        }
+    }
+
+    debug!("Block range stream ended, waiting for consumers");
+
+    // Close the channel sender to signal to the log consumers that streaming is done.
+    drop(range_tx);
+
+    // ensure all consumers finish before they're dropped - this is to ensure that this
+    // consumer set finishes its log processing before the next consumer set can
+    // be spawned in a subsequent `handle_stream` invocation.
+    consumers.join_all().await;
+
+    debug!("All event consumers finished");
+}
 
 /// Invalidates logs from orphaned blocks.
 fn discard_logs_from_orphaned_blocks(collected: Vec<Log>, common_ancestor: u64) -> Vec<Log> {
@@ -577,9 +587,12 @@ mod tests {
             provider,
             listeners: vec![EventListener { filter: EventFilter::new(), sender }],
             max_concurrent_fetches: 1,
+            broadcast_channel_capacity: 1,
         };
 
-        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(1);
+        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(
+            stream_handler.broadcast_channel_capacity,
+        );
 
         let _set = stream_handler.spawn(&range_tx);
 
@@ -603,9 +616,12 @@ mod tests {
             listeners: vec![EventListener { filter: EventFilter::new(), sender }],
             max_concurrent_fetches: 1,
             count: 5,
+            broadcast_channel_capacity: 1,
         };
 
-        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(1);
+        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(
+            handler.broadcast_channel_capacity,
+        );
 
         let _set = handler.spawn(&range_tx);
 

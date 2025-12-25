@@ -146,15 +146,17 @@ impl<N: Network> EventScanner<Historic, N> {
             .stream_historical(self.config.from_block, self.config.to_block)
             .await?;
 
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let provider = self.block_range_scanner.provider().clone();
-        let listeners = self.listeners.clone();
-        let buffer_capacity = self.buffer_capacity();
+        let broadcast_channel_capacity = self.buffer_capacity();
 
-        let handler = StreamHandler::new(provider, listeners, max_concurrent_fetches);
+        let handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            self.listeners,
+            self.config.max_concurrent_fetches,
+            broadcast_channel_capacity,
+        );
 
         tokio::spawn(async move {
-            handler.handle(stream, buffer_capacity).await;
+            handler.handle(stream).await;
         });
 
         Ok(())

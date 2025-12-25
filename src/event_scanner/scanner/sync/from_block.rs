@@ -94,10 +94,11 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
             self.block_range_scanner.provider().clone(),
             self.listeners,
             self.config.max_concurrent_fetches,
+            buffer_capacity,
         );
 
         tokio::spawn(async move {
-            handler.handle(stream, buffer_capacity).await;
+            handler.handle(stream).await;
         });
 
         Ok(())

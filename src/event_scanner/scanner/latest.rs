@@ -152,17 +152,18 @@ impl<N: Network> EventScanner<LatestEvents, N> {
             .stream_rewind(self.config.from_block, self.config.to_block)
             .await?;
 
-        let buffer_capacity = self.buffer_capacity();
+        let broadcast_channel_capacity = self.buffer_capacity();
 
         let handler = LatestEventsHandler::new(
             self.block_range_scanner.provider().clone(),
-            self.listeners.clone(),
+            self.listeners,
             self.config.max_concurrent_fetches,
             self.config.count,
+            broadcast_channel_capacity,
         );
 
         tokio::spawn(async move {
-            handler.handle(stream, buffer_capacity).await;
+            handler.handle(stream).await;
         });
 
         Ok(())

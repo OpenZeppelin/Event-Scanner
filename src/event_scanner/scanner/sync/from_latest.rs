@@ -85,7 +85,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
-        let buffer_capacity = self.buffer_capacity();
+        let broadcast_channel_capacity = self.buffer_capacity();
 
         // Fetch the latest block number.
         // This is used to determine the starting point for the rewind stream and the live
@@ -104,11 +104,13 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             listeners.clone(),
             self.config.max_concurrent_fetches,
             self.config.count,
+            broadcast_channel_capacity,
         );
         let stream_handler = StreamHandler::new(
             self.block_range_scanner.provider().clone(),
             listeners.clone(),
             self.config.max_concurrent_fetches,
+            broadcast_channel_capacity,
         );
 
         // Start streaming...
@@ -123,7 +125,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             // channel, we must ensure that all latest events are streamed before
             // consuming the live stream, otherwise the log consumers may send events out
             // of order.
-            collection_handler.handle(rewind_stream, buffer_capacity).await;
+            collection_handler.handle(rewind_stream).await;
 
             debug!(
                 start_block = latest_block + 1,
@@ -150,7 +152,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             };
 
             // Start the live (sync) stream.
-            stream_handler.handle(sync_stream, buffer_capacity).await;
+            stream_handler.handle(sync_stream).await;
 
             debug!("SyncFromLatestEvents stream ended");
         });
