@@ -63,6 +63,7 @@ impl<N: Network> StreamHandler<N> {
     ///   listener at once.
     /// * `broadcast_channel_capacity` - Capacity for the broadcast channel used to distribute block
     ///   ranges to consumers.
+    #[must_use]
     pub fn new(
         provider: RobustProvider<N>,
         listeners: Vec<EventListener>,
@@ -197,6 +198,7 @@ impl<N: Network> LatestEventsHandler<N> {
     ///   listener
     /// * `count` - Maximum number of logs to collect per listener before streaming
     /// * `broadcast_channel_capacity` - Capacity of the broadcast channel for forwarding results
+    #[must_use]
     pub fn new(
         provider: RobustProvider<N>,
         listeners: Vec<EventListener>,
@@ -207,6 +209,7 @@ impl<N: Network> LatestEventsHandler<N> {
         Self { provider, listeners, max_concurrent_fetches, count, broadcast_channel_capacity }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
         let mut join_set = JoinSet::new();
 
@@ -258,7 +261,7 @@ impl<N: Network> LatestEventsHandler<N> {
 
                                 let last_log_block_num = logs
                                     .last()
-                                    .expect("logs is not empty")
+                                    .expect("logs already confirmed not empty")
                                     .block_number
                                     .expect("pending blocks not supported");
                                 // Check if in reorg recovery and past the reorg range
@@ -323,8 +326,7 @@ impl<N: Network> LatestEventsHandler<N> {
                     match range_rx.recv().await {
                         Ok(message) => {
                             if tx.send(message).await.is_err() {
-                                // range processor has streamed the expected number of logs, stop
-                                // sending ranges
+                                // range processor has streamed the expected number of logs
                                 break;
                             }
                         }
