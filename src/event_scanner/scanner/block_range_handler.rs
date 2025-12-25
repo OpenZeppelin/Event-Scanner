@@ -186,7 +186,7 @@ impl<N: Network> ConsumerSpawner for StreamHandler<N> {
 
 impl<N: Network> BlockRangeHandler for StreamHandler<N> {}
 
-/// Collects the latest `count` logs per listener before emitting them.
+/// Collects the latest `count` logs per listener before streaming them.
 ///
 /// This handler performs a reverse scan (newest-to-oldest) while buffering logs locally. Once
 /// `count` matching logs are collected (or the scan finishes), it emits the collected logs in
@@ -205,9 +205,13 @@ pub struct LatestEventsHandler<N: Network> {
 impl<N: Network> LatestEventsHandler<N> {
     /// Creates a [`LatestEventsHandler`].
     ///
-    /// `count` is the maximum number of logs to collect per listener before emitting.
-    /// `max_concurrent_fetches` limits how many log-fetching RPC requests can be in-flight per
-    /// listener at once.
+    /// # Arguments
+    ///
+    /// * `provider` - The robust provider to use for fetching logs
+    /// * `listeners` - The list of event listeners to collect logs for
+    /// * `max_concurrent_fetches` - Maximum number of concurrent log-fetching RPC requests per
+    ///   listener
+    /// * `count` - Maximum number of logs to collect per listener before streaming
     pub fn new(
         provider: RobustProvider<N>,
         listeners: Vec<EventListener>,
