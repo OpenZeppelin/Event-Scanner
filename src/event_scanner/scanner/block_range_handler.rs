@@ -21,15 +21,19 @@ use tokio::{
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 
+pub trait ConsumerSpawner {
+    fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()>;
+}
+
 pub trait BlockRangeHandler: ConsumerSpawner {
     fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(
         &self,
         mut stream: S,
-        buffer_capacity: usize,
+        broadcast_channel_capacity: usize,
     ) -> impl std::future::Future<Output = ()> + Send {
         trace!("Starting log stream handler");
 
-        let (range_tx, _) = broadcast::channel::<BlockScannerResult>(buffer_capacity);
+        let (range_tx, _) = broadcast::channel::<BlockScannerResult>(broadcast_channel_capacity);
 
         let consumers = self.spawn(&range_tx);
 
@@ -54,10 +58,6 @@ pub trait BlockRangeHandler: ConsumerSpawner {
             debug!("All event consumers finished");
         }
     }
-}
-
-pub trait ConsumerSpawner {
-    fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()>;
 }
 
 #[derive(Debug)]
