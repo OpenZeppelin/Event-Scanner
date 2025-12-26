@@ -66,10 +66,10 @@ async fn main() -> anyhow::Result<()> {
         _ = counter_contract.increase().send().await?;
     }
 
-    let token = scanner.start().await?;
+    let proof = scanner.start().await?;
 
-    // Access the stream using the token (proves scanner is started)
-    let mut stream = subscription.stream(&token);
+    // Access the stream using the proof (proves scanner is started)
+    let mut stream = subscription.stream(&proof);
 
     while let Some(message) = stream.next().await {
         match message {

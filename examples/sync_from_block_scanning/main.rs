@@ -72,10 +72,10 @@ async fn main() -> anyhow::Result<()> {
     let subscription = scanner.subscribe(increase_filter);
 
     info!("Starting sync scanner...");
-    let token = scanner.start().await.expect("failed to start scanner");
+    let proof = scanner.start().await.expect("failed to start scanner");
 
-    // Access the stream using the token (proves scanner is started)
-    let mut stream = subscription.stream(&token);
+    // Access the stream using the proof (proves scanner is started)
+    let mut stream = subscription.stream(&proof);
 
     info!("Creating live events...");
     for i in 0..2 {

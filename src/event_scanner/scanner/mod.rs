@@ -195,8 +195,8 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let subscription = scanner.subscribe(filter);
-    /// let token = scanner.start().await?;
-    /// let mut stream = subscription.stream(&token);
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(Ok(Message::Data(logs))) = stream.next().await {
     ///     println!("Received {} logs", logs.len());
@@ -272,8 +272,8 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let subscription = scanner.subscribe(filter);
-    /// let token = scanner.start().await?;
-    /// let mut stream = subscription.stream(&token);
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
@@ -362,8 +362,8 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let subscription = scanner.subscribe(filter);
-    /// let token = scanner.start().await?;
-    /// let mut stream = subscription.stream(&token);
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// // Expect a single message with up to 10 logs, then the stream ends
     /// while let Some(Ok(Message::Data(logs))) = stream.next().await {
@@ -588,11 +588,11 @@ impl<Mode> EventScannerBuilder<Mode> {
 /// // Create subscription (cannot access stream yet)
 /// let subscription = scanner.subscribe(filter);
 ///
-/// // Start scanner and get token
-/// let token = scanner.start().await?;
+/// // Start scanner and get proof
+/// let proof = scanner.start().await?;
 ///
-/// // Now access the stream with the token
-/// let mut stream = subscription.stream(&token);
+/// // Now access the stream with the proof
+/// let mut stream = subscription.stream(&proof);
 ///
 /// while let Some(msg) = stream.next().await {
 ///     // process events
