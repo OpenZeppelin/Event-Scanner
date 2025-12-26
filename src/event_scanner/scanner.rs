@@ -16,8 +16,9 @@ use crate::{
 
 /// An event scanner configured in mode `Mode` and bound to network `N`.
 ///
-/// Create an instance via [`EventScannerBuilder`], register subscriptions with
-/// [`EventScanner::subscribe`], then start the scanner with the mode-specific `start()` method.
+/// Create an instance via [`EventScannerBuilder`](crate::EventScannerBuilder), register
+/// subscriptions with [`EventScanner::subscribe`], then start the scanner with the mode-specific
+/// `start()` method.
 ///
 /// # Starting the scanner
 ///
@@ -29,7 +30,7 @@ use crate::{
 /// - **Non-blocking start**: `start()` returns immediately after spawning background tasks.
 ///   Subscription streams yield events asynchronously.
 /// - **Errors after startup**: most runtime failures are delivered through subscription streams as
-///   [`ScannerError`] items, rather than being returned from `start()`.
+///   [`ScannerError`](crate::ScannerError) items, rather than being returned from `start()`.
 #[derive(Debug)]
 pub struct EventScanner<Mode = Unspecified, N: Network = Ethereum> {
     pub(crate) config: Mode,
@@ -49,8 +50,8 @@ impl<Mode, N: Network> EventScanner<Mode, N> {
 /// underlying stream but prevents access until [`stream()`](EventSubscription::stream) is called
 /// with a valid [`StartProof`].
 ///
-/// This pattern ensures at compile time that [`EventScanner::start()`](crate::EventScanner::start)
-/// is called before attempting to read from the event stream.
+/// This pattern ensures at compile time that `EventScanner::start()` is called before attempting to
+/// read from the event stream.
 ///
 /// # Example
 ///
@@ -114,23 +115,14 @@ impl<Mode, N: Network> EventScanner<Mode, N> {
         self.block_range_scanner.buffer_capacity()
     }
 
-    /// Registers an event subscription and returns its stream.
+    /// Registers an event subscription.
     ///
-    /// Each call creates a separate subscription stream with its own buffer.
+    /// Each call creates a separate subscription with its own buffer.
     ///
     /// # Ordering
     ///
-    /// Ordering is guaranteed only within a single returned stream. There is no ordering
-    /// guarantee across streams created by multiple calls to this method.
-    ///
-    /// # Errors
-    ///
-    /// The stream yields [`ScannerError`] values on failures. In particular, if a consumer cannot
-    /// keep up and internal buffers lag, the stream yields [`ScannerError::Lagged`].
-    ///
-    /// # Notes
-    ///
-    /// For scanner to properly stream events, register all subscriptions before calling `start()`.
+    /// Ordering is guaranteed only within a single returned subscription. There is no ordering
+    /// guarantee across subscriptions created by multiple calls to this method.
     #[must_use]
     pub fn subscribe(&mut self, filter: EventFilter) -> EventSubscription {
         let (sender, receiver) =
