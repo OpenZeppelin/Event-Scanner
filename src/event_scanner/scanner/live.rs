@@ -3,7 +3,7 @@ use alloy::network::Network;
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{
-        EventScanner,
+        EventScanner, StartProof,
         scanner::{
             Live,
             block_range_handler::{BlockRangeHandler, StreamHandler},
@@ -72,7 +72,7 @@ impl<N: Network> EventScanner<Live, N> {
     ///
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
-    pub async fn start(self) -> Result<(), ScannerError> {
+    pub async fn start(self) -> Result<StartProof, ScannerError> {
         info!(
             block_confirmations = self.config.block_confirmations,
             listener_count = self.listeners.len(),
@@ -93,7 +93,7 @@ impl<N: Network> EventScanner<Live, N> {
             handler.handle(stream).await;
         });
 
-        Ok(())
+        Ok(StartProof::new())
     }
 }
 

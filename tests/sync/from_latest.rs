@@ -10,7 +10,7 @@ async fn happy_path_no_duplicates() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     // Historical: produce 6 events total
     contract.increase().send().await?.watch().await?;
@@ -21,7 +21,8 @@ async fn happy_path_no_duplicates() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
 
     // Ask for the latest 3, then live
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Latest phase
     assert_next!(
@@ -58,13 +59,14 @@ async fn fewer_historical_then_continues_live() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 5, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     // Historical: only 2 available
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Latest phase returns all available
     assert_next!(
@@ -100,7 +102,7 @@ async fn exact_historical_count_then_live() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 4, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     // Historical: produce exactly 4 events
     contract.increase().send().await?.watch().await?;
@@ -108,7 +110,8 @@ async fn exact_historical_count_then_live() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(
         stream,
@@ -141,9 +144,10 @@ async fn no_historical_only_live_streams() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 5, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Latest is empty
     assert_next!(stream, Notification::NoPastLogsFound);
@@ -176,7 +180,7 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
     let provider = setup.provider;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     // Historical: emit 3, mine 1 empty block to form a clear boundary
     contract.increase().send().await?.watch().await?;
@@ -188,7 +192,8 @@ async fn block_gaps_do_not_affect_number_of_events_streamed() -> anyhow::Result<
 
     provider.primary().anvil_mine(Some(1), None).await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Latest phase
     assert_next!(
@@ -221,14 +226,15 @@ async fn waiting_on_live_logs_arriving() -> anyhow::Result<()> {
     let setup = setup_sync_from_latest_scanner(None, None, 3, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     // Historical: emit 3
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Latest phase
     assert_next!(

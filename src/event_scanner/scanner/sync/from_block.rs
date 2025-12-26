@@ -3,7 +3,7 @@ use alloy::{eips::BlockId, network::Network};
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{
-        EventScanner, SyncFromBlock,
+        EventScanner, StartProof, SyncFromBlock,
         scanner::block_range_handler::{BlockRangeHandler, StreamHandler},
     },
     robust_provider::IntoRobustProvider,
@@ -75,7 +75,7 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` cannot be resolved.
-    pub async fn start(self) -> Result<(), ScannerError> {
+    pub async fn start(self) -> Result<StartProof, ScannerError> {
         info!(
             from_block = ?self.config.from_block,
             block_confirmations = self.config.block_confirmations,
@@ -101,7 +101,7 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
             handler.handle(stream).await;
         });
 
-        Ok(())
+        Ok(StartProof::new())
     }
 }
 

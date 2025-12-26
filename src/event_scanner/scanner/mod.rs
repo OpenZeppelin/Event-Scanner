@@ -39,9 +39,12 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    BlockRangeScannerBuilder, EventFilter, ScannerError,
-    block_range_scanner::{BlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS, RingBufferCapacity},
-    event_scanner::{EventScannerResult, listener::EventListener},
+    block_range_scanner::{
+        BlockRangeScanner, BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS,
+        RingBufferCapacity,
+    },
+    error::ScannerError,
+    event_scanner::{EventScannerResult, filter::EventFilter, listener::EventListener},
     robust_provider::IntoRobustProvider,
 };
 
@@ -191,9 +194,9 @@ impl EventScannerBuilder<Unspecified> {
     /// let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
-    /// let mut stream = scanner.subscribe(filter);
-    ///
-    /// scanner.start().await?;
+    /// let subscription = scanner.subscribe(filter);
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(Ok(Message::Data(logs))) = stream.next().await {
     ///     println!("Received {} logs", logs.len());
@@ -268,9 +271,9 @@ impl EventScannerBuilder<Unspecified> {
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
-    /// let mut stream = scanner.subscribe(filter);
-    ///
-    /// scanner.start().await?;
+    /// let subscription = scanner.subscribe(filter);
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
@@ -358,9 +361,9 @@ impl EventScannerBuilder<Unspecified> {
     /// let mut scanner = EventScannerBuilder::latest(10).connect(robust_provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
-    /// let mut stream = scanner.subscribe(filter);
-    ///
-    /// scanner.start().await?;
+    /// let subscription = scanner.subscribe(filter);
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// // Expect a single message with up to 10 logs, then the stream ends
     /// while let Some(Ok(Message::Data(logs))) = stream.next().await {
@@ -568,6 +571,58 @@ impl<Mode> EventScannerBuilder<Mode> {
     }
 }
 
+/// A subscription to scanner events that requires proof the scanner has started.
+///
+/// Created by [`EventScanner::subscribe()`](crate::EventScanner::subscribe), this type holds the
+/// underlying stream but prevents access until [`stream()`](EventSubscription::stream) is called
+/// with a valid [`StartProof`].
+///
+/// This pattern ensures at compile time that [`EventScanner::start()`](crate::EventScanner::start)
+/// is called before attempting to read from the event stream.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut scanner = EventScannerBuilder::live().connect(provider).await?;
+///
+/// // Create subscription (cannot access stream yet)
+/// let subscription = scanner.subscribe(filter);
+///
+/// // Start scanner and get proof
+/// let proof = scanner.start().await?;
+///
+/// // Now access the stream with the proof
+/// let mut stream = subscription.stream(&proof);
+///
+/// while let Some(msg) = stream.next().await {
+///     // process events
+/// }
+/// ```
+pub struct EventSubscription {
+    inner: ReceiverStream<EventScannerResult>,
+}
+
+impl EventSubscription {
+    /// Creates a new subscription wrapping the given stream.
+    pub(crate) fn new(inner: ReceiverStream<EventScannerResult>) -> Self {
+        Self { inner }
+    }
+
+    /// Access the event stream.
+    ///
+    /// Requires a reference to a [`StartProof`] as proof that the scanner
+    /// has been started. The proof is obtained by calling
+    /// `EventScanner::start()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `_proof` - Proof that the scanner has been started
+    #[must_use]
+    pub fn stream(self, _proof: &StartProof) -> ReceiverStream<EventScannerResult> {
+        self.inner
+    }
+}
+
 impl<Mode, N: Network> EventScanner<Mode, N> {
     /// Returns the configured stream buffer capacity.
     #[must_use]
@@ -593,11 +648,43 @@ impl<Mode, N: Network> EventScanner<Mode, N> {
     ///
     /// For scanner to properly stream events, register all subscriptions before calling `start()`.
     #[must_use]
-    pub fn subscribe(&mut self, filter: EventFilter) -> ReceiverStream<EventScannerResult> {
+    pub fn subscribe(&mut self, filter: EventFilter) -> EventSubscription {
         let (sender, receiver) =
             mpsc::channel::<EventScannerResult>(self.block_range_scanner.buffer_capacity());
         self.listeners.push(EventListener { filter, sender });
-        ReceiverStream::new(receiver)
+        EventSubscription::new(ReceiverStream::new(receiver))
+    }
+}
+
+/// Proof that the scanner has been started.
+///
+/// This proof is returned by `EventScanner::start()` and must be passed to
+/// [`EventSubscription::stream()`] to access the event stream. This ensures at compile
+/// time that the scanner is started before attempting to read events.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut scanner = EventScannerBuilder::sync().from_block(0).connect(provider).await?;
+/// let subscription = scanner.subscribe(filter);
+///
+/// // Start the scanner and get the proof
+/// let proof = scanner.start().await?;
+///
+/// // Now we can access the stream
+/// let mut stream = subscription.stream(&proof);
+/// ```
+#[derive(Debug, Clone)]
+pub struct StartProof {
+    /// Private field prevents construction outside this crate
+    _private: (),
+}
+
+impl StartProof {
+    /// Creates a new start proof.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self { _private: () }
     }
 }
 

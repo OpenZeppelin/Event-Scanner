@@ -10,13 +10,14 @@ async fn exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
     let setup = setup_latest_scanner(None, None, 5, None, None).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     for _ in 0..8 {
         contract.increase().send().await?.watch().await?;
     }
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(
         stream,
@@ -39,14 +40,15 @@ async fn fewer_available_than_count_returns_all() -> anyhow::Result<()> {
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     // Produce only 3 events
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(
         stream,
@@ -66,9 +68,10 @@ async fn no_past_events_returns_empty() -> anyhow::Result<()> {
     let count = 5;
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(stream, Notification::NoPastLogsFound);
     assert_closed!(stream);
@@ -97,9 +100,10 @@ async fn respects_range_subset() -> anyhow::Result<()> {
 
     let mut scanner_with_range =
         EventScannerBuilder::latest(10).from_block(start).to_block(end).connect(provider).await?;
-    let mut stream_with_range = scanner_with_range.subscribe(default_filter);
+    let subscription = scanner_with_range.subscribe(default_filter);
 
-    scanner_with_range.start().await?;
+    let proof = scanner_with_range.start().await?;
+    let mut stream_with_range = subscription.stream(&proof);
 
     assert_next!(
         stream_with_range,
@@ -119,13 +123,13 @@ async fn multiple_listeners_to_same_event_receive_same_results() -> anyhow::Resu
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
     let mut scanner = setup.scanner;
-    let mut stream1 = setup.stream;
+    let subscription1 = setup.subscription;
 
     // Add a second listener with the same filter
     let filter2 = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountIncreased::SIGNATURE);
-    let mut stream2 = scanner.subscribe(filter2);
+    let subscription2 = scanner.subscribe(filter2);
 
     // Produce 7 events
     contract.increase().send().await?.watch().await?;
@@ -136,7 +140,9 @@ async fn multiple_listeners_to_same_event_receive_same_results() -> anyhow::Resu
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream1 = subscription1.stream(&proof);
+    let mut stream2 = subscription2.stream(&proof);
 
     let expected = &[
         TestCounter::CountIncreased { newCount: U256::from(3) },
@@ -166,13 +172,13 @@ async fn different_filters_receive_different_results() -> anyhow::Result<()> {
     let filter_inc = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountIncreased::SIGNATURE);
-    let mut stream_inc = scanner.subscribe(filter_inc);
+    let subscription_inc = scanner.subscribe(filter_inc);
 
     // Second listener for CountDecreased
     let filter_dec = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountDecreased::SIGNATURE);
-    let mut stream_dec = scanner.subscribe(filter_dec);
+    let subscription_dec = scanner.subscribe(filter_dec);
 
     // Produce 5 increases, then 2 decreases
     contract.increase().send().await?.watch().await?;
@@ -186,7 +192,9 @@ async fn different_filters_receive_different_results() -> anyhow::Result<()> {
 
     // Ask for latest 3 across the full range: each filtered listener should receive their own last
     // 3 events
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream_inc = subscription_inc.stream(&proof);
+    let mut stream_dec = subscription_dec.stream(&proof);
 
     assert_next!(
         stream_inc,
@@ -216,13 +224,13 @@ async fn mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()>
     let setup = setup_latest_scanner(None, None, count, None, None).await?;
     let contract = setup.contract;
     let mut scanner = setup.scanner;
-    let mut stream_inc = setup.stream; // CountIncreased by default
+    let subscription_inc = setup.subscription; // CountIncreased by default
 
     // Add a CountDecreased listener
     let filter_dec = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountDecreased::SIGNATURE);
-    let mut stream_dec = scanner.subscribe(filter_dec);
+    let subscription_dec = scanner.subscribe(filter_dec);
 
     contract.increase().send().await?.watch().await?; // inc(1)
     contract.increase().send().await?.watch().await?; // inc(2)
@@ -230,7 +238,9 @@ async fn mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()>
     contract.increase().send().await?.watch().await?; // inc(2)
     contract.decrease().send().await?.watch().await?; // dec(1)
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream_inc = subscription_inc.stream(&proof);
+    let mut stream_dec = subscription_dec.stream(&proof);
 
     assert_next!(
         stream_inc,
@@ -264,7 +274,7 @@ async fn ignores_non_tracked_contract() -> anyhow::Result<()> {
     let contract_b = deploy_counter(provider.primary()).await?;
 
     // Listener only for contract A CountIncreased
-    let mut stream_a = setup.stream;
+    let subscription_a = setup.subscription;
 
     // Emit interleaved events from A and B: A(1), B(1), A(2), B(2), A(3)
     contract_a.increase().send().await?.watch().await?;
@@ -273,7 +283,8 @@ async fn ignores_non_tracked_contract() -> anyhow::Result<()> {
     contract_b.increase().send().await?.watch().await?; // ignored by filter
     contract_a.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream_a = subscription_a.stream(&proof);
 
     assert_next!(
         stream_a,
@@ -308,9 +319,10 @@ async fn large_gaps_and_empty_ranges() -> anyhow::Result<()> {
 
     let mut scanner_with_range =
         EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
-    let mut stream_with_range = scanner_with_range.subscribe(default_filter);
+    let subscription = scanner_with_range.subscribe(default_filter);
 
-    scanner_with_range.start().await?;
+    let proof = scanner_with_range.start().await?;
+    let mut stream_with_range = subscription.stream(&proof);
 
     assert_next!(
         stream_with_range,
@@ -339,9 +351,10 @@ async fn boundary_range_single_block() -> anyhow::Result<()> {
 
     let mut scanner_with_range =
         EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
-    let mut stream_with_range = scanner_with_range.subscribe(default_filter);
+    let subscription = scanner_with_range.subscribe(default_filter);
 
-    scanner_with_range.start().await?;
+    let proof = scanner_with_range.start().await?;
+    let mut stream_with_range = subscription.stream(&proof);
 
     assert_next!(stream_with_range, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
     assert_closed!(stream_with_range);

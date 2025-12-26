@@ -98,7 +98,9 @@ macro_rules! assert_empty {
 /// async fn test_event_order() {
 ///     // scanner setup...
 ///
-///     let mut stream = scanner.subscribe(EventFilter::new().contract_address(contract_address));
+///     let subscription = scanner.subscribe(EventFilter::new().contract_address(contract_address));
+///     let handle = scanner.start().await.unwrap();
+///     let mut stream = subscription.stream(&handle);
 ///
 ///     // Assert these two events are emitted in order
 ///     assert_event_sequence!(

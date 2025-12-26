@@ -85,10 +85,13 @@ async fn run_scanner(
         .contract_address(contract)
         .event(MyContract::SomeEvent::SIGNATURE);
 
-    let mut stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    // Start the scanner
-    scanner.start().await?;
+    // Start the scanner and get the proof
+    let proof = scanner.start().await?;
+
+    // Access the stream using the proof
+    let mut stream = subscription.stream(&proof);
 
     // Process messages from the stream
     while let Some(message) = stream.next().await {
@@ -174,7 +177,7 @@ let scanner = EventScannerBuilder::sync()
     .await?;
 ```
 
-Invoking `scanner.start()` starts the scanner in the specified mode.
+Invoking `scanner.start()` starts the scanner in the specified mode and returns a `StartProof` that must be passed to `subscription.stream()` to access the event stream. This compile-time guarantee ensures the scanner is started before attempting to read events.
 
 ### Defining Event Filters
 

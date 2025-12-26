@@ -13,9 +13,10 @@ async fn track_all_events_from_contract() -> anyhow::Result<()> {
     // Create filter that tracks ALL events from a specific contract (no event signature specified)
     let filter = EventFilter::new().contract_address(contract_address);
 
-    let mut stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Generate both increase and decrease events
     for _ in 0..5 {
@@ -52,9 +53,10 @@ async fn track_all_events_in_block_range() -> anyhow::Result<()> {
     // specified)
     let filter = EventFilter::new();
 
-    let mut stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Generate events from our contract
     for _ in 0..3 {
@@ -82,10 +84,12 @@ async fn mixed_optional_and_required_filters() -> anyhow::Result<()> {
 
     // Filter for all events from all contracts
     let all_events_filter = EventFilter::new();
-    let mut all_stream = scanner.subscribe(all_events_filter);
-    let contract_1_stream = setup.stream;
+    let all_subscription = scanner.subscribe(all_events_filter);
+    let contract_1_subscription = setup.subscription;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut all_stream = all_subscription.stream(&proof);
+    let contract_1_stream = contract_1_subscription.stream(&proof);
 
     // First increase the contract_2 newCount
     contract_2.increase().send().await?.watch().await?;

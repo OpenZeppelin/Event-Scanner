@@ -7,7 +7,7 @@ use alloy::{
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{
-        EventScanner, LatestEvents,
+        EventScanner, LatestEvents, StartProof,
         scanner::block_range_handler::{BlockRangeHandler, LatestEventsHandler},
     },
     robust_provider::IntoRobustProvider,
@@ -146,7 +146,15 @@ impl<N: Network> EventScanner<LatestEvents, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` or `to_block` cannot be resolved.
-    pub async fn start(self) -> Result<(), ScannerError> {
+    pub async fn start(self) -> Result<StartProof, ScannerError> {
+        info!(
+            from_block = ?self.config.from_block,
+            to_block = ?self.config.to_block,
+            count = ?self.config.count,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in LatestEvents mode"
+        );
+
         let stream = self
             .block_range_scanner
             .stream_rewind(self.config.from_block, self.config.to_block)
@@ -166,7 +174,7 @@ impl<N: Network> EventScanner<LatestEvents, N> {
             handler.handle(stream).await;
         });
 
-        Ok(())
+        Ok(StartProof::new())
     }
 }
 
