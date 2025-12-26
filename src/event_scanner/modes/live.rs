@@ -1,3 +1,9 @@
+//! Live mode implementation for streaming new events as they occur.
+//!
+//! This module implements the live streaming mode which continuously monitors the blockchain
+//! and streams events from newly produced blocks. See [`EventScannerBuilder::live`] for
+//! usage details.
+
 use alloy::network::Network;
 
 use crate::{
@@ -5,12 +11,10 @@ use crate::{
     event_scanner::{
         EventScanner, StartProof,
         block_range_handler::{BlockRangeHandler, StreamHandler},
-        builder::EventScannerBuilder,
+        builder::{EventScannerBuilder, Live},
     },
     robust_provider::IntoRobustProvider,
 };
-
-use super::types::Live;
 
 impl EventScannerBuilder<Live> {
     /// Sets the number of confirmations required before a block is considered stable enough to

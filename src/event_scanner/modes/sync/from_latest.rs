@@ -1,3 +1,11 @@
+//! Sync from latest events mode implementation.
+//!
+//! This module implements the sync-from-latest mode which collects a specified number of
+//! most recent events, then automatically transitions to live streaming. See
+//! [`EventScannerBuilder::sync().from_latest()`][from_latest] for usage details.
+//!
+//! [from_latest]: crate::EventScannerBuilder::from_latest
+
 use alloy::{eips::BlockNumberOrTag, network::Network};
 
 use crate::{
@@ -5,13 +13,11 @@ use crate::{
     event_scanner::{
         EventScanner, StartProof,
         block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
-        builder::EventScannerBuilder,
+        builder::{EventScannerBuilder, SyncFromLatestEvents},
     },
     robust_provider::IntoRobustProvider,
     types::TryStream,
 };
-
-use super::super::types::SyncFromLatestEvents;
 
 impl EventScannerBuilder<SyncFromLatestEvents> {
     /// Sets the number of confirmations required before a block is considered stable enough to

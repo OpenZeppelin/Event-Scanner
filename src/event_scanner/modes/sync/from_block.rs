@@ -1,3 +1,11 @@
+//! Sync from block mode implementation.
+//!
+//! This module implements the sync-from-block mode which streams events from a specified
+//! starting block to the present, then automatically transitions to live streaming.
+//! See [`EventScannerBuilder::sync().from_block()`][from_block] for usage details.
+//!
+//! [from_block]: crate::EventScannerBuilder#method.from_block-2
+
 use alloy::{eips::BlockId, network::Network};
 
 use crate::{
@@ -5,12 +13,10 @@ use crate::{
     event_scanner::{
         EventScanner, StartProof,
         block_range_handler::{BlockRangeHandler, StreamHandler},
-        builder::EventScannerBuilder,
+        builder::{EventScannerBuilder, SyncFromBlock},
     },
     robust_provider::IntoRobustProvider,
 };
-
-use super::super::types::SyncFromBlock;
 
 impl EventScannerBuilder<SyncFromBlock> {
     /// Sets the number of confirmations required before a block is considered stable enough to

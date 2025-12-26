@@ -1,3 +1,8 @@
+//! Historic mode implementation for scanning a fixed block range.
+//!
+//! This module implements the historic scanning mode which streams events from a specified
+//! block range in chronological order. See [`EventScannerBuilder::historic`] for usage details.
+
 use alloy::{
     consensus::BlockHeader,
     eips::BlockId,
@@ -9,13 +14,11 @@ use crate::{
     event_scanner::{
         StartProof,
         block_range_handler::{BlockRangeHandler, StreamHandler},
-        builder::EventScannerBuilder,
+        builder::{EventScannerBuilder, Historic},
         scanner::EventScanner,
     },
     robust_provider::IntoRobustProvider,
 };
-
-use super::types::Historic;
 
 impl EventScannerBuilder<Historic> {
     /// Sets the starting block for the historic scan.

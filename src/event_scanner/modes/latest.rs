@@ -1,3 +1,9 @@
+//! Latest events mode implementation for collecting recent logs.
+//!
+//! This module implements the latest events mode which performs a reverse scan to collect
+//! a specified number of most recent matching events. See [`EventScannerBuilder::latest`]
+//! for usage details.
+
 use alloy::{
     consensus::BlockHeader,
     eips::BlockId,
@@ -9,12 +15,10 @@ use crate::{
     event_scanner::{
         EventScanner, StartProof,
         block_range_handler::{BlockRangeHandler, LatestEventsHandler},
-        builder::EventScannerBuilder,
+        builder::{EventScannerBuilder, LatestEvents},
     },
     robust_provider::IntoRobustProvider,
 };
-
-use super::types::LatestEvents;
 
 impl EventScannerBuilder<LatestEvents> {
     /// Sets the number of confirmations required before a block is considered stable enough to

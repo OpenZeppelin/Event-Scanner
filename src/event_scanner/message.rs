@@ -1,3 +1,8 @@
+//! Message types for event scanner subscription streams.
+//!
+//! This module defines the [`Message`] and [`EventScannerResult`] types that are yielded
+//! by event subscription streams, along with conversions and comparisons for working with logs.
+
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
 use crate::{

@@ -1,11 +1,16 @@
+//! Sync mode implementations for catch-up followed by live streaming.
+//!
+//! This module provides two sync variants:
+//! - [`from_block`]: Syncs from a specific block then transitions to live mode
+//! - [`from_latest`]: Collects latest N events then transitions to live mode
+
 use alloy::eips::BlockId;
 
 pub(crate) mod from_block;
 pub(crate) mod from_latest;
 
-use crate::event_scanner::{
-    builder::EventScannerBuilder,
-    modes::{SyncFromBlock, SyncFromLatestEvents, Synchronize},
+use crate::event_scanner::builder::{
+    EventScannerBuilder, SyncFromBlock, SyncFromLatestEvents, Synchronize,
 };
 
 impl EventScannerBuilder<Synchronize> {
