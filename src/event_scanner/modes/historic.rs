@@ -51,6 +51,9 @@ impl EventScannerBuilder<Historic> {
     /// Increasing this value can improve throughput by issuing multiple RPC
     /// requests concurrently, at the cost of higher load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
