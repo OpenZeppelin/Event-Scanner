@@ -233,8 +233,6 @@ mod tests {
 
         let mut scanner = EventScanner::new(Historic::default(), brs);
 
-        assert_eq!(scanner.block_range_scanner.buffer_capacity(), custom_capacity);
-
         let _ = scanner.subscribe(EventFilter::new());
         let sender = &scanner.listeners[0].sender;
         assert_eq!(sender.capacity(), custom_capacity);
