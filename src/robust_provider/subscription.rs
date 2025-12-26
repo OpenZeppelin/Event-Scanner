@@ -43,14 +43,8 @@ impl From<CoreError> for Error {
 impl From<RecvError> for Error {
     fn from(err: RecvError) -> Self {
         match err {
-            RecvError::Closed => {
-                error!("Provider closed the subscription channel");
-                Error::Closed
-            }
-            RecvError::Lagged(count) => {
-                error!(skipped = count, "Receiver lagged");
-                Error::Lagged(count)
-            }
+            RecvError::Closed => Error::Closed,
+            RecvError::Lagged(count) => Error::Lagged(count),
         }
     }
 }
@@ -112,35 +106,22 @@ impl<N: Network> RobustSubscription<N> {
     /// * If all providers have been exhausted and failed, returns the last attempt's error.
     pub async fn recv(&mut self) -> Result<N::HeaderResponse, Error> {
         let subscription_timeout = self.robust_provider.subscription_timeout;
+
         loop {
-            let recv_result = timeout(subscription_timeout, self.subscription.recv()).await;
-            match recv_result {
-                Ok(recv_result) => match recv_result {
-                    Ok(header) => {
-                        if self.is_on_fallback() {
-                            self.try_reconnect_to_primary(false).await;
-                        }
-                        return Ok(header);
+            match timeout(subscription_timeout, self.subscription.recv()).await {
+                Ok(Ok(header)) => {
+                    if self.is_on_fallback() {
+                        self.try_reconnect_to_primary(false).await;
                     }
-                    Err(recv_error) => {
-                        match recv_error {
-                            RecvError::Closed => {
-                                error!("Provider closed the subscription channel");
-                            }
-                            RecvError::Lagged(count) => {
-                                error!(skipped = count, "Receiver lagged");
-                            }
-                        }
-                        return Err(recv_error.into());
-                    }
-                },
-                Err(elapsed_err) => {
+                    return Ok(header);
+                }
+                Ok(Err(recv_error)) => return Err(recv_error.into()),
+                Err(_elapsed) => {
                     warn!(
                         timeout_secs = subscription_timeout.as_secs(),
                         "Subscription timeout - no block received, switching provider"
                     );
-
-                    self.switch_to_fallback(elapsed_err.into()).await?;
+                    self.switch_to_fallback(CoreError::Timeout).await?;
                 }
             }
         }
@@ -162,8 +143,6 @@ impl<N: Network> RobustSubscription<N> {
             return false;
         }
 
-        info!("Attempting to reconnect to primary provider");
-
         let operation =
             move |provider: RootProvider<N>| async move { provider.subscribe_blocks().await };
 
@@ -171,19 +150,15 @@ impl<N: Network> RobustSubscription<N> {
         let subscription =
             self.robust_provider.try_provider_with_timeout(primary, &operation).await;
 
-        match subscription {
-            Ok(sub) => {
-                info!("Successfully reconnected to primary provider");
-                self.subscription = sub;
-                self.current_fallback_index = None;
-                self.last_reconnect_attempt = None;
-                true
-            }
-            Err(e) => {
-                self.last_reconnect_attempt = Some(Instant::now());
-                warn!(error = %e, "Failed to reconnect to primary provider");
-                false
-            }
+        if let Ok(sub) = subscription {
+            info!("Reconnected to primary provider");
+            self.subscription = sub;
+            self.current_fallback_index = None;
+            self.last_reconnect_attempt = None;
+            true
+        } else {
+            self.last_reconnect_attempt = Some(Instant::now());
+            false
         }
     }
 
@@ -208,6 +183,7 @@ impl<N: Network> RobustSubscription<N> {
             .try_fallback_providers_from(&operation, true, last_error, start_index)
             .await?;
 
+        info!(fallback_index = fallback_idx, "Subscription switched to fallback provider");
         self.subscription = sub;
         self.current_fallback_index = Some(fallback_idx);
         Ok(())

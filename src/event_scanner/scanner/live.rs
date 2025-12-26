@@ -1,9 +1,14 @@
 use alloy::network::Network;
 
-use super::common::{ConsumerMode, handle_stream};
 use crate::{
     EventScannerBuilder, ScannerError,
-    event_scanner::{EventScanner, ScannerToken, scanner::Live},
+    event_scanner::{
+        EventScanner, ScannerToken,
+        scanner::{
+            Live,
+            block_range_handler::{BlockRangeHandler, StreamHandler},
+        },
+    },
     robust_provider::IntoRobustProvider,
 };
 
@@ -67,23 +72,25 @@ impl<N: Network> EventScanner<Live, N> {
     ///
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
-    pub async fn start(mut self) -> Result<ScannerToken, ScannerError> {
+    pub async fn start(self) -> Result<ScannerToken, ScannerError> {
+        info!(
+            block_confirmations = self.config.block_confirmations,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in Live mode"
+        );
+
         let stream = self.block_range_scanner.stream_live(self.config.block_confirmations).await?;
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let provider = self.block_range_scanner.provider().clone();
-        let listeners = self.listeners.clone();
-        let buffer_capacity = self.buffer_capacity();
+        let broadcast_channel_capacity = self.buffer_capacity();
+
+        let handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            self.listeners,
+            self.config.max_concurrent_fetches,
+            broadcast_channel_capacity,
+        );
 
         tokio::spawn(async move {
-            handle_stream(
-                stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            handler.handle(stream).await;
         });
 
         Ok(ScannerToken::new())
@@ -100,8 +107,9 @@ mod tests {
     use alloy_node_bindings::Anvil;
 
     use crate::{
-        DEFAULT_STREAM_BUFFER_CAPACITY,
-        block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
+        block_range_scanner::{
+            DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+        },
         event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 

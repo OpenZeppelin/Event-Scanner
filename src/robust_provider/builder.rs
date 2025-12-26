@@ -133,12 +133,23 @@ impl<N: Network, P: IntoRootProvider<N>> RobustProviderBuilder<N, P> {
     ///
     /// Returns an error if any of the providers fail to connect.
     pub async fn build(self) -> Result<RobustProvider<N>, Error> {
+        debug!(
+            call_timeout_ms = self.call_timeout.as_millis(),
+            subscription_timeout_ms = self.subscription_timeout.as_millis(),
+            max_retries = self.max_retries,
+            fallback_count = self.fallback_providers.len(),
+            "Building RobustProvider"
+        );
+
         let primary_provider = self.primary_provider.into_root_provider().await?;
 
         let mut fallback_providers = Vec::with_capacity(self.fallback_providers.len());
-        for fallback in self.fallback_providers {
+        for (idx, fallback) in self.fallback_providers.into_iter().enumerate() {
+            trace!(fallback_index = idx, "Connecting fallback provider");
             fallback_providers.push(fallback.await?);
         }
+
+        info!("RobustProvider initialized");
 
         Ok(RobustProvider {
             primary_provider,

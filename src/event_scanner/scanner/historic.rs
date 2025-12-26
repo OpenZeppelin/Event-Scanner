@@ -4,12 +4,12 @@ use alloy::{
     network::{BlockResponse, Network},
 };
 
-use super::common::{ConsumerMode, handle_stream};
+use super::block_range_handler::StreamHandler;
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{
         ScannerToken,
-        scanner::{EventScanner, Historic},
+        scanner::{EventScanner, Historic, block_range_handler::BlockRangeHandler},
     },
     robust_provider::IntoRobustProvider,
 };
@@ -136,27 +136,30 @@ impl<N: Network> EventScanner<Historic, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` or `to_block` cannot be resolved.
-    pub async fn start(mut self) -> Result<ScannerToken, ScannerError> {
+    pub async fn start(self) -> Result<ScannerToken, ScannerError> {
+        info!(
+            from_block = ?self.config.from_block,
+            to_block = ?self.config.to_block,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in Historic mode"
+        );
+
         let stream = self
             .block_range_scanner
             .stream_historical(self.config.from_block, self.config.to_block)
             .await?;
 
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let provider = self.block_range_scanner.provider().clone();
-        let listeners = self.listeners.clone();
-        let buffer_capacity = self.buffer_capacity();
+        let broadcast_channel_capacity = self.buffer_capacity();
+
+        let handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            self.listeners,
+            self.config.max_concurrent_fetches,
+            broadcast_channel_capacity,
+        );
 
         tokio::spawn(async move {
-            handle_stream(
-                stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            handler.handle(stream).await;
         });
 
         Ok(ScannerToken::new())
@@ -166,7 +169,7 @@ impl<N: Network> EventScanner<Historic, N> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        DEFAULT_STREAM_BUFFER_CAPACITY, block_range_scanner::DEFAULT_MAX_BLOCK_RANGE,
+        block_range_scanner::{DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY},
         event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 

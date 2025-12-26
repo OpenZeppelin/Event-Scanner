@@ -39,16 +39,19 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    EventFilter, ScannerError,
     block_range_scanner::{
-        BlockRangeScanner, ConnectedBlockRangeScanner, DEFAULT_BLOCK_CONFIRMATIONS,
+        BlockRangeScanner, BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS,
         RingBufferCapacity,
     },
-    event_scanner::{EventScannerResult, listener::EventListener, stream::EventSubscription},
+    error::ScannerError,
+    event_scanner::{
+        EventScannerResult, filter::EventFilter, listener::EventListener, stream::EventSubscription,
+    },
     robust_provider::IntoRobustProvider,
 };
 
-mod common;
+pub mod block_range_handler;
+
 mod historic;
 mod latest;
 mod live;
@@ -164,7 +167,7 @@ impl Default for Live {
 #[derive(Debug)]
 pub struct EventScanner<Mode = Unspecified, N: Network = Ethereum> {
     config: Mode,
-    block_range_scanner: ConnectedBlockRangeScanner<N>,
+    block_range_scanner: BlockRangeScanner<N>,
     listeners: Vec<EventListener>,
 }
 
@@ -172,7 +175,7 @@ pub struct EventScanner<Mode = Unspecified, N: Network = Ethereum> {
 #[derive(Default, Debug)]
 pub struct EventScannerBuilder<Mode> {
     pub(crate) config: Mode,
-    pub(crate) block_range_scanner: BlockRangeScanner,
+    pub(crate) block_range_scanner: BlockRangeScannerBuilder,
 }
 
 impl EventScannerBuilder<Unspecified> {
@@ -312,6 +315,11 @@ impl EventScannerBuilder<Unspecified> {
     /// 2. Adjusts the next confirmed range using `block_confirmations`
     /// 3. Re-emits events from the corrected confirmed block range
     /// 4. Continues streaming from the new chain state
+    ///
+    /// **Important**: If a reorg occurs, the scanner will only restream blocks from the new
+    /// canonical chain that have block numbers greater than or equal to the block number that was
+    /// the "latest block" at the time when the live stream was first started. Blocks with lower
+    /// block numbers will not be restreamed, even if they are part of the new canonical chain.
     ///
     /// [reorg]: crate::types::Notification::ReorgDetected
     #[must_use]
@@ -466,7 +474,7 @@ impl EventScannerBuilder<LatestEvents> {
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
                 max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
-            block_range_scanner: BlockRangeScanner::default(),
+            block_range_scanner: BlockRangeScannerBuilder::default(),
         }
     }
 }
@@ -480,7 +488,7 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
                 max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
-            block_range_scanner: BlockRangeScanner::default(),
+            block_range_scanner: BlockRangeScannerBuilder::default(),
         }
     }
 }
@@ -494,7 +502,7 @@ impl EventScannerBuilder<SyncFromBlock> {
                 block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
                 max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
             },
-            block_range_scanner: BlockRangeScanner::default(),
+            block_range_scanner: BlockRangeScannerBuilder::default(),
         }
     }
 }
@@ -605,7 +613,7 @@ mod tests {
         rpc::client::RpcClient,
     };
 
-    use crate::DEFAULT_STREAM_BUFFER_CAPACITY;
+    use crate::block_range_scanner::DEFAULT_STREAM_BUFFER_CAPACITY;
 
     use super::*;
 

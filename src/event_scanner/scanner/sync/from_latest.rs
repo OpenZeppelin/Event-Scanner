@@ -6,7 +6,7 @@ use crate::{
         EventScanner, ScannerToken,
         scanner::{
             SyncFromLatestEvents,
-            common::{ConsumerMode, handle_stream},
+            block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
         },
     },
     robust_provider::IntoRobustProvider,
@@ -74,14 +74,18 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     #[allow(clippy::missing_panics_doc)]
-    pub async fn start(mut self) -> Result<ScannerToken, ScannerError> {
+    pub async fn start(self) -> Result<ScannerToken, ScannerError> {
+        info!(
+            event_count = self.config.count,
+            block_confirmations = self.config.block_confirmations,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in SyncFromLatestEvents mode"
+        );
+
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let buffer_capacity = self.buffer_capacity();
-
-        info!(count = count, "Starting scanner, mode: fetch latest events and switch to live");
+        let broadcast_channel_capacity = self.buffer_capacity();
 
         // Fetch the latest block number.
         // This is used to determine the starting point for the rewind stream and the live
@@ -95,21 +99,38 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             .stream_rewind(latest_block, BlockNumberOrTag::Earliest)
             .await?;
 
+        let collection_handler = LatestEventsHandler::new(
+            self.block_range_scanner.provider().clone(),
+            listeners.clone(),
+            self.config.max_concurrent_fetches,
+            self.config.count,
+            broadcast_channel_capacity,
+        );
+        let stream_handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            listeners.clone(),
+            self.config.max_concurrent_fetches,
+            broadcast_channel_capacity,
+        );
+
         // Start streaming...
         tokio::spawn(async move {
+            debug!(
+                latest_block = latest_block,
+                count = count,
+                "Phase 1: Collecting latest events via rewind"
+            );
+
             // Since both rewind and live log consumers are ultimately streaming to the same
             // channel, we must ensure that all latest events are streamed before
             // consuming the live stream, otherwise the log consumers may send events out
             // of order.
-            handle_stream(
-                rewind_stream,
-                &provider,
-                &listeners,
-                ConsumerMode::CollectLatest { count },
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            collection_handler.handle(rewind_stream).await;
+
+            debug!(
+                start_block = latest_block + 1,
+                "Phase 2: Catching up and transitioning to live mode"
+            );
 
             // We actually rely on the sync mode for the live stream, as more blocks could have been
             // minted while the scanner was collecting the latest `count` events.
@@ -121,7 +142,8 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             {
                 Ok(stream) => stream,
                 Err(e) => {
-                    error!(error = %e, "Error during sync mode setup");
+                    error!("Failed to setup sync stream after collecting latest events");
+                    // notify all active listeners about the error before dropping the stream
                     for listener in listeners {
                         _ = listener.sender.try_stream(e.clone()).await;
                     }
@@ -130,15 +152,9 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             };
 
             // Start the live (sync) stream.
-            handle_stream(
-                sync_stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            stream_handler.handle(sync_stream).await;
+
+            debug!("SyncFromLatestEvents stream ended");
         });
 
         Ok(ScannerToken::new())
@@ -155,8 +171,9 @@ mod tests {
     use alloy_node_bindings::Anvil;
 
     use crate::{
-        DEFAULT_STREAM_BUFFER_CAPACITY,
-        block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
+        block_range_scanner::{
+            DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+        },
         event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 

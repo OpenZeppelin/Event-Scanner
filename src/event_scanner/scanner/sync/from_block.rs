@@ -4,7 +4,7 @@ use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{
         EventScanner, ScannerToken, SyncFromBlock,
-        scanner::common::{ConsumerMode, handle_stream},
+        scanner::block_range_handler::{BlockRangeHandler, StreamHandler},
     },
     robust_provider::IntoRobustProvider,
 };
@@ -76,26 +76,29 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` cannot be resolved.
     pub async fn start(self) -> Result<ScannerToken, ScannerError> {
+        info!(
+            from_block = ?self.config.from_block,
+            block_confirmations = self.config.block_confirmations,
+            listener_count = self.listeners.len(),
+            "Starting EventScanner in SyncFromBlock mode"
+        );
+
         let stream = self
             .block_range_scanner
             .stream_from(self.config.from_block, self.config.block_confirmations)
             .await?;
 
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let provider = self.block_range_scanner.provider().clone();
-        let listeners = self.listeners.clone();
         let buffer_capacity = self.buffer_capacity();
 
+        let handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            self.listeners,
+            self.config.max_concurrent_fetches,
+            buffer_capacity,
+        );
+
         tokio::spawn(async move {
-            handle_stream(
-                stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            handler.handle(stream).await;
         });
 
         Ok(ScannerToken::new())
@@ -114,8 +117,9 @@ mod tests {
     use alloy_node_bindings::Anvil;
 
     use crate::{
-        DEFAULT_STREAM_BUFFER_CAPACITY,
-        block_range_scanner::{DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE},
+        block_range_scanner::{
+            DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
+        },
         event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 

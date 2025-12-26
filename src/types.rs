@@ -115,14 +115,6 @@ pub(crate) trait TryStream<T: Clone> {
 impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<ScannerResult<T>> {
     async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool {
         let item = msg.into_scanner_message_result();
-        match &item {
-            Ok(msg) => info!(item = ?msg, "Sending message"),
-            Err(err) => info!(error = ?err, "Sending error"),
-        }
-        if let Err(err) = self.send(item).await {
-            warn!(error = %err, "Downstream channel closed, stopping stream");
-            return false;
-        }
-        true
+        self.send(item).await.is_ok()
     }
 }

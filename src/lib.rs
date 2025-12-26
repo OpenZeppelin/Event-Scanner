@@ -49,19 +49,19 @@
 //! [finalized]: alloy::eips::BlockNumberOrTag::Finalized
 
 #[macro_use]
-mod logging;
+pub mod macros;
 
 pub mod block_range_scanner;
 pub mod robust_provider;
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils;
 
 mod error;
 mod event_scanner;
 mod types;
 
 pub use block_range_scanner::{
-    DEFAULT_STREAM_BUFFER_CAPACITY, RingBufferCapacity as PastBlocksStorageCapacity,
+    BlockRangeScanner, BlockRangeScannerBuilder, BlockScannerResult, DEFAULT_BLOCK_CONFIRMATIONS,
+    DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY, RingBufferCapacity,
+    RingBufferCapacity as PastBlocksStorageCapacity,
 };
 
 pub use error::ScannerError;
@@ -71,4 +71,5 @@ pub use event_scanner::{
     DEFAULT_MAX_CONCURRENT_FETCHES, EventFilter, EventScanner, EventScannerBuilder,
     EventScannerResult, EventSubscription, Historic, LatestEvents, Live, Message, ScannerToken,
     SyncFromBlock, SyncFromLatestEvents,
+    block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
 };
