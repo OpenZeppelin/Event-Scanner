@@ -39,7 +39,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    ScannerToken,
     block_range_scanner::{
         BlockRangeScanner, BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS,
         RingBufferCapacity,
@@ -576,7 +575,7 @@ impl<Mode> EventScannerBuilder<Mode> {
 ///
 /// Created by [`EventScanner::subscribe()`](crate::EventScanner::subscribe), this type holds the
 /// underlying stream but prevents access until [`stream()`](EventSubscription::stream) is called
-/// with a valid [`ScannerToken`].
+/// with a valid [`StartProof`].
 ///
 /// This pattern ensures at compile time that [`EventScanner::start()`](crate::EventScanner::start)
 /// is called before attempting to read from the event stream.
@@ -611,15 +610,15 @@ impl EventSubscription {
 
     /// Access the event stream.
     ///
-    /// Requires a reference to a [`ScannerToken`] as proof that the scanner
-    /// has been started. The token is obtained by calling
-    /// [`EventScanner::start()`](crate::EventScanner::start).
+    /// Requires a reference to a [`StartProof`] as proof that the scanner
+    /// has been started. The proof is obtained by calling
+    /// `EventScanner::start()`.
     ///
     /// # Arguments
     ///
-    /// * `_token` - Proof that the scanner has been started
+    /// * `_proof` - Proof that the scanner has been started
     #[must_use]
-    pub fn stream(self, _token: &ScannerToken) -> ReceiverStream<EventScannerResult> {
+    pub fn stream(self, _proof: &StartProof) -> ReceiverStream<EventScannerResult> {
         self.inner
     }
 }
@@ -654,6 +653,38 @@ impl<Mode, N: Network> EventScanner<Mode, N> {
             mpsc::channel::<EventScannerResult>(self.block_range_scanner.buffer_capacity());
         self.listeners.push(EventListener { filter, sender });
         EventSubscription::new(ReceiverStream::new(receiver))
+    }
+}
+
+/// Proof that the scanner has been started.
+///
+/// This proof is returned by `EventScanner::start()` and must be passed to
+/// [`EventSubscription::stream()`] to access the event stream. This ensures at compile
+/// time that the scanner is started before attempting to read events.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut scanner = EventScannerBuilder::sync().from_block(0).connect(provider).await?;
+/// let subscription = scanner.subscribe(filter);
+///
+/// // Start the scanner and get the proof
+/// let proof = scanner.start().await?;
+///
+/// // Now we can access the stream
+/// let mut stream = subscription.stream(&proof);
+/// ```
+#[derive(Debug, Clone)]
+pub struct StartProof {
+    /// Private field prevents construction outside this crate
+    _private: (),
+}
+
+impl StartProof {
+    /// Creates a new start proof.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self { _private: () }
     }
 }
 

@@ -3,7 +3,7 @@ use alloy::{eips::BlockNumberOrTag, network::Network};
 use crate::{
     EventScannerBuilder, ScannerError,
     event_scanner::{
-        EventScanner, ScannerToken,
+        EventScanner, StartProof,
         scanner::{
             SyncFromLatestEvents,
             block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
@@ -74,7 +74,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     #[allow(clippy::missing_panics_doc)]
-    pub async fn start(self) -> Result<ScannerToken, ScannerError> {
+    pub async fn start(self) -> Result<StartProof, ScannerError> {
         info!(
             event_count = self.config.count,
             block_confirmations = self.config.block_confirmations,
@@ -157,7 +157,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             debug!("SyncFromLatestEvents stream ended");
         });
 
-        Ok(ScannerToken::new())
+        Ok(StartProof::new())
     }
 }
 

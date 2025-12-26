@@ -69,7 +69,7 @@ pub use types::{Notification, ScannerMessage};
 
 pub use event_scanner::{
     DEFAULT_MAX_CONCURRENT_FETCHES, EventFilter, EventScanner, EventScannerBuilder,
-    EventScannerResult, EventSubscription, Historic, LatestEvents, Live, Message, ScannerToken,
+    EventScannerResult, EventSubscription, Historic, LatestEvents, Live, Message, StartProof,
     SyncFromBlock, SyncFromLatestEvents,
     block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
 };
