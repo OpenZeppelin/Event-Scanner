@@ -1,173 +1,19 @@
-//! Scanner builders and mode marker types.
-//!
-//! This module defines [`EventScannerBuilder`] and the mode marker types used to configure an
-//! [`EventScanner`]. Calling [`EventScannerBuilder::historic`], [`EventScannerBuilder::live`],
-//! [`EventScannerBuilder::latest`] or [`EventScannerBuilder::sync`] selects a mode and exposes the
-//! mode-specific configuration methods.
-//!
-//! # Streams
-//!
-//! Consumers register event subscriptions via [`EventScanner::subscribe`]. Each subscription
-//! produces an independent stream of [`EventScannerResult`].
-//!
-//! ## Ordering
-//!
-//! Ordering is preserved *per subscription stream*. There is no global ordering guarantee across
-//! different subscriptions.
-//!
-//! ## Backpressure and lag
-//!
-//! Subscription streams are buffered. If a consumer processes events too slowly and the
-//! internal buffer fills up, the stream yields [`ScannerError::Lagged`] and some events
-//! may be skipped.
-//!
-//! # Reorgs and finality
-//!
-//! When scanning non-finalized blocks, the scanner may detect chain reorganizations and will emit
-//! [`Notification::ReorgDetected`]. Consumers should assume the same events might be delivered more
-//! than once around reorgs (i.e. benign duplicates are possible).
-//!
-//! In live mode, `block_confirmations` delays emission so that shallow reorganizations that do not
-//! affect the confirmed boundary do not trigger reorg notifications.
-//!
-//! [`Notification::ReorgDetected`]: crate::Notification::ReorgDetected
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
-    network::{Ethereum, Network},
+    network::Network,
 };
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    block_range_scanner::{
-        BlockRangeScanner, BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS,
-        RingBufferCapacity,
-    },
-    error::ScannerError,
-    event_scanner::{EventScannerResult, filter::EventFilter, listener::EventListener},
-    robust_provider::IntoRobustProvider,
+    BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS, EventScanner, RingBufferCapacity,
+    ScannerError, robust_provider::IntoRobustProvider,
 };
 
-pub mod block_range_handler;
-
-mod historic;
-mod latest;
-mod live;
-mod sync;
+use super::modes::{
+    Historic, LatestEvents, Live, SyncFromBlock, SyncFromLatestEvents, Synchronize, Unspecified,
+};
 
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
-
-/// Marker indicating that a scanner mode has not been selected yet.
-#[derive(Default, Debug)]
-pub struct Unspecified;
-
-/// Mode marker for historical range scanning.
-///
-/// For more details on this scanner mode, see [`EventScannerBuilder::historic`].
-#[derive(Debug)]
-pub struct Historic {
-    pub(crate) from_block: BlockId,
-    pub(crate) to_block: BlockId,
-    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
-    pub(crate) max_concurrent_fetches: usize,
-}
-
-/// Mode marker for live streaming.
-///
-/// For more details on this scanner mode, see [`EventScannerBuilder::live`].
-#[derive(Debug)]
-pub struct Live {
-    pub(crate) block_confirmations: u64,
-    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
-    pub(crate) max_concurrent_fetches: usize,
-}
-
-/// Mode marker for latest-events collection.
-///
-/// For more details on this scanner mode, see [`EventScannerBuilder::latest`].
-#[derive(Debug)]
-pub struct LatestEvents {
-    pub(crate) count: usize,
-    pub(crate) from_block: BlockId,
-    pub(crate) to_block: BlockId,
-    pub(crate) block_confirmations: u64,
-    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
-    pub(crate) max_concurrent_fetches: usize,
-}
-
-/// Marker indicating that a sync mode must be selected.
-#[derive(Default, Debug)]
-pub struct Synchronize;
-
-/// Mode marker for scanning by syncing from the specified count of latest events and then switching
-/// to live mode.
-///
-/// For more details on this scanner mode, see
-/// [`EventScannerBuilder::sync().from_latest(count)`](crate::EventScannerBuilder::from_latest).
-#[derive(Debug)]
-pub struct SyncFromLatestEvents {
-    pub(crate) count: usize,
-    pub(crate) block_confirmations: u64,
-    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
-    pub(crate) max_concurrent_fetches: usize,
-}
-
-/// Mode marker for scanning by syncing from the specified block and then switching to live mode.
-///
-/// For more details on this scanner mode, see
-/// [`EventScannerBuilder::sync().from_block(block_id)`][sync from block].
-///
-/// [sync from block]: crate::EventScannerBuilder#method.from_block-2
-#[derive(Debug)]
-pub struct SyncFromBlock {
-    pub(crate) from_block: BlockId,
-    pub(crate) block_confirmations: u64,
-    /// Controls how many log-fetching RPC requests can run in parallel during the scan.
-    pub(crate) max_concurrent_fetches: usize,
-}
-
-impl Default for Historic {
-    fn default() -> Self {
-        Self {
-            from_block: BlockNumberOrTag::Earliest.into(),
-            to_block: BlockNumberOrTag::Latest.into(),
-            max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
-        }
-    }
-}
-
-impl Default for Live {
-    fn default() -> Self {
-        Self {
-            block_confirmations: DEFAULT_BLOCK_CONFIRMATIONS,
-            max_concurrent_fetches: DEFAULT_MAX_CONCURRENT_FETCHES,
-        }
-    }
-}
-
-/// An event scanner configured in mode `Mode` and bound to network `N`.
-///
-/// Create an instance via [`EventScannerBuilder`], register subscriptions with
-/// [`EventScanner::subscribe`], then start the scanner with the mode-specific `start()` method.
-///
-/// # Starting the scanner
-///
-/// All scanner modes follow the same general startup pattern:
-///
-/// - **Register subscriptions first**: call [`EventScanner::subscribe`] before starting the scanner
-///   with `start()`. The scanner sends events only to subscriptions that have already been
-///   registered.
-/// - **Non-blocking start**: `start()` returns immediately after spawning background tasks.
-///   Subscription streams yield events asynchronously.
-/// - **Errors after startup**: most runtime failures are delivered through subscription streams as
-///   [`ScannerError`] items, rather than being returned from `start()`.
-#[derive(Debug)]
-pub struct EventScanner<Mode = Unspecified, N: Network = Ethereum> {
-    config: Mode,
-    block_range_scanner: BlockRangeScanner<N>,
-    listeners: Vec<EventListener>,
-}
 
 /// Builder for constructing an [`EventScanner`] in a particular mode.
 #[derive(Default, Debug)]
@@ -188,10 +34,10 @@ impl EventScannerBuilder<Unspecified> {
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
+    /// # let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// # let provider = RobustProviderBuilder::new(provider).build().await?;
     /// // Stream all events from genesis to latest block
-    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
-    /// let mut scanner = EventScannerBuilder::historic().connect(robust_provider).await?;
+    /// let mut scanner = EventScannerBuilder::historic().connect(provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let subscription = scanner.subscribe(filter);
@@ -212,13 +58,13 @@ impl EventScannerBuilder<Unspecified> {
     /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// # let provider = RobustProviderBuilder::new(provider).build().await?;
     /// // Stream events between blocks [1_000_000, 2_000_000]
-    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::historic()
     ///     .from_block(1_000_000)
     ///     .to_block(2_000_000)
-    ///     .connect(robust_provider)
+    ///     .connect(provider)
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -262,12 +108,12 @@ impl EventScannerBuilder<Unspecified> {
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
+    /// # let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// # let provider = RobustProviderBuilder::new(provider).build().await?;
     /// // Stream new events as they arrive
-    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::live()
     ///     .block_confirmations(20)
-    ///     .connect(robust_provider)
+    ///     .connect(provider)
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
@@ -355,10 +201,10 @@ impl EventScannerBuilder<Unspecified> {
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
+    /// # let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// # let provider = RobustProviderBuilder::new(provider).build().await?;
     /// // Collect the latest 10 events across Earliest..=Latest
-    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
-    /// let mut scanner = EventScannerBuilder::latest(10).connect(robust_provider).await?;
+    /// let mut scanner = EventScannerBuilder::latest(10).connect(provider).await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
     /// let subscription = scanner.subscribe(filter);
@@ -380,13 +226,13 @@ impl EventScannerBuilder<Unspecified> {
     /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
+    /// # let provider = RobustProviderBuilder::new(provider).build().await?;
     /// // Collect the latest 5 events between blocks [1_000_000, 1_100_000]
-    /// let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    /// let robust_provider = RobustProviderBuilder::new(provider).build().await?;
     /// let mut scanner = EventScannerBuilder::latest(5)
     ///     .from_block(1_000_000)
     ///     .to_block(1_100_000)
-    ///     .connect(robust_provider)
+    ///     .connect(provider)
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -562,139 +408,17 @@ impl<Mode> EventScannerBuilder<Mode> {
     /// Builds the scanner by connecting to an existing provider.
     ///
     /// This is a shared method used internally by scanner-specific `connect()` methods.
-    async fn build<N: Network>(
+    pub(crate) async fn build<N: Network>(
         self,
         provider: impl IntoRobustProvider<N>,
     ) -> Result<EventScanner<Mode, N>, ScannerError> {
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
-        Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
-    }
-}
-
-/// A subscription to scanner events that requires proof the scanner has started.
-///
-/// Created by [`EventScanner::subscribe()`](crate::EventScanner::subscribe), this type holds the
-/// underlying stream but prevents access until [`stream()`](EventSubscription::stream) is called
-/// with a valid [`StartProof`].
-///
-/// This pattern ensures at compile time that [`EventScanner::start()`](crate::EventScanner::start)
-/// is called before attempting to read from the event stream.
-///
-/// # Example
-///
-/// ```ignore
-/// let mut scanner = EventScannerBuilder::live().connect(provider).await?;
-///
-/// // Create subscription (cannot access stream yet)
-/// let subscription = scanner.subscribe(filter);
-///
-/// // Start scanner and get proof
-/// let proof = scanner.start().await?;
-///
-/// // Now access the stream with the proof
-/// let mut stream = subscription.stream(&proof);
-///
-/// while let Some(msg) = stream.next().await {
-///     // process events
-/// }
-/// ```
-pub struct EventSubscription {
-    inner: ReceiverStream<EventScannerResult>,
-}
-
-impl EventSubscription {
-    /// Creates a new subscription wrapping the given stream.
-    pub(crate) fn new(inner: ReceiverStream<EventScannerResult>) -> Self {
-        Self { inner }
-    }
-
-    /// Access the event stream.
-    ///
-    /// Requires a reference to a [`StartProof`] as proof that the scanner
-    /// has been started. The proof is obtained by calling
-    /// `EventScanner::start()`.
-    ///
-    /// # Arguments
-    ///
-    /// * `_proof` - Proof that the scanner has been started
-    #[must_use]
-    pub fn stream(self, _proof: &StartProof) -> ReceiverStream<EventScannerResult> {
-        self.inner
-    }
-}
-
-impl<Mode, N: Network> EventScanner<Mode, N> {
-    /// Returns the configured stream buffer capacity.
-    #[must_use]
-    pub fn buffer_capacity(&self) -> usize {
-        self.block_range_scanner.buffer_capacity()
-    }
-
-    /// Registers an event subscription and returns its stream.
-    ///
-    /// Each call creates a separate subscription stream with its own buffer.
-    ///
-    /// # Ordering
-    ///
-    /// Ordering is guaranteed only within a single returned stream. There is no ordering
-    /// guarantee across streams created by multiple calls to this method.
-    ///
-    /// # Errors
-    ///
-    /// The stream yields [`ScannerError`] values on failures. In particular, if a consumer cannot
-    /// keep up and internal buffers lag, the stream yields [`ScannerError::Lagged`].
-    ///
-    /// # Notes
-    ///
-    /// For scanner to properly stream events, register all subscriptions before calling `start()`.
-    #[must_use]
-    pub fn subscribe(&mut self, filter: EventFilter) -> EventSubscription {
-        let (sender, receiver) =
-            mpsc::channel::<EventScannerResult>(self.block_range_scanner.buffer_capacity());
-        self.listeners.push(EventListener { filter, sender });
-        EventSubscription::new(ReceiverStream::new(receiver))
-    }
-}
-
-/// Proof that the scanner has been started.
-///
-/// This proof is returned by `EventScanner::start()` and must be passed to
-/// [`EventSubscription::stream()`] to access the event stream. This ensures at compile
-/// time that the scanner is started before attempting to read events.
-///
-/// # Example
-///
-/// ```ignore
-/// let mut scanner = EventScannerBuilder::sync().from_block(0).connect(provider).await?;
-/// let subscription = scanner.subscribe(filter);
-///
-/// // Start the scanner and get the proof
-/// let proof = scanner.start().await?;
-///
-/// // Now we can access the stream
-/// let mut stream = subscription.stream(&proof);
-/// ```
-#[derive(Debug, Clone)]
-pub struct StartProof {
-    /// Private field prevents construction outside this crate
-    _private: (),
-}
-
-impl StartProof {
-    /// Creates a new start proof.
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self { _private: () }
+        Ok(EventScanner::new(self.config, block_range_scanner))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use alloy::{
-        providers::{RootProvider, mock::Asserter},
-        rpc::client::RpcClient,
-    };
-
     use crate::block_range_scanner::DEFAULT_STREAM_BUFFER_CAPACITY;
 
     use super::*;
@@ -735,47 +459,5 @@ mod tests {
         assert_eq!(builder.config.from_block, BlockNumberOrTag::Earliest.into());
         assert_eq!(builder.config.block_confirmations, DEFAULT_BLOCK_CONFIRMATIONS);
         assert_eq!(builder.block_range_scanner.buffer_capacity, DEFAULT_STREAM_BUFFER_CAPACITY);
-    }
-
-    #[tokio::test]
-    async fn test_historic_event_stream_listeners_vector_updates() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().build(provider).await?;
-
-        assert!(scanner.listeners.is_empty());
-
-        let _stream1 = scanner.subscribe(EventFilter::new());
-        assert_eq!(scanner.listeners.len(), 1);
-
-        let _stream2 = scanner.subscribe(EventFilter::new());
-        let _stream3 = scanner.subscribe(EventFilter::new());
-        assert_eq!(scanner.listeners.len(), 3);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_historic_event_stream_channel_capacity() -> anyhow::Result<()> {
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(Asserter::new()));
-        let mut scanner = EventScannerBuilder::historic().build(provider.clone()).await?;
-
-        let _ = scanner.subscribe(EventFilter::new());
-        let sender = &scanner.listeners[0].sender;
-        assert_eq!(sender.capacity(), scanner.block_range_scanner.buffer_capacity());
-
-        let custom_capacity = 1000;
-
-        let mut scanner = EventScannerBuilder::historic()
-            .buffer_capacity(custom_capacity)
-            .build(provider)
-            .await?;
-
-        assert_eq!(scanner.block_range_scanner.buffer_capacity(), custom_capacity);
-
-        let _ = scanner.subscribe(EventFilter::new());
-        let sender = &scanner.listeners[0].sender;
-        assert_eq!(sender.capacity(), custom_capacity);
-
-        Ok(())
     }
 }

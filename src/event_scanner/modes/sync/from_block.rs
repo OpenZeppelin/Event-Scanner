@@ -1,13 +1,16 @@
 use alloy::{eips::BlockId, network::Network};
 
 use crate::{
-    EventScannerBuilder, ScannerError,
+    ScannerError,
     event_scanner::{
-        EventScanner, StartProof, SyncFromBlock,
-        scanner::block_range_handler::{BlockRangeHandler, StreamHandler},
+        EventScanner, StartProof,
+        block_range_handler::{BlockRangeHandler, StreamHandler},
+        builder::EventScannerBuilder,
     },
     robust_provider::IntoRobustProvider,
 };
+
+use super::super::types::SyncFromBlock;
 
 impl EventScannerBuilder<SyncFromBlock> {
     /// Sets the number of confirmations required before a block is considered stable enough to
@@ -31,7 +34,7 @@ impl EventScannerBuilder<SyncFromBlock> {
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -120,7 +123,7 @@ mod tests {
         block_range_scanner::{
             DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
         },
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;

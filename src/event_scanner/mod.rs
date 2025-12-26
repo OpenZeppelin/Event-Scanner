@@ -8,14 +8,17 @@
 //!
 //! Mode marker types (e.g. [`Live`], [`Historic`]) are also re-exported.
 
+pub mod block_range_handler;
+
+mod builder;
 mod filter;
 mod listener;
 mod message;
+mod modes;
 mod scanner;
 
+pub use builder::{DEFAULT_MAX_CONCURRENT_FETCHES, EventScannerBuilder};
 pub use filter::EventFilter;
 pub use message::{EventScannerResult, Message};
-pub use scanner::{
-    DEFAULT_MAX_CONCURRENT_FETCHES, EventScanner, EventScannerBuilder, EventSubscription, Historic,
-    LatestEvents, Live, StartProof, SyncFromBlock, SyncFromLatestEvents, block_range_handler,
-};
+pub use modes::{Historic, LatestEvents, Live, SyncFromBlock, SyncFromLatestEvents};
+pub use scanner::{EventScanner, EventSubscription, StartProof};

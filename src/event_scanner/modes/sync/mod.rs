@@ -3,9 +3,9 @@ use alloy::eips::BlockId;
 pub(crate) mod from_block;
 pub(crate) mod from_latest;
 
-use crate::{
-    EventScannerBuilder,
-    event_scanner::scanner::{SyncFromBlock, SyncFromLatestEvents, Synchronize},
+use crate::event_scanner::{
+    builder::EventScannerBuilder,
+    modes::{SyncFromBlock, SyncFromLatestEvents, Synchronize},
 };
 
 impl EventScannerBuilder<Synchronize> {
