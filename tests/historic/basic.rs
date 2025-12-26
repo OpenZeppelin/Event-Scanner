@@ -1,4 +1,4 @@
-use alloy::eips::BlockNumberOrTag;
+use alloy::{eips::BlockNumberOrTag, primitives::U256};
 use event_scanner::{assert_closed, assert_next};
 
 use crate::common::{TestCounter, setup_historic_scanner};
@@ -24,11 +24,11 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     assert_next!(
         stream,
         &[
-            TestCounter::CountIncreased { newCount: alloy::primitives::U256::from(1) },
-            TestCounter::CountIncreased { newCount: alloy::primitives::U256::from(2) },
-            TestCounter::CountIncreased { newCount: alloy::primitives::U256::from(3) },
-            TestCounter::CountIncreased { newCount: alloy::primitives::U256::from(4) },
-            TestCounter::CountIncreased { newCount: alloy::primitives::U256::from(5) },
+            TestCounter::CountIncreased { newCount: U256::from(1) },
+            TestCounter::CountIncreased { newCount: U256::from(2) },
+            TestCounter::CountIncreased { newCount: U256::from(3) },
+            TestCounter::CountIncreased { newCount: U256::from(4) },
+            TestCounter::CountIncreased { newCount: U256::from(5) },
         ]
     );
     assert_closed!(stream);
