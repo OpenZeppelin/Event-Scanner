@@ -20,8 +20,8 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // historical events
     assert_next!(
@@ -61,8 +61,8 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     let subscription = setup.subscription;
 
     // Start the scanner in sync mode from the future block
-    let token = scanner.start().await?;
-    let stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let stream = subscription.stream(&proof);
 
     // Send 2 transactions that should not appear in the stream
     contract.increase().send().await?.watch().await?;
@@ -95,8 +95,8 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // assert historic events are streamed in a batch
     assert_next!(

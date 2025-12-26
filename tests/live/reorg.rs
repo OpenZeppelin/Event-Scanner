@@ -15,8 +15,8 @@ async fn rescans_events_within_same_block() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // emit initial events
     for _ in 0..5 {
@@ -66,8 +66,8 @@ async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // emit initial events
     for _ in 0..5 {
@@ -115,8 +115,8 @@ async fn depth_one() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // emit initial events
     for _ in 0..4 {
@@ -154,8 +154,8 @@ async fn depth_two() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
         setup_live_scanner(None, None, 0).await?;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // emit initial events
     for _ in 0..4 {
@@ -194,8 +194,8 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
         setup_live_scanner(None, None, 5).await?;
 
-    let token = scanner.start().await?;
-    let stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let stream = subscription.stream(&proof);
 
     // mine some initial blocks
     provider.primary().anvil_mine(Some(10), None).await?;

@@ -9,8 +9,8 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let scanner = setup.scanner;
     let subscription = setup.subscription;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     for _ in 0..5 {
         contract.increase().send().await?.watch().await?;
@@ -45,9 +45,9 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
         .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
     let b_subscription = scanner.subscribe(b_filter);
 
-    let token = scanner.start().await?;
-    let mut a_stream = a_subscription.stream(&token);
-    let mut b_stream = b_subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut a_stream = a_subscription.stream(&proof);
+    let mut b_stream = b_subscription.stream(&proof);
 
     for _ in 0..3 {
         a.increase().send().await?.watch().await?;
@@ -88,9 +88,9 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
         .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
     let decr_subscription = scanner.subscribe(decrease_filter);
 
-    let token = scanner.start().await?;
-    let mut incr_stream = incr_subscription.stream(&token);
-    let mut decr_stream = decr_subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut incr_stream = incr_subscription.stream(&proof);
+    let mut decr_stream = decr_subscription.stream(&proof);
 
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
@@ -129,8 +129,8 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
 
     let subscription = scanner.subscribe(filter);
 
-    let token = scanner.start().await?;
-    let stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let stream = subscription.stream(&proof);
 
     contract.increase().send().await?.watch().await?;
 
@@ -150,8 +150,8 @@ async fn filters_malformed_signature_graceful() -> anyhow::Result<()> {
 
     let subscription = scanner.subscribe(filter);
 
-    let token = scanner.start().await?;
-    let stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let stream = subscription.stream(&proof);
 
     contract.increase().send().await?.watch().await?;
 

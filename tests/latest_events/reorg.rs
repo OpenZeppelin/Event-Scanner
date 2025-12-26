@@ -23,8 +23,8 @@ async fn reorged_logs_are_removed_from_stream() -> anyhow::Result<()> {
         EventScannerBuilder::latest(5).max_block_range(2).connect(provider.clone()).await?;
     let subscription = scanner.subscribe(filter);
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Trigger a reorg that removes the last 2 blocks (events 19 and 20)
     provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs: vec![] }).await?;
@@ -63,8 +63,8 @@ async fn new_logs_in_reorged_blocks_are_included() -> anyhow::Result<()> {
     // Mine 2 empty blocks - max newCount is still 8
     provider.primary().anvil_mine(Some(2), None).await?;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Trigger a reorg that removes 2 empty blocks and adds 2 new events in replacement blocks.
     // Events 9 and 10 can only come from the reorged blocks.
@@ -103,8 +103,8 @@ async fn rewind_continues_further_when_reorg_removes_logs() -> anyhow::Result<()
         contract.increase().send().await?.watch().await?;
     }
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     provider.primary().anvil_reorg(ReorgOptions { depth: 3, tx_block_pairs: vec![] }).await?;
 
@@ -138,8 +138,8 @@ async fn deep_reorg_closes_stream_when_fewer_events_remain_than_requested() -> a
         contract.increase().send().await?.watch().await?;
     }
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Reorg removes 5 blocks - this removes events 4-8
     // Only events 1-3 remain

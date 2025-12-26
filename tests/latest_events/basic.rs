@@ -16,8 +16,8 @@ async fn exact_count_returns_last_events_in_order() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(
         stream,
@@ -47,8 +47,8 @@ async fn fewer_available_than_count_returns_all() -> anyhow::Result<()> {
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(
         stream,
@@ -70,8 +70,8 @@ async fn no_past_events_returns_empty() -> anyhow::Result<()> {
     let scanner = setup.scanner;
     let subscription = setup.subscription;
 
-    let token = scanner.start().await?;
-    let mut stream = subscription.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(stream, Notification::NoPastLogsFound);
     assert_closed!(stream);
@@ -102,8 +102,8 @@ async fn respects_range_subset() -> anyhow::Result<()> {
         EventScannerBuilder::latest(10).from_block(start).to_block(end).connect(provider).await?;
     let subscription = scanner_with_range.subscribe(default_filter);
 
-    let token = scanner_with_range.start().await?;
-    let mut stream_with_range = subscription.stream(&token);
+    let proof = scanner_with_range.start().await?;
+    let mut stream_with_range = subscription.stream(&proof);
 
     assert_next!(
         stream_with_range,
@@ -140,9 +140,9 @@ async fn multiple_listeners_to_same_event_receive_same_results() -> anyhow::Resu
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    let token = scanner.start().await?;
-    let mut stream1 = subscription1.stream(&token);
-    let mut stream2 = subscription2.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream1 = subscription1.stream(&proof);
+    let mut stream2 = subscription2.stream(&proof);
 
     let expected = &[
         TestCounter::CountIncreased { newCount: U256::from(3) },
@@ -192,9 +192,9 @@ async fn different_filters_receive_different_results() -> anyhow::Result<()> {
 
     // Ask for latest 3 across the full range: each filtered listener should receive their own last
     // 3 events
-    let token = scanner.start().await?;
-    let mut stream_inc = subscription_inc.stream(&token);
-    let mut stream_dec = subscription_dec.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream_inc = subscription_inc.stream(&proof);
+    let mut stream_dec = subscription_dec.stream(&proof);
 
     assert_next!(
         stream_inc,
@@ -238,9 +238,9 @@ async fn mixed_events_and_filters_return_correct_streams() -> anyhow::Result<()>
     contract.increase().send().await?.watch().await?; // inc(2)
     contract.decrease().send().await?.watch().await?; // dec(1)
 
-    let token = scanner.start().await?;
-    let mut stream_inc = subscription_inc.stream(&token);
-    let mut stream_dec = subscription_dec.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream_inc = subscription_inc.stream(&proof);
+    let mut stream_dec = subscription_dec.stream(&proof);
 
     assert_next!(
         stream_inc,
@@ -283,8 +283,8 @@ async fn ignores_non_tracked_contract() -> anyhow::Result<()> {
     contract_b.increase().send().await?.watch().await?; // ignored by filter
     contract_a.increase().send().await?.watch().await?;
 
-    let token = scanner.start().await?;
-    let mut stream_a = subscription_a.stream(&token);
+    let proof = scanner.start().await?;
+    let mut stream_a = subscription_a.stream(&proof);
 
     assert_next!(
         stream_a,
@@ -321,8 +321,8 @@ async fn large_gaps_and_empty_ranges() -> anyhow::Result<()> {
         EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
     let subscription = scanner_with_range.subscribe(default_filter);
 
-    let token = scanner_with_range.start().await?;
-    let mut stream_with_range = subscription.stream(&token);
+    let proof = scanner_with_range.start().await?;
+    let mut stream_with_range = subscription.stream(&proof);
 
     assert_next!(
         stream_with_range,
@@ -353,8 +353,8 @@ async fn boundary_range_single_block() -> anyhow::Result<()> {
         EventScannerBuilder::latest(5).from_block(start).to_block(end).connect(provider).await?;
     let subscription = scanner_with_range.subscribe(default_filter);
 
-    let token = scanner_with_range.start().await?;
-    let mut stream_with_range = subscription.stream(&token);
+    let proof = scanner_with_range.start().await?;
+    let mut stream_with_range = subscription.stream(&proof);
 
     assert_next!(stream_with_range, &[TestCounter::CountIncreased { newCount: U256::from(2) }]);
     assert_closed!(stream_with_range);
