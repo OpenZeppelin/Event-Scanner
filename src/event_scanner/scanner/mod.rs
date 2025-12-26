@@ -39,14 +39,13 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
+    ScannerToken,
     block_range_scanner::{
         BlockRangeScanner, BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS,
         RingBufferCapacity,
     },
     error::ScannerError,
-    event_scanner::{
-        EventScannerResult, filter::EventFilter, listener::EventListener, stream::EventSubscription,
-    },
+    event_scanner::{EventScannerResult, filter::EventFilter, listener::EventListener},
     robust_provider::IntoRobustProvider,
 };
 
@@ -570,6 +569,58 @@ impl<Mode> EventScannerBuilder<Mode> {
     ) -> Result<EventScanner<Mode, N>, ScannerError> {
         let block_range_scanner = self.block_range_scanner.connect::<N>(provider).await?;
         Ok(EventScanner { config: self.config, block_range_scanner, listeners: Vec::new() })
+    }
+}
+
+/// A subscription to scanner events that requires proof the scanner has started.
+///
+/// Created by [`EventScanner::subscribe()`](crate::EventScanner::subscribe), this type holds the
+/// underlying stream but prevents access until [`stream()`](EventSubscription::stream) is called
+/// with a valid [`ScannerToken`].
+///
+/// This pattern ensures at compile time that [`EventScanner::start()`](crate::EventScanner::start)
+/// is called before attempting to read from the event stream.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut scanner = EventScannerBuilder::live().connect(provider).await?;
+///
+/// // Create subscription (cannot access stream yet)
+/// let subscription = scanner.subscribe(filter);
+///
+/// // Start scanner and get token
+/// let token = scanner.start().await?;
+///
+/// // Now access the stream with the token
+/// let mut stream = subscription.stream(&token);
+///
+/// while let Some(msg) = stream.next().await {
+///     // process events
+/// }
+/// ```
+pub struct EventSubscription {
+    inner: ReceiverStream<EventScannerResult>,
+}
+
+impl EventSubscription {
+    /// Creates a new subscription wrapping the given stream.
+    pub(crate) fn new(inner: ReceiverStream<EventScannerResult>) -> Self {
+        Self { inner }
+    }
+
+    /// Access the event stream.
+    ///
+    /// Requires a reference to a [`ScannerToken`] as proof that the scanner
+    /// has been started. The token is obtained by calling
+    /// [`EventScanner::start()`](crate::EventScanner::start).
+    ///
+    /// # Arguments
+    ///
+    /// * `_token` - Proof that the scanner has been started
+    #[must_use]
+    pub fn stream(self, _token: &ScannerToken) -> ReceiverStream<EventScannerResult> {
+        self.inner
     }
 }
 

@@ -17,7 +17,7 @@ mod stream;
 pub use filter::EventFilter;
 pub use message::{EventScannerResult, Message};
 pub use scanner::{
-    DEFAULT_MAX_CONCURRENT_FETCHES, EventScanner, EventScannerBuilder, Historic, LatestEvents,
-    Live, SyncFromBlock, SyncFromLatestEvents, block_range_handler,
+    DEFAULT_MAX_CONCURRENT_FETCHES, EventScanner, EventScannerBuilder, EventSubscription, Historic,
+    LatestEvents, Live, SyncFromBlock, SyncFromLatestEvents, block_range_handler,
 };
-pub use stream::{EventSubscription, ScannerToken};
+pub use stream::ScannerToken;
