@@ -1,13 +1,16 @@
+//! Streams events from newly produced blocks in real-time.
+//!
+//! Continuously monitors the blockchain and yields events as new blocks are confirmed.
+//! See [`EventScannerBuilder::live`] for usage details.
+
 use alloy::network::Network;
 
 use crate::{
-    EventScannerBuilder, ScannerError,
+    ScannerError,
     event_scanner::{
         EventScanner, StartProof,
-        scanner::{
-            Live,
-            block_range_handler::{BlockRangeHandler, StreamHandler},
-        },
+        block_range_handler::{BlockRangeHandler, StreamHandler},
+        builder::{EventScannerBuilder, Live},
     },
     robust_provider::IntoRobustProvider,
 };
@@ -33,11 +36,14 @@ impl EventScannerBuilder<Live> {
     /// processing multiple block ranges in parallel. Increasing the value
     /// improves throughput at the expense of higher load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -110,7 +116,7 @@ mod tests {
         block_range_scanner::{
             DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
         },
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;

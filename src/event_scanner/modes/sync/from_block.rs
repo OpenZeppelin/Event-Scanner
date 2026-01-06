@@ -1,10 +1,19 @@
+//! Syncs from a starting block, then transitions to live streaming.
+//!
+//! Streams events from a specified starting block to the present, then automatically
+//! continues with live streaming. See [`EventScannerBuilder::sync().from_block()`][from_block]
+//! for usage details.
+//!
+//! [from_block]: crate::EventScannerBuilder#method.from_block-2
+
 use alloy::{eips::BlockId, network::Network};
 
 use crate::{
-    EventScannerBuilder, ScannerError,
+    ScannerError,
     event_scanner::{
-        EventScanner, StartProof, SyncFromBlock,
-        scanner::block_range_handler::{BlockRangeHandler, StreamHandler},
+        EventScanner, StartProof,
+        block_range_handler::{BlockRangeHandler, StreamHandler},
+        builder::{EventScannerBuilder, SyncFromBlock},
     },
     robust_provider::IntoRobustProvider,
 };
@@ -27,11 +36,14 @@ impl EventScannerBuilder<SyncFromBlock> {
     /// Higher values can improve throughput by issuing multiple RPC requests
     /// concurrently, at the cost of additional load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -120,7 +132,7 @@ mod tests {
         block_range_scanner::{
             DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
         },
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;

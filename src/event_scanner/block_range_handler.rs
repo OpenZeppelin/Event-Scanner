@@ -44,6 +44,11 @@ pub trait BlockRangeHandler {
 /// This handler fetches logs per listener and forwards each non-empty result immediately. It is
 /// used by scanner modes that operate as continuous streams (e.g. historic/live scanning), where
 /// incremental delivery is preferred over collecting a fixed-size window.
+///
+/// # Concurrency
+///
+/// The `max_concurrent_fetches` limit applies **per listener**, not globally. With N listeners
+/// and a limit of M, up to N × M concurrent RPC requests may be in-flight simultaneously.
 #[derive(Debug)]
 pub struct StreamHandler<N: Network> {
     provider: RobustProvider<N>,
@@ -178,6 +183,11 @@ impl<N: Network> BlockRangeHandler for StreamHandler<N> {
 ///
 /// During reorg recovery it prepends newly fetched logs so that the newest-first buffer remains
 /// correctly ordered.
+///
+/// # Concurrency
+///
+/// The `max_concurrent_fetches` limit applies **per listener**, not globally. With N listeners
+/// and a limit of M, up to N × M concurrent RPC requests may be in-flight simultaneously.
 #[derive(Debug)]
 pub struct LatestEventsHandler<N: Network> {
     provider: RobustProvider<N>,

@@ -1,13 +1,19 @@
+//! Collects recent events, then transitions to live streaming.
+//!
+//! Collects a specified number of the most recent events, then automatically continues
+//! with live streaming. See [`EventScannerBuilder::sync().from_latest()`][from_latest]
+//! for usage details.
+//!
+//! [from_latest]: crate::EventScannerBuilder::from_latest
+
 use alloy::{eips::BlockNumberOrTag, network::Network};
 
 use crate::{
-    EventScannerBuilder, ScannerError,
+    ScannerError,
     event_scanner::{
         EventScanner, StartProof,
-        scanner::{
-            SyncFromLatestEvents,
-            block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
-        },
+        block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
+        builder::{EventScannerBuilder, SyncFromLatestEvents},
     },
     robust_provider::IntoRobustProvider,
     types::TryStream,
@@ -31,11 +37,14 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
     /// Increasing this value can improve catch-up throughput by issuing multiple
     /// RPC requests concurrently, at the cost of additional load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -174,7 +183,7 @@ mod tests {
         block_range_scanner::{
             DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
         },
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;

@@ -1,15 +1,21 @@
+//! Scans events from a fixed block range.
+//!
+//! Streams events from a specified block range in chronological order.
+//! See [`EventScannerBuilder::historic`] for usage details.
+
 use alloy::{
     consensus::BlockHeader,
     eips::BlockId,
     network::{BlockResponse, Network},
 };
 
-use super::block_range_handler::StreamHandler;
 use crate::{
-    EventScannerBuilder, ScannerError,
+    ScannerError,
     event_scanner::{
         StartProof,
-        scanner::{EventScanner, Historic, block_range_handler::BlockRangeHandler},
+        block_range_handler::{BlockRangeHandler, StreamHandler},
+        builder::{EventScannerBuilder, Historic},
+        scanner::EventScanner,
     },
     robust_provider::IntoRobustProvider,
 };
@@ -45,11 +51,14 @@ impl EventScannerBuilder<Historic> {
     /// Increasing this value can improve throughput by issuing multiple RPC
     /// requests concurrently, at the cost of higher load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -170,7 +179,7 @@ impl<N: Network> EventScanner<Historic, N> {
 mod tests {
     use crate::{
         block_range_scanner::{DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY},
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;
