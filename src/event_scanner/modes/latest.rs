@@ -1,8 +1,7 @@
-//! Latest events mode implementation for collecting recent logs.
+//! Collects the most recent matching events.
 //!
-//! This module implements the latest events mode which performs a reverse scan to collect
-//! a specified number of most recent matching events. See [`EventScannerBuilder::latest`]
-//! for usage details.
+//! Performs a reverse scan to collect a specified number of the most recent matching events.
+//! See [`EventScannerBuilder::latest`] for usage details.
 
 use alloy::{
     consensus::BlockHeader,

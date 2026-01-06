@@ -1,8 +1,7 @@
-//! Live mode implementation for streaming new events as they occur.
+//! Streams events from newly produced blocks in real-time.
 //!
-//! This module implements the live streaming mode which continuously monitors the blockchain
-//! and streams events from newly produced blocks. See [`EventScannerBuilder::live`] for
-//! usage details.
+//! Continuously monitors the blockchain and yields events as new blocks are confirmed.
+//! See [`EventScannerBuilder::live`] for usage details.
 
 use alloy::network::Network;
 

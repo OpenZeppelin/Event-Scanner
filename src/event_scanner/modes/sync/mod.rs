@@ -1,8 +1,8 @@
-//! Sync mode implementations for catch-up followed by live streaming.
+//! Catches up on historical events, then transitions to live streaming.
 //!
-//! This module provides two sync variants:
+//! Two sync variants are available:
 //! - [`from_block`]: Syncs from a specific block then transitions to live mode
-//! - [`from_latest`]: Collects latest N events then transitions to live mode
+//! - [`from_latest`]: Collects the latest N events then transitions to live mode
 
 use alloy::eips::BlockId;
 

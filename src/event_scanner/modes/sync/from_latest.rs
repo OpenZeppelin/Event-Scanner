@@ -1,8 +1,8 @@
-//! Sync from latest events mode implementation.
+//! Collects recent events, then transitions to live streaming.
 //!
-//! This module implements the sync-from-latest mode which collects a specified number of
-//! most recent events, then automatically transitions to live streaming. See
-//! [`EventScannerBuilder::sync().from_latest()`][from_latest] for usage details.
+//! Collects a specified number of the most recent events, then automatically continues
+//! with live streaming. See [`EventScannerBuilder::sync().from_latest()`][from_latest]
+//! for usage details.
 //!
 //! [from_latest]: crate::EventScannerBuilder::from_latest
 

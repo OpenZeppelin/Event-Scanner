@@ -1,7 +1,7 @@
-//! Historic mode implementation for scanning a fixed block range.
+//! Scans events from a fixed block range.
 //!
-//! This module implements the historic scanning mode which streams events from a specified
-//! block range in chronological order. See [`EventScannerBuilder::historic`] for usage details.
+//! Streams events from a specified block range in chronological order.
+//! See [`EventScannerBuilder::historic`] for usage details.
 
 use alloy::{
     consensus::BlockHeader,

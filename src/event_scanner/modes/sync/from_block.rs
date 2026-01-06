@@ -1,8 +1,8 @@
-//! Sync from block mode implementation.
+//! Syncs from a starting block, then transitions to live streaming.
 //!
-//! This module implements the sync-from-block mode which streams events from a specified
-//! starting block to the present, then automatically transitions to live streaming.
-//! See [`EventScannerBuilder::sync().from_block()`][from_block] for usage details.
+//! Streams events from a specified starting block to the present, then automatically
+//! continues with live streaming. See [`EventScannerBuilder::sync().from_block()`][from_block]
+//! for usage details.
 //!
 //! [from_block]: crate::EventScannerBuilder#method.from_block-2
 
