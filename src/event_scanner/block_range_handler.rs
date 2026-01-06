@@ -5,7 +5,7 @@
 //! * [`StreamHandler`]
 //! * [`LatestEventsHandler`]
 
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use crate::{
     Message, Notification, ScannerError, ScannerMessage,
@@ -52,7 +52,7 @@ pub trait BlockRangeHandler {
 #[derive(Debug)]
 pub struct StreamHandler<N: Network> {
     provider: RobustProvider<N>,
-    listeners: Vec<EventListener>,
+    listeners: Arc<[EventListener]>,
     max_concurrent_fetches: usize,
     broadcast_channel_capacity: usize,
 }
@@ -75,13 +75,19 @@ impl<N: Network> StreamHandler<N> {
         max_concurrent_fetches: usize,
         broadcast_channel_capacity: usize,
     ) -> Self {
-        Self { provider, listeners, max_concurrent_fetches, broadcast_channel_capacity }
+        Self {
+            provider,
+            listeners: listeners.into(),
+            max_concurrent_fetches,
+            broadcast_channel_capacity,
+        }
     }
 
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
         let mut join_set = JoinSet::new();
 
-        for listener in self.listeners.iter().cloned() {
+        for idx in 0..self.listeners.len() {
+            let listeners = Arc::clone(&self.listeners);
             let max_concurrent_fetches = self.max_concurrent_fetches;
             let provider = self.provider.clone();
             let mut range_rx = range_tx.subscribe();
@@ -97,6 +103,7 @@ impl<N: Network> StreamHandler<N> {
                 // thread can continue receiving and buffering subsequent
                 // block ranges while the previous ones are being processed.
                 tokio::spawn(async move {
+                    let listener = &listeners[idx];
                     let mut stream = ReceiverStream::new(rx)
                         .map(async |message| match message {
                             Ok(ScannerMessage::Data(range)) => {
@@ -191,7 +198,7 @@ impl<N: Network> BlockRangeHandler for StreamHandler<N> {
 #[derive(Debug)]
 pub struct LatestEventsHandler<N: Network> {
     provider: RobustProvider<N>,
-    listeners: Vec<EventListener>,
+    listeners: Arc<[EventListener]>,
     max_concurrent_fetches: usize,
     count: usize,
     broadcast_channel_capacity: usize,
@@ -216,14 +223,21 @@ impl<N: Network> LatestEventsHandler<N> {
         count: usize,
         broadcast_channel_capacity: usize,
     ) -> Self {
-        Self { provider, listeners, max_concurrent_fetches, count, broadcast_channel_capacity }
+        Self {
+            provider,
+            listeners: listeners.into(),
+            max_concurrent_fetches,
+            count,
+            broadcast_channel_capacity,
+        }
     }
 
     #[allow(clippy::too_many_lines)]
     fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
         let mut join_set = JoinSet::new();
 
-        for listener in self.listeners.iter().cloned() {
+        for idx in 0..self.listeners.len() {
+            let listeners = Arc::clone(&self.listeners);
             let max_concurrent_fetches = self.max_concurrent_fetches;
             let count = self.count;
             let provider = self.provider.clone();
@@ -239,6 +253,7 @@ impl<N: Network> LatestEventsHandler<N> {
                 // can continue receiving and buffering subsequent block ranges
                 // while the previous ones are being processed.
                 tokio::spawn(async move {
+                    let listener = &listeners[idx];
                     let mut stream = ReceiverStream::new(rx)
                         .map(async |message| match message {
                             Ok(ScannerMessage::Data(range)) => {
@@ -605,7 +620,7 @@ mod tests {
 
         let stream_handler = StreamHandler {
             provider,
-            listeners: vec![EventListener { filter: EventFilter::new(), sender }],
+            listeners: vec![EventListener { filter: EventFilter::new(), sender }].into(),
             max_concurrent_fetches: 1,
             broadcast_channel_capacity: 1,
         };
@@ -633,7 +648,7 @@ mod tests {
 
         let handler = LatestEventsHandler {
             provider,
-            listeners: vec![EventListener { filter: EventFilter::new(), sender }],
+            listeners: vec![EventListener { filter: EventFilter::new(), sender }].into(),
             max_concurrent_fetches: 1,
             count: 5,
             broadcast_channel_capacity: 1,
