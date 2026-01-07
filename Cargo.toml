@@ -32,6 +32,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 test-log = { version = "0.2.18", features = ["trace"] }
 backon = "1.6.0"
+robust-provider = "0.1.0"
 
 [package]
 name = "event-scanner"
@@ -63,6 +64,7 @@ tracing.workspace = true
 backon.workspace = true
 tokio-util = "0.7.17"
 futures.workspace = true
+robust-provider.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

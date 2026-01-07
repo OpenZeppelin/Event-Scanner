@@ -1724,6 +1724,7 @@ dependencies = [
  "anyhow",
  "backon",
  "futures",
+ "robust-provider",
  "test-log",
  "thiserror",
  "tokio",
@@ -3178,6 +3179,24 @@ checksum = "bb919243f34364b6bd2fc10ef797edbfa75f33c252e7998527479c6d6b47e1ec"
 dependencies = [
  "bytes",
  "rustc-hex",
+]
+
+[[package]]
+name = "robust-provider"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65ce27da301d4ff59917b47660571e18cf7f55d9c020627d7f7c4df8785ff901"
+dependencies = [
+ "alloy",
+ "alloy-node-bindings",
+ "anyhow",
+ "backon",
+ "futures",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
