@@ -60,7 +60,8 @@ Create an event stream for the given event filters registered with the `EventSca
 
 ```rust
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
+use robust_provider::RobustProviderBuilder;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 

@@ -32,8 +32,8 @@
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
 //!     BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS, ScannerError, ScannerMessage,
-//!     robust_provider::RobustProviderBuilder,
 //! };
+//! use robust_provider::RobustProviderBuilder;
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
 //!
