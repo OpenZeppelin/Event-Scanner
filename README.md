@@ -293,42 +293,7 @@ All examples spin up a local `anvil` instance, deploy a demo counter contract, a
 
 ## Robust Provider
 
-`event-scanner` ships with a `robust_provider` module that wraps Alloy providers with:
-
-- bounded per-call timeouts and exponential backoff retries
-- automatic failover from a primary provider to one or more fallbacks
-- resilient WebSocket block subscriptions with timeout handling and reconnection.
-
-The main entry point is `robust_provider::RobustProviderBuilder`, which accepts a wide
-range of provider types (URLs, `RootProvider`, layered providers, etc.) through the
-`IntoRobustProvider` and `IntoRobustProvider` traits.
-
-A typical setup looks like:
-
-```rust
-use alloy::providers::ProviderBuilder;
-use event_scanner::robust_provider::RobustProviderBuilder;
-use std::time::Duration;
-
-async fn example() -> anyhow::Result<()> {
-    let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    let http = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
-
-    let provider = RobustProviderBuilder::new(ws)
-        .fallback(http)
-        .call_timeout(Duration::from_secs(30))
-        .subscription_timeout(Duration::from_secs(120))
-        .build()
-        .await?;
-
-    // ...
-
-    Ok(())
-}
-```
-
-You can then pass this `robust` provider into `EventScannerBuilder::connect` just like
-any other provider.
+For resilient RPC connections with automatic retries, timeouts, and failover, we use the [Robust Provider](https://github.com/OpenZeppelin/Robust-Provider) crate.
 
 ---
 
