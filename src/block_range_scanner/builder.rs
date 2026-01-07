@@ -1,12 +1,13 @@
 use alloy::network::Network;
 
+use robust_provider::IntoRobustProvider;
+
 use crate::{
     ScannerError,
     block_range_scanner::{
         DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY, RingBufferCapacity,
         scanner::BlockRangeScanner,
     },
-    robust_provider::IntoRobustProvider,
 };
 
 /// Builder/configuration for the block-range streaming service.

@@ -16,8 +16,9 @@ use crate::{
         block_range_handler::{BlockRangeHandler, LatestEventsHandler},
         builder::{EventScannerBuilder, LatestEvents},
     },
-    robust_provider::IntoRobustProvider,
 };
+
+use robust_provider::IntoRobustProvider;
 
 impl EventScannerBuilder<LatestEvents> {
     /// Sets the number of confirmations required before a block is considered stable enough to

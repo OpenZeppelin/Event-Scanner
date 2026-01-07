@@ -11,8 +11,10 @@ use alloy::{
 
 use crate::{
     BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS, EventScanner, RingBufferCapacity,
-    ScannerError, robust_provider::IntoRobustProvider,
+    ScannerError,
 };
+
+use robust_provider::IntoRobustProvider;
 
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;

@@ -4,13 +4,10 @@ use alloy::{
     network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
     primitives::BlockHash,
 };
+use robust_provider::RobustProvider;
 
 use super::ring_buffer::RingBuffer;
-use crate::{
-    ScannerError,
-    block_range_scanner::ring_buffer::RingBufferCapacity,
-    robust_provider::{self, RobustProvider},
-};
+use crate::{ScannerError, block_range_scanner::ring_buffer::RingBufferCapacity};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ReorgHandler<N: Network = Ethereum> {

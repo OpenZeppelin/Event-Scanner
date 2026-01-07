@@ -77,6 +77,7 @@
 //! }
 //! ```
 
+use robust_provider::RobustProvider;
 use std::{cmp::Ordering, fmt::Debug};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -90,7 +91,6 @@ use crate::{
         rewind_handler::RewindHandler,
         sync_handler::SyncHandler,
     },
-    robust_provider::RobustProvider,
 };
 
 use alloy::{
