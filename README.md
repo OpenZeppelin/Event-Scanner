@@ -124,13 +124,14 @@ async fn run_scanner(
 `EventScannerBuilder` provides mode-specific constructors and functions to configure settings before connecting.
 Once configured, connect using:
 
-- `connect(provider)` - Connect using a `RobustProvider` wrapping your alloy provider or using an alloy provider directly
+- `connect(provider)` - Connect using a [Robust Provider](https://github.com/OpenZeppelin/Robust-Provider) wrapping your alloy provider or using an alloy provider directly
 
 This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ```rust
 use alloy::providers::ProviderBuilder;
-use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+use event_scanner::{EventScannerBuilder};
+use robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
