@@ -49,28 +49,6 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     }
 }
 
-/// Fetches the finalized block number, falling back to the earliest when
-/// the chain is too young to expose finalized blocks (height < finalized depth).
-pub(crate) async fn fetch_finalized_or_earliest_block_number<N: Network>(
-    provider: &RobustProvider<N>,
-    sender: &mpsc::Sender<BlockScannerResult>,
-) -> Option<BlockNumber> {
-    let finalized = match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await
-    {
-        Ok(block) => Ok(block),
-        Err(_) => provider.get_block_number_by_id(BlockNumberOrTag::Earliest.into()).await,
-    };
-
-    match finalized {
-        Ok(block) => Some(block),
-        Err(e) => {
-            error!("Failed to get finalized block");
-            _ = sender.try_stream(e).await;
-            None
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 #[cfg_attr(
     feature = "tracing",
@@ -412,10 +390,13 @@ pub(crate) async fn stream_historical_range<N: Network>(
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<()> {
-    let finalized = fetch_finalized_or_earliest_block_number(provider, sender).await?;
+    // NOTE: Edge case - If the chain is too young to expose finalized blocks (height < finalized
+    // depth) just use zero
+    let finalized_block_num =
+        provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
     // no reorg check for finalized blocks
-    let finalized_batch_end = finalized.min(end);
+    let finalized_batch_end = finalized_block_num.min(end);
     let finalized_range_count =
         RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
     trace!(
@@ -450,7 +431,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     //   on `start + 1`
     // * start < finalized -> if we got here, then `end > finalized`; on reorg, we should only
     //   re-stream non-finalized blocks
-    let min_common_ancestor = (start.saturating_sub(1)).max(finalized);
+    let min_common_ancestor = (start.saturating_sub(1)).max(finalized_block_num);
 
     stream_range_with_reorg_handling(
         min_common_ancestor,
