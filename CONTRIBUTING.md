@@ -68,9 +68,27 @@ cargo test --features test-utils
 Run examples:
 
 ```bash
-RUST_LOG=info cargo run -p simple_counter
+RUST_LOG=info cargo run -p live_scanning
 # or
 RUST_LOG=info cargo run -p historical_scanning
+```
+
+Logging / observability notes:
+
+- The library's internal logs are **compile-time opt-in** via the `event-scanner` crate feature `tracing`.
+- If the feature is disabled, internal logging calls compile to **no-ops**.
+- Examples install a `tracing_subscriber` and read filters from `RUST_LOG`.
+
+Enable `event-scanner` internal logs when running an example:
+
+```bash
+RUST_LOG=event_scanner=debug cargo run -p historical_scanning --features event-scanner/tracing
+```
+
+You can also combine filters to keep other dependencies quiet:
+
+```bash
+RUST_LOG=warn,event_scanner=info cargo run -p historical_scanning --features event-scanner/tracing
 ```
 
 Note: Examples start a local `anvil` instance and deploy a demo contract.

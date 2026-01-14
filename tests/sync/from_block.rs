@@ -13,14 +13,15 @@ async fn replays_historical_then_switches_to_live() -> anyhow::Result<()> {
     let setup = setup_sync_scanner(None, None, BlockNumberOrTag::Earliest, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     // emit "historic" events
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // historical events
     assert_next!(
@@ -57,10 +58,11 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
     let setup = setup_sync_scanner(None, None, future_start_block, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let stream = setup.stream;
+    let subscription = setup.subscription;
 
     // Start the scanner in sync mode from the future block
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let stream = subscription.stream(&proof);
 
     // Send 2 transactions that should not appear in the stream
     contract.increase().send().await?.watch().await?;
@@ -85,7 +87,7 @@ async fn sync_from_future_block_waits_until_minted() -> anyhow::Result<()> {
 #[tokio::test]
 async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     // any reorg ≤ 5 should be invisible to consumers
-    let SyncScannerSetup { provider, contract, scanner, mut stream, anvil: _anvil } =
+    let SyncScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
         setup_sync_scanner(None, None, BlockNumberOrTag::Earliest, 5).await?;
 
     // mine some initial "historic" blocks
@@ -93,7 +95,8 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
         contract.increase().send().await?.watch().await?;
     }
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // assert historic events are streamed in a batch
     assert_next!(

@@ -60,13 +60,16 @@ async fn main() -> anyhow::Result<()> {
 
     let mut scanner = EventScannerBuilder::latest(5).connect(robust_provider).await?;
 
-    let mut stream = scanner.subscribe(increase_filter);
+    let subscription = scanner.subscribe(increase_filter);
 
     for _ in 0..8 {
         _ = counter_contract.increase().send().await?;
     }
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+
+    // Access the stream using the proof (proves scanner is started)
+    let mut stream = subscription.stream(&proof);
 
     while let Some(message) = stream.next().await {
         match message {

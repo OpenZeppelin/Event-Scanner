@@ -1,9 +1,17 @@
+//! Streams events from newly produced blocks in real-time.
+//!
+//! Continuously monitors the blockchain and yields events as new blocks are confirmed.
+//! See [`EventScannerBuilder::live`] for usage details.
+
 use alloy::network::Network;
 
-use super::common::{ConsumerMode, handle_stream};
 use crate::{
-    EventScannerBuilder, ScannerError,
-    event_scanner::{EventScanner, scanner::Live},
+    ScannerError,
+    event_scanner::{
+        EventScanner, StartProof,
+        block_range_handler::{BlockRangeHandler, StreamHandler},
+        builder::{EventScannerBuilder, Live},
+    },
     robust_provider::IntoRobustProvider,
 };
 
@@ -28,11 +36,14 @@ impl EventScannerBuilder<Live> {
     /// processing multiple block ranges in parallel. Increasing the value
     /// improves throughput at the expense of higher load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -67,7 +78,7 @@ impl<N: Network> EventScanner<Live, N> {
     ///
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
-    pub async fn start(self) -> Result<(), ScannerError> {
+    pub async fn start(self) -> Result<StartProof, ScannerError> {
         info!(
             block_confirmations = self.config.block_confirmations,
             listener_count = self.listeners.len(),
@@ -75,24 +86,20 @@ impl<N: Network> EventScanner<Live, N> {
         );
 
         let stream = self.block_range_scanner.stream_live(self.config.block_confirmations).await?;
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let provider = self.block_range_scanner.provider().clone();
-        let listeners = self.listeners.clone();
-        let buffer_capacity = self.buffer_capacity();
+        let broadcast_channel_capacity = self.buffer_capacity();
+
+        let handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            self.listeners,
+            self.config.max_concurrent_fetches,
+            broadcast_channel_capacity,
+        );
 
         tokio::spawn(async move {
-            handle_stream(
-                stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            handler.handle(stream).await;
         });
 
-        Ok(())
+        Ok(StartProof::new())
     }
 }
 
@@ -109,7 +116,7 @@ mod tests {
         block_range_scanner::{
             DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
         },
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;

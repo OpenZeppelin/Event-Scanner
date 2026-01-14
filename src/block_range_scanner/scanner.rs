@@ -102,13 +102,31 @@ use alloy::{
 /// A [`BlockRangeScanner`] connected to a provider.
 #[derive(Debug)]
 pub struct BlockRangeScanner<N: Network> {
-    pub(crate) provider: RobustProvider<N>,
-    pub(crate) max_block_range: u64,
-    pub(crate) past_blocks_storage_capacity: RingBufferCapacity,
-    pub(crate) buffer_capacity: usize,
+    provider: RobustProvider<N>,
+    max_block_range: u64,
+    past_blocks_storage_capacity: RingBufferCapacity,
+    buffer_capacity: usize,
 }
 
 impl<N: Network> BlockRangeScanner<N> {
+    /// Creates a new [`BlockRangeScanner`] with the specified configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The robust provider to use for blockchain interactions
+    /// * `max_block_range` - Maximum number of blocks per streamed range (must be > 0)
+    /// * `past_blocks_storage_capacity` - How many past block hashes to keep for reorg detection
+    /// * `buffer_capacity` - Stream buffer capacity (must be > 0)
+    #[must_use]
+    pub fn new(
+        provider: RobustProvider<N>,
+        max_block_range: u64,
+        past_blocks_storage_capacity: RingBufferCapacity,
+        buffer_capacity: usize,
+    ) -> Self {
+        Self { provider, max_block_range, past_blocks_storage_capacity, buffer_capacity }
+    }
+
     /// Returns the underlying [`RobustProvider`].
     #[must_use]
     pub fn provider(&self) -> &RobustProvider<N> {

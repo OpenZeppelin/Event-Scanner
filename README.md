@@ -53,7 +53,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "0.9.0-alpha"
+event-scanner = "1.0.0-rc.1"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
@@ -85,10 +85,13 @@ async fn run_scanner(
         .contract_address(contract)
         .event(MyContract::SomeEvent::SIGNATURE);
 
-    let mut stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    // Start the scanner
-    scanner.start().await?;
+    // Start the scanner and get the proof
+    let proof = scanner.start().await?;
+
+    // Access the stream using the proof
+    let mut stream = subscription.stream(&proof);
 
     // Process messages from the stream
     while let Some(message) = stream.next().await {
@@ -174,7 +177,7 @@ let scanner = EventScannerBuilder::sync()
     .await?;
 ```
 
-Invoking `scanner.start()` starts the scanner in the specified mode.
+Invoking `scanner.start()` starts the scanner in the specified mode and returns a `StartProof` that must be passed to `subscription.stream()` to access the event stream. This compile-time guarantee ensures the scanner is started before attempting to read events.
 
 ### Defining Event Filters
 
@@ -276,6 +279,12 @@ Run an example with:
 
 ```bash
 RUST_LOG=info cargo run -p live_scanning
+```
+
+To also enable `event-scanner` internal logs in the examples:
+
+```bash
+RUST_LOG=event_scanner=debug cargo run -p live_scanning --features event-scanner/tracing
 ```
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.

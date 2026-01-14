@@ -10,7 +10,7 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
             .await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
@@ -18,7 +18,8 @@ async fn processes_events_within_specified_historical_range() -> anyhow::Result<
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     assert_next!(
         stream,

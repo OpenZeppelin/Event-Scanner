@@ -1,11 +1,16 @@
+//! Catches up on historical events, then transitions to live streaming.
+//!
+//! Two sync variants are available:
+//! - [`from_block`]: Syncs from a specific block then transitions to live mode
+//! - [`from_latest`]: Collects the latest N events then transitions to live mode
+
 use alloy::eips::BlockId;
 
 pub(crate) mod from_block;
 pub(crate) mod from_latest;
 
-use crate::{
-    EventScannerBuilder,
-    event_scanner::scanner::{SyncFromBlock, SyncFromLatestEvents, Synchronize},
+use crate::event_scanner::builder::{
+    EventScannerBuilder, SyncFromBlock, SyncFromLatestEvents, Synchronize,
 };
 
 impl EventScannerBuilder<Synchronize> {
@@ -39,9 +44,10 @@ impl EventScannerBuilder<Synchronize> {
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
-    /// let mut stream = scanner.subscribe(filter);
+    /// let subscription = scanner.subscribe(filter);
     ///
-    /// scanner.start().await?;
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
@@ -153,9 +159,10 @@ impl EventScannerBuilder<Synchronize> {
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
-    /// let mut stream = scanner.subscribe(filter);
+    /// let subscription = scanner.subscribe(filter);
     ///
-    /// scanner.start().await?;
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
