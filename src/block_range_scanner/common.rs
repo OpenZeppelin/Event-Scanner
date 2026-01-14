@@ -49,6 +49,8 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     }
 }
 
+/// Fetches the finalized block number, falling back to the earliest when
+/// the chain is too young to expose finalized blocks (height < finalized depth).
 pub(crate) async fn fetch_finalized_or_earliest_block_number<N: Network>(
     provider: &RobustProvider<N>,
     sender: &mpsc::Sender<BlockScannerResult>,
