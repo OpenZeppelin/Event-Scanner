@@ -49,6 +49,26 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     }
 }
 
+pub(crate) async fn fetch_finalized_or_earliest_block_number<N: Network>(
+    provider: &RobustProvider<N>,
+    sender: &mpsc::Sender<BlockScannerResult>,
+) -> Option<BlockNumber> {
+    let finalized = match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await
+    {
+        Ok(block) => Ok(block),
+        Err(_) => provider.get_block_number_by_id(BlockNumberOrTag::Earliest.into()).await,
+    };
+
+    match finalized {
+        Ok(block) => Some(block),
+        Err(e) => {
+            error!("Failed to get finalized block");
+            _ = sender.try_stream(e).await;
+            None
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 #[cfg_attr(
     feature = "tracing",
@@ -390,17 +410,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<()> {
-    let finalized = match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await
-    {
-        Ok(block) => block,
-        Err(e) => {
-            error!("Failed to get finalized block");
-            _ = sender.try_stream(e).await;
-            return None;
-        }
-    };
-
-    debug!(finalized_block = finalized, "Got finalized block for historical range");
+    let finalized = fetch_finalized_or_earliest_block_number(provider, sender).await?;
 
     // no reorg check for finalized blocks
     let finalized_batch_end = finalized.min(end);

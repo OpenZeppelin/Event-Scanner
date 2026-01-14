@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use alloy::{
     consensus::BlockHeader,
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockId,
     network::{BlockResponse, Network},
 };
 use tokio::{sync::mpsc, try_join};
@@ -12,7 +12,9 @@ use robust_provider::RobustProvider;
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{
-        common::BlockScannerResult, range_iterator::RangeIterator, reorg_handler::ReorgHandler,
+        common::{BlockScannerResult, fetch_finalized_or_earliest_block_number},
+        range_iterator::RangeIterator,
+        reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
     types::TryStream,
@@ -103,17 +105,11 @@ impl<N: Network> RewindHandler<N> {
         let from = tip.header().number();
         let to = to.header().number();
 
-        let finalized_block = match provider.get_block_by_number(BlockNumberOrTag::Finalized).await
-        {
-            Ok(block) => block,
-            Err(e) => {
-                error!("Failed to get finalized block for rewind");
-                _ = sender.try_stream(e).await;
-                return;
-            }
+        let Some(finalized_number) =
+            fetch_finalized_or_earliest_block_number(provider, sender).await
+        else {
+            return;
         };
-
-        let finalized_number = finalized_block.header().number();
 
         // only check reorg if our tip is after the finalized block
         let check_reorg = tip.header().number() > finalized_number;
