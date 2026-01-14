@@ -188,7 +188,7 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, eips::BlockNumberOrTag, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder};
+    /// # use event_scanner::EventScannerBuilder;
     /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {

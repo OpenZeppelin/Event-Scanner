@@ -130,7 +130,7 @@ This will connect the `EventScanner` and allow you to create event streams and s
 
 ```rust
 use alloy::providers::ProviderBuilder;
-use event_scanner::{EventScannerBuilder};
+use event_scanner::EventScannerBuilder;
 use robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
@@ -290,12 +290,6 @@ RUST_LOG=event_scanner=debug cargo run -p live_scanning --features event-scanner
 ```
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
-
----
-
-## Robust Provider
-
-For resilient RPC connections with automatic retries, timeouts, and failover, we use the [Robust Provider](https://github.com/OpenZeppelin/Robust-Provider) crate.
 
 ---
 
