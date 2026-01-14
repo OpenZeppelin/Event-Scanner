@@ -7,13 +7,14 @@ use alloy::{
 };
 use tokio::{sync::mpsc, try_join};
 
+use robust_provider::RobustProvider;
+
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{
         common::BlockScannerResult, range_iterator::RangeIterator, reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
-    robust_provider::RobustProvider,
     types::TryStream,
 };
 
@@ -197,7 +198,7 @@ impl<N: Network> RewindHandler<N> {
                 block
             }
             Err(e) => {
-                if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
+                if matches!(e, robust_provider::Error::BlockNotFound(_)) {
                     error!(
                         tip_number = tip_number,
                         "Unexpected: chain height decreased after reorg"

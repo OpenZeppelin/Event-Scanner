@@ -60,7 +60,8 @@ Create an event stream for the given event filters registered with the `EventSca
 
 ```rust
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
+use robust_provider::RobustProviderBuilder;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 
@@ -123,13 +124,14 @@ async fn run_scanner(
 `EventScannerBuilder` provides mode-specific constructors and functions to configure settings before connecting.
 Once configured, connect using:
 
-- `connect(provider)` - Connect using a `RobustProvider` wrapping your alloy provider or using an alloy provider directly
+- `connect(provider)` - Connect using a [Robust Provider](https://github.com/OpenZeppelin/Robust-Provider) wrapping your alloy provider or using an alloy provider directly
 
 This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ```rust
 use alloy::providers::ProviderBuilder;
-use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+use event_scanner::EventScannerBuilder;
+use robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
@@ -288,47 +290,6 @@ RUST_LOG=event_scanner=debug cargo run -p live_scanning --features event-scanner
 ```
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
-
----
-
-## Robust Provider
-
-`event-scanner` ships with a `robust_provider` module that wraps Alloy providers with:
-
-- bounded per-call timeouts and exponential backoff retries
-- automatic failover from a primary provider to one or more fallbacks
-- resilient WebSocket block subscriptions with timeout handling and reconnection.
-
-The main entry point is `robust_provider::RobustProviderBuilder`, which accepts a wide
-range of provider types (URLs, `RootProvider`, layered providers, etc.) through the
-`IntoRobustProvider` and `IntoRobustProvider` traits.
-
-A typical setup looks like:
-
-```rust
-use alloy::providers::ProviderBuilder;
-use event_scanner::robust_provider::RobustProviderBuilder;
-use std::time::Duration;
-
-async fn example() -> anyhow::Result<()> {
-    let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    let http = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
-
-    let provider = RobustProviderBuilder::new(ws)
-        .fallback(http)
-        .call_timeout(Duration::from_secs(30))
-        .subscription_timeout(Duration::from_secs(120))
-        .build()
-        .await?;
-
-    // ...
-
-    Ok(())
-}
-```
-
-You can then pass this `robust` provider into `EventScannerBuilder::connect` just like
-any other provider.
 
 ---
 

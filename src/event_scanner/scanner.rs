@@ -57,7 +57,8 @@ impl<Mode, N: Network> EventScanner<Mode, N> {
 ///
 /// ```no_run
 /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-/// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+/// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+/// # use robust_provider::RobustProviderBuilder;
 /// # use tokio_stream::StreamExt;
 /// #
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -142,7 +143,8 @@ impl<Mode, N: Network> EventScanner<Mode, N> {
 ///
 /// ```no_run
 /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-/// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+/// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
+/// # use robust_provider::RobustProviderBuilder;
 /// # use tokio_stream::StreamExt;
 /// #
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {

@@ -1722,8 +1722,8 @@ dependencies = [
  "alloy",
  "alloy-node-bindings",
  "anyhow",
- "backon",
  "futures",
+ "robust-provider",
  "test-log",
  "thiserror",
  "tokio",
@@ -2053,6 +2053,7 @@ dependencies = [
  "alloy-node-bindings",
  "anyhow",
  "event-scanner",
+ "robust-provider",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -2466,6 +2467,7 @@ dependencies = [
  "alloy-node-bindings",
  "anyhow",
  "event-scanner",
+ "robust-provider",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -2510,6 +2512,7 @@ dependencies = [
  "alloy-node-bindings",
  "anyhow",
  "event-scanner",
+ "robust-provider",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -3181,6 +3184,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "robust-provider"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65ce27da301d4ff59917b47660571e18cf7f55d9c020627d7f7c4df8785ff901"
+dependencies = [
+ "alloy",
+ "alloy-node-bindings",
+ "anyhow",
+ "backon",
+ "futures",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "ruint"
 version = "1.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3706,6 +3727,7 @@ dependencies = [
  "alloy-node-bindings",
  "anyhow",
  "event-scanner",
+ "robust-provider",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -3720,6 +3742,7 @@ dependencies = [
  "alloy-node-bindings",
  "anyhow",
  "event-scanner",
+ "robust-provider",
  "tokio",
  "tokio-stream",
  "tracing",

@@ -11,8 +11,10 @@ use alloy::{
 
 use crate::{
     BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS, EventScanner, RingBufferCapacity,
-    ScannerError, robust_provider::IntoRobustProvider,
+    ScannerError,
 };
+
+use robust_provider::IntoRobustProvider;
 
 /// Default number of maximum concurrent fetches for each scanner mode.
 pub const DEFAULT_MAX_CONCURRENT_FETCHES: usize = 24;
@@ -114,8 +116,9 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
     /// # use tokio_stream::StreamExt;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
@@ -140,7 +143,8 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::EventScannerBuilder;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
@@ -188,8 +192,9 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
     /// # use tokio_stream::StreamExt;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
@@ -281,8 +286,9 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
     /// # use tokio_stream::StreamExt;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
@@ -308,7 +314,8 @@ impl EventScannerBuilder<Unspecified> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::EventScannerBuilder;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;

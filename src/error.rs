@@ -6,7 +6,9 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::{robust_provider::provider::Error as RobustProviderError, types::ScannerResult};
+use crate::types::ScannerResult;
+
+use robust_provider::provider::Error as RobustProviderError;
 
 /// Errors emitted by the scanner.
 ///

@@ -17,8 +17,8 @@ use crate::{
         builder::{EventScannerBuilder, Historic},
         scanner::EventScanner,
     },
-    robust_provider::IntoRobustProvider,
 };
+use robust_provider::IntoRobustProvider;
 
 impl EventScannerBuilder<Historic> {
     /// Sets the starting block for the historic scan.

@@ -1,12 +1,12 @@
 use std::ops::RangeInclusive;
 
+use robust_provider::{RobustProvider, RobustSubscription, subscription};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 use crate::{
     ScannerError, ScannerMessage,
     block_range_scanner::{range_iterator::RangeIterator, reorg_handler::ReorgHandler},
-    robust_provider::{RobustProvider, RobustSubscription, subscription},
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 use alloy::{

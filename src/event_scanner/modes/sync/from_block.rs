@@ -15,8 +15,8 @@ use crate::{
         block_range_handler::{BlockRangeHandler, StreamHandler},
         builder::{EventScannerBuilder, SyncFromBlock},
     },
-    robust_provider::IntoRobustProvider,
 };
+use robust_provider::IntoRobustProvider;
 
 impl EventScannerBuilder<SyncFromBlock> {
     /// Sets the number of confirmations required before a block is considered stable enough to
