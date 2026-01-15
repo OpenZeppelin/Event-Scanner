@@ -7,6 +7,14 @@
 >
 > This project is under active development and likely contains bugs. APIs and behaviour may change without notice. Use at your own risk.
 
+## Node compatibility
+
+Event Scanner's test suite and examples are exercised against Foundry's `anvil` dev node.
+
+While the library is intended to work with other EVM nodes and RPC providers, behaviour may vary across implementations. If you encounter errors when using a different node/provider, please open an issue at:
+
+https://github.com/OpenZeppelin/Event-Scanner/issues
+
 ## About
 
 Event Scanner is a Rust library for streaming EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters; the scanner takes care of fetching historical ranges, bridging into live streaming mode, all whilst delivering the events as streams of data.
@@ -53,7 +61,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "1.0.0-rc.1"
+event-scanner = "1.0.0"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
@@ -291,6 +299,8 @@ RUST_LOG=event_scanner=debug cargo run -p live_scanning --features event-scanner
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
 
+If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.
+
 ---
 
 ## Testing
@@ -298,6 +308,8 @@ All examples spin up a local `anvil` instance, deploy a demo counter contract, a
 (We recommend using [nextest](https://crates.io/crates/cargo-nextest) to run the tests)
 
 Integration tests cover all modes:
+
+Note: Tests are exercised against a local Foundry `anvil` instance.
 
 ```bash
 cargo nextest run --features test-utils

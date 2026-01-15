@@ -196,7 +196,7 @@ impl<N: Network> RewindHandler<N> {
                 block
             }
             Err(e) => {
-                if matches!(e, robust_provider::Error::BlockNotFound(_)) {
+                if matches!(e, robust_provider::Error::BlockNotFound) {
                     error!(
                         tip_number = tip_number,
                         "Unexpected: chain height decreased after reorg"
