@@ -7,6 +7,14 @@
 >
 > This project is under active development and likely contains bugs. APIs and behaviour may change without notice. Use at your own risk.
 
+## Node compatibility
+
+Event Scanner's test suite and examples are exercised against Foundry's `anvil` dev node.
+
+While the library is intended to work with other EVM nodes and RPC providers, behaviour may vary across implementations. If you encounter errors when using a different node/provider, please open an issue at:
+
+https://github.com/OpenZeppelin/Event-Scanner/issues
+
 ## About
 
 Event Scanner is a Rust library for streaming EVM-based smart contract events. It is built on top of the [`alloy`](https://github.com/alloy-rs/alloy) ecosystem and focuses on in-memory scanning without a backing database. Applications provide event filters; the scanner takes care of fetching historical ranges, bridging into live streaming mode, all whilst delivering the events as streams of data.
@@ -53,14 +61,15 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "0.9.0-alpha"
+event-scanner = "1.0.0"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
 
 ```rust
 use alloy::{network::Ethereum, providers::ProviderBuilder, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
+use robust_provider::RobustProviderBuilder;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 
@@ -85,10 +94,13 @@ async fn run_scanner(
         .contract_address(contract)
         .event(MyContract::SomeEvent::SIGNATURE);
 
-    let mut stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    // Start the scanner
-    scanner.start().await?;
+    // Start the scanner and get the proof
+    let proof = scanner.start().await?;
+
+    // Access the stream using the proof
+    let mut stream = subscription.stream(&proof);
 
     // Process messages from the stream
     while let Some(message) = stream.next().await {
@@ -120,13 +132,14 @@ async fn run_scanner(
 `EventScannerBuilder` provides mode-specific constructors and functions to configure settings before connecting.
 Once configured, connect using:
 
-- `connect(provider)` - Connect using a `RobustProvider` wrapping your alloy provider or using an alloy provider directly
+- `connect(provider)` - Connect using a [Robust Provider](https://github.com/OpenZeppelin/Robust-Provider) wrapping your alloy provider or using an alloy provider directly
 
 This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ```rust
 use alloy::providers::ProviderBuilder;
-use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+use event_scanner::EventScannerBuilder;
+use robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
@@ -174,7 +187,7 @@ let scanner = EventScannerBuilder::sync()
     .await?;
 ```
 
-Invoking `scanner.start()` starts the scanner in the specified mode.
+Invoking `scanner.start()` starts the scanner in the specified mode and returns a `StartProof` that must be passed to `subscription.stream()` to access the event stream. This compile-time guarantee ensures the scanner is started before attempting to read events.
 
 ### Defining Event Filters
 
@@ -278,48 +291,15 @@ Run an example with:
 RUST_LOG=info cargo run -p live_scanning
 ```
 
-All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
+To also enable `event-scanner` internal logs in the examples:
 
----
-
-## Robust Provider
-
-`event-scanner` ships with a `robust_provider` module that wraps Alloy providers with:
-
-- bounded per-call timeouts and exponential backoff retries
-- automatic failover from a primary provider to one or more fallbacks
-- resilient WebSocket block subscriptions with timeout handling and reconnection.
-
-The main entry point is `robust_provider::RobustProviderBuilder`, which accepts a wide
-range of provider types (URLs, `RootProvider`, layered providers, etc.) through the
-`IntoRobustProvider` and `IntoRobustProvider` traits.
-
-A typical setup looks like:
-
-```rust
-use alloy::providers::ProviderBuilder;
-use event_scanner::robust_provider::RobustProviderBuilder;
-use std::time::Duration;
-
-async fn example() -> anyhow::Result<()> {
-    let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    let http = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
-
-    let provider = RobustProviderBuilder::new(ws)
-        .fallback(http)
-        .call_timeout(Duration::from_secs(30))
-        .subscription_timeout(Duration::from_secs(120))
-        .build()
-        .await?;
-
-    // ...
-
-    Ok(())
-}
+```bash
+RUST_LOG=event_scanner=debug cargo run -p live_scanning --features event-scanner/tracing
 ```
 
-You can then pass this `robust` provider into `EventScannerBuilder::connect` just like
-any other provider.
+All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
+
+If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.
 
 ---
 
@@ -328,6 +308,8 @@ any other provider.
 (We recommend using [nextest](https://crates.io/crates/cargo-nextest) to run the tests)
 
 Integration tests cover all modes:
+
+Note: Tests are exercised against a local Foundry `anvil` instance.
 
 ```bash
 cargo nextest run --features test-utils

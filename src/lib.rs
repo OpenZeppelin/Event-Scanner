@@ -3,6 +3,14 @@
 //! The main entry point is [`EventScanner`], built via [`EventScannerBuilder`] in one of the
 //! supported modes (e.g. [`Historic`] or [`Live`]).
 //!
+//! # Node compatibility
+//!
+//! Event Scanner's test suite and examples are exercised against Foundry's `anvil` dev node.
+//!
+//! While the library is intended to work with other EVM nodes and RPC providers, behaviour may
+//! vary across implementations. If you encounter errors when using a different node/provider,
+//! please report them at <https://github.com/OpenZeppelin/Event-Scanner/issues>.
+//!
 //! After constructing a scanner, register one or more event subscriptions with
 //! [`EventScanner::subscribe`], then call [`EventScanner::start`] to begin streaming.
 //!
@@ -41,20 +49,12 @@
 //! Streams are buffered. If a consumer cannot keep up and an internal broadcast receiver lags,
 //! the subscription stream yields [`ScannerError::Lagged`].
 //!
-//! # Robust providers
-//!
-//! The [`robust_provider`] module provides [`robust_provider::RobustProvider`], a wrapper that can
-//! retry and fail over across multiple RPC endpoints.
-//!
 //! [finalized]: alloy::eips::BlockNumberOrTag::Finalized
 
 #[macro_use]
-mod logging;
+pub mod macros;
 
 pub mod block_range_scanner;
-pub mod robust_provider;
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils;
 
 mod error;
 mod event_scanner;
@@ -71,5 +71,7 @@ pub use types::{Notification, ScannerMessage};
 
 pub use event_scanner::{
     DEFAULT_MAX_CONCURRENT_FETCHES, EventFilter, EventScanner, EventScannerBuilder,
-    EventScannerResult, Historic, LatestEvents, Live, Message, SyncFromBlock, SyncFromLatestEvents,
+    EventScannerResult, EventSubscription, Historic, LatestEvents, Live, Message, StartProof,
+    SyncFromBlock, SyncFromLatestEvents,
+    block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
 };

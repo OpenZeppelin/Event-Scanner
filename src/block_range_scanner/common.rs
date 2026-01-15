@@ -1,12 +1,12 @@
 use std::ops::RangeInclusive;
 
+use robust_provider::{RobustProvider, RobustSubscription, subscription};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 use crate::{
     ScannerError, ScannerMessage,
     block_range_scanner::{range_iterator::RangeIterator, reorg_handler::ReorgHandler},
-    robust_provider::{RobustProvider, RobustSubscription, subscription},
     types::{IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 use alloy::{
@@ -390,20 +390,18 @@ pub(crate) async fn stream_historical_range<N: Network>(
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<()> {
-    let finalized = match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await
-    {
-        Ok(block) => block,
-        Err(e) => {
-            error!("Failed to get finalized block");
-            _ = sender.try_stream(e).await;
-            return None;
-        }
-    };
-
-    debug!(finalized_block = finalized, "Got finalized block for historical range");
+    // NOTE: Edge case - If the chain is too young to expose finalized blocks (height < finalized
+    // depth) just use zero.
+    // Since we use the finalized block number only to determine whether to run reorg checks
+    // or not, this is a "low-stakes" RPC call, for which, for simplicity, we can default to `0`
+    // even on errors. Here `0` is used because it effectively just enables reorg checks.
+    // If there was actually a provider problem, any subsequent provider call will catch and
+    // properly log it and return the error to the caller.
+    let finalized_block_num =
+        provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
     // no reorg check for finalized blocks
-    let finalized_batch_end = finalized.min(end);
+    let finalized_batch_end = finalized_block_num.min(end);
     let finalized_range_count =
         RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
     trace!(
@@ -438,7 +436,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     //   on `start + 1`
     // * start < finalized -> if we got here, then `end > finalized`; on reorg, we should only
     //   re-stream non-finalized blocks
-    let min_common_ancestor = (start.saturating_sub(1)).max(finalized);
+    let min_common_ancestor = (start.saturating_sub(1)).max(finalized_block_num);
 
     stream_range_with_reorg_handling(
         min_common_ancestor,

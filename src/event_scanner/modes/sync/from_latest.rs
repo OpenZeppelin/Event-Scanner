@@ -1,17 +1,24 @@
+//! Collects recent events, then transitions to live streaming.
+//!
+//! Collects a specified number of the most recent events, then automatically continues
+//! with live streaming. See [`EventScannerBuilder::sync().from_latest()`][from_latest]
+//! for usage details.
+//!
+//! [from_latest]: crate::EventScannerBuilder::from_latest
+
 use alloy::{eips::BlockNumberOrTag, network::Network};
 
 use crate::{
-    EventScannerBuilder, ScannerError,
+    ScannerError,
     event_scanner::{
-        EventScanner,
-        scanner::{
-            SyncFromLatestEvents,
-            common::{ConsumerMode, handle_stream},
-        },
+        EventScanner, StartProof,
+        block_range_handler::{BlockRangeHandler, LatestEventsHandler, StreamHandler},
+        builder::{EventScannerBuilder, SyncFromLatestEvents},
     },
-    robust_provider::IntoRobustProvider,
     types::TryStream,
 };
+
+use robust_provider::IntoRobustProvider;
 
 impl EventScannerBuilder<SyncFromLatestEvents> {
     /// Sets the number of confirmations required before a block is considered stable enough to
@@ -31,11 +38,14 @@ impl EventScannerBuilder<SyncFromLatestEvents> {
     /// Increasing this value can improve catch-up throughput by issuing multiple
     /// RPC requests concurrently, at the cost of additional load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -74,7 +84,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     #[allow(clippy::missing_panics_doc)]
-    pub async fn start(self) -> Result<(), ScannerError> {
+    pub async fn start(self) -> Result<StartProof, ScannerError> {
         info!(
             event_count = self.config.count,
             block_confirmations = self.config.block_confirmations,
@@ -85,8 +95,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
         let count = self.config.count;
         let provider = self.block_range_scanner.provider().clone();
         let listeners = self.listeners.clone();
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let buffer_capacity = self.buffer_capacity();
+        let broadcast_channel_capacity = self.buffer_capacity();
 
         // Fetch the latest block number.
         // This is used to determine the starting point for the rewind stream and the live
@@ -100,6 +109,20 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             .stream_rewind(latest_block, BlockNumberOrTag::Earliest)
             .await?;
 
+        let collection_handler = LatestEventsHandler::new(
+            self.block_range_scanner.provider().clone(),
+            listeners.clone(),
+            self.config.max_concurrent_fetches,
+            self.config.count,
+            broadcast_channel_capacity,
+        );
+        let stream_handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            listeners.clone(),
+            self.config.max_concurrent_fetches,
+            broadcast_channel_capacity,
+        );
+
         // Start streaming...
         tokio::spawn(async move {
             debug!(
@@ -112,15 +135,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             // channel, we must ensure that all latest events are streamed before
             // consuming the live stream, otherwise the log consumers may send events out
             // of order.
-            handle_stream(
-                rewind_stream,
-                &provider,
-                &listeners,
-                ConsumerMode::CollectLatest { count },
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            collection_handler.handle(rewind_stream).await;
 
             debug!(
                 start_block = latest_block + 1,
@@ -138,6 +153,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
                 Ok(stream) => stream,
                 Err(e) => {
                     error!("Failed to setup sync stream after collecting latest events");
+                    // notify all active listeners about the error before dropping the stream
                     for listener in listeners {
                         _ = listener.sender.try_stream(e.clone()).await;
                     }
@@ -146,20 +162,12 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             };
 
             // Start the live (sync) stream.
-            handle_stream(
-                sync_stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            stream_handler.handle(sync_stream).await;
 
             debug!("SyncFromLatestEvents stream ended");
         });
 
-        Ok(())
+        Ok(StartProof::new())
     }
 }
 
@@ -176,7 +184,7 @@ mod tests {
         block_range_scanner::{
             DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
         },
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;

@@ -21,9 +21,10 @@ async fn reorged_logs_are_removed_from_stream() -> anyhow::Result<()> {
 
     let mut scanner =
         EventScannerBuilder::latest(5).max_block_range(2).connect(provider.clone()).await?;
-    let mut stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Trigger a reorg that removes the last 2 blocks (events 19 and 20)
     provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs: vec![] }).await?;
@@ -53,7 +54,7 @@ async fn new_logs_in_reorged_blocks_are_included() -> anyhow::Result<()> {
     let provider = setup.provider;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     for _ in 0..8 {
         contract.increase().send().await?.watch().await?;
@@ -62,7 +63,8 @@ async fn new_logs_in_reorged_blocks_are_included() -> anyhow::Result<()> {
     // Mine 2 empty blocks - max newCount is still 8
     provider.primary().anvil_mine(Some(2), None).await?;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Trigger a reorg that removes 2 empty blocks and adds 2 new events in replacement blocks.
     // Events 9 and 10 can only come from the reorged blocks.
@@ -95,13 +97,14 @@ async fn rewind_continues_further_when_reorg_removes_logs() -> anyhow::Result<()
     let provider = setup.provider;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     for _ in 0..10 {
         contract.increase().send().await?.watch().await?;
     }
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     provider.primary().anvil_reorg(ReorgOptions { depth: 3, tx_block_pairs: vec![] }).await?;
 
@@ -129,13 +132,14 @@ async fn deep_reorg_closes_stream_when_fewer_events_remain_than_requested() -> a
     let provider = setup.provider;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
     for _ in 0..8 {
         contract.increase().send().await?.watch().await?;
     }
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     // Reorg removes 5 blocks - this removes events 4-8
     // Only events 1-3 remain

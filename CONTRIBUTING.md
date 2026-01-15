@@ -28,7 +28,8 @@ Thanks for your interest in contributing! This guide explains how to set up your
   - `typos` for spell checking: `cargo install typos-cli` (or `brew install typos`)
   - A recent `rust-analyzer` for IDE support
 - Runtime/dev tools
-  - For examples and some tests, you’ll need an Ethereum dev node such as Foundry’s `anvil`
+  - For examples and some tests, you'll need an Ethereum dev node such as Foundry's `anvil`
+  - The repository is exercised against `anvil`; if you encounter issues on other nodes/providers, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues
 
 ---
 
@@ -68,12 +69,30 @@ cargo test --features test-utils
 Run examples:
 
 ```bash
-RUST_LOG=info cargo run -p simple_counter
+RUST_LOG=info cargo run -p live_scanning
 # or
 RUST_LOG=info cargo run -p historical_scanning
 ```
 
-Note: Examples start a local `anvil` instance and deploy a demo contract.
+Logging / observability notes:
+
+- The library's internal logs are **compile-time opt-in** via the `event-scanner` crate feature `tracing`.
+- If the feature is disabled, internal logging calls compile to **no-ops**.
+- Examples install a `tracing_subscriber` and read filters from `RUST_LOG`.
+
+Enable `event-scanner` internal logs when running an example:
+
+```bash
+RUST_LOG=event_scanner=debug cargo run -p historical_scanning --features event-scanner/tracing
+```
+
+You can also combine filters to keep other dependencies quiet:
+
+```bash
+RUST_LOG=warn,event_scanner=info cargo run -p historical_scanning --features event-scanner/tracing
+```
+
+Note: Examples start a local `anvil` instance and deploy a demo contract. If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.
 
 ---
 
