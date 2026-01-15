@@ -1,3 +1,8 @@
+//! Types yielded by event subscription streams.
+//!
+//! Defines [`Message`] and [`EventScannerResult`], along with conversions and comparisons
+//! for working with logs.
+
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
 use crate::{

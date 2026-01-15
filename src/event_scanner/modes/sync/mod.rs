@@ -1,11 +1,16 @@
+//! Catches up on historical events, then transitions to live streaming.
+//!
+//! Two sync variants are available:
+//! - [`from_block`]: Syncs from a specific block then transitions to live mode
+//! - [`from_latest`]: Collects the latest N events then transitions to live mode
+
 use alloy::eips::BlockId;
 
 pub(crate) mod from_block;
 pub(crate) mod from_latest;
 
-use crate::{
-    EventScannerBuilder,
-    event_scanner::scanner::{SyncFromBlock, SyncFromLatestEvents, Synchronize},
+use crate::event_scanner::builder::{
+    EventScannerBuilder, SyncFromBlock, SyncFromLatestEvents, Synchronize,
 };
 
 impl EventScannerBuilder<Synchronize> {
@@ -25,8 +30,9 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
     /// # use tokio_stream::StreamExt;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
@@ -39,9 +45,10 @@ impl EventScannerBuilder<Synchronize> {
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
-    /// let mut stream = scanner.subscribe(filter);
+    /// let subscription = scanner.subscribe(filter);
     ///
-    /// scanner.start().await?;
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
@@ -139,8 +146,9 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::{EventFilter, EventScannerBuilder, Message};
     /// # use tokio_stream::StreamExt;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let contract_address = alloy::primitives::address!("0xd8dA6BF26964af9d7eed9e03e53415d37aa96045");
@@ -153,9 +161,10 @@ impl EventScannerBuilder<Synchronize> {
     ///     .await?;
     ///
     /// let filter = EventFilter::new().contract_address(contract_address);
-    /// let mut stream = scanner.subscribe(filter);
+    /// let subscription = scanner.subscribe(filter);
     ///
-    /// scanner.start().await?;
+    /// let proof = scanner.start().await?;
+    /// let mut stream = subscription.stream(&proof);
     ///
     /// while let Some(msg) = stream.next().await {
     ///     match msg {
@@ -179,7 +188,8 @@ impl EventScannerBuilder<Synchronize> {
     ///
     /// ```no_run
     /// # use alloy::{network::Ethereum, eips::BlockNumberOrTag, providers::{Provider, ProviderBuilder}};
-    /// # use event_scanner::{EventScannerBuilder, robust_provider::RobustProviderBuilder};
+    /// # use event_scanner::EventScannerBuilder;
+    /// # use robust_provider::RobustProviderBuilder;
     /// #
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// // Sync from genesis block

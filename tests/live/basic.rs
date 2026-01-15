@@ -7,9 +7,10 @@ async fn basic_single_event_scanning() -> anyhow::Result<()> {
     let setup = setup_live_scanner(None, None, 0).await?;
     let contract = setup.contract;
     let scanner = setup.scanner;
-    let mut stream = setup.stream;
+    let subscription = setup.subscription;
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     for _ in 0..5 {
         contract.increase().send().await?.watch().await?;
@@ -36,15 +37,17 @@ async fn multiple_contracts_same_event_isolate_callbacks() -> anyhow::Result<()>
     let mut scanner = setup.scanner;
 
     let a = setup.contract;
-    let mut a_stream = setup.stream;
+    let a_subscription = setup.subscription;
 
     let b = deploy_counter(provider.primary().clone()).await?;
     let b_filter = EventFilter::new()
         .contract_address(*b.address())
         .event(TestCounter::CountIncreased::SIGNATURE.to_owned());
-    let mut b_stream = scanner.subscribe(b_filter);
+    let b_subscription = scanner.subscribe(b_filter);
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut a_stream = a_subscription.stream(&proof);
+    let mut b_stream = b_subscription.stream(&proof);
 
     for _ in 0..3 {
         a.increase().send().await?.watch().await?;
@@ -78,14 +81,16 @@ async fn multiple_events_same_contract() -> anyhow::Result<()> {
     let setup = setup_live_scanner(None, None, 0).await?;
     let mut scanner = setup.scanner;
     let contract = setup.contract;
-    let mut incr_stream = setup.stream;
+    let incr_subscription = setup.subscription;
 
     let decrease_filter = EventFilter::new()
         .contract_address(*contract.address())
         .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
-    let mut decr_stream = scanner.subscribe(decrease_filter);
+    let decr_subscription = scanner.subscribe(decrease_filter);
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let mut incr_stream = incr_subscription.stream(&proof);
+    let mut decr_stream = decr_subscription.stream(&proof);
 
     contract.increase().send().await?.watch().await?;
     contract.increase().send().await?.watch().await?;
@@ -122,9 +127,10 @@ async fn signature_matching_ignores_irrelevant_events() -> anyhow::Result<()> {
         .contract_address(*contract.address())
         .event(TestCounter::CountDecreased::SIGNATURE.to_owned());
 
-    let stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let stream = subscription.stream(&proof);
 
     contract.increase().send().await?.watch().await?;
 
@@ -142,9 +148,10 @@ async fn filters_malformed_signature_graceful() -> anyhow::Result<()> {
     let filter =
         EventFilter::new().contract_address(*contract.address()).event("invalid-sig".to_string());
 
-    let stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    scanner.start().await?;
+    let proof = scanner.start().await?;
+    let stream = subscription.stream(&proof);
 
     contract.increase().send().await?.watch().await?;
 

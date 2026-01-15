@@ -1,13 +1,22 @@
+//! Syncs from a starting block, then transitions to live streaming.
+//!
+//! Streams events from a specified starting block to the present, then automatically
+//! continues with live streaming. See [`EventScannerBuilder::sync().from_block()`][from_block]
+//! for usage details.
+//!
+//! [from_block]: crate::EventScannerBuilder#method.from_block-2
+
 use alloy::{eips::BlockId, network::Network};
 
 use crate::{
-    EventScannerBuilder, ScannerError,
+    ScannerError,
     event_scanner::{
-        EventScanner, SyncFromBlock,
-        scanner::common::{ConsumerMode, handle_stream},
+        EventScanner, StartProof,
+        block_range_handler::{BlockRangeHandler, StreamHandler},
+        builder::{EventScannerBuilder, SyncFromBlock},
     },
-    robust_provider::IntoRobustProvider,
 };
+use robust_provider::IntoRobustProvider;
 
 impl EventScannerBuilder<SyncFromBlock> {
     /// Sets the number of confirmations required before a block is considered stable enough to
@@ -27,11 +36,14 @@ impl EventScannerBuilder<SyncFromBlock> {
     /// Higher values can improve throughput by issuing multiple RPC requests
     /// concurrently, at the cost of additional load on the provider.
     ///
+    /// **Note**: This limit applies **per listener**. With N listeners and a limit of M,
+    /// up to N × M concurrent RPC requests may be in-flight simultaneously.
+    ///
     /// Must be greater than 0.
     ///
     /// Defaults to [`DEFAULT_MAX_CONCURRENT_FETCHES`][default].
     ///
-    /// [default]: crate::event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES
+    /// [default]: crate::event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES
     #[must_use]
     pub fn max_concurrent_fetches(mut self, max_concurrent_fetches: usize) -> Self {
         self.config.max_concurrent_fetches = max_concurrent_fetches;
@@ -75,7 +87,7 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
     /// * [`ScannerError::Timeout`] - if an RPC call required for startup times out.
     /// * [`ScannerError::RpcError`] - if an RPC call required for startup fails.
     /// * [`ScannerError::BlockNotFound`] - if `from_block` cannot be resolved.
-    pub async fn start(self) -> Result<(), ScannerError> {
+    pub async fn start(self) -> Result<StartProof, ScannerError> {
         info!(
             from_block = ?self.config.from_block,
             block_confirmations = self.config.block_confirmations,
@@ -88,24 +100,20 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
             .stream_from(self.config.from_block, self.config.block_confirmations)
             .await?;
 
-        let max_concurrent_fetches = self.config.max_concurrent_fetches;
-        let provider = self.block_range_scanner.provider().clone();
-        let listeners = self.listeners.clone();
         let buffer_capacity = self.buffer_capacity();
 
+        let handler = StreamHandler::new(
+            self.block_range_scanner.provider().clone(),
+            self.listeners,
+            self.config.max_concurrent_fetches,
+            buffer_capacity,
+        );
+
         tokio::spawn(async move {
-            handle_stream(
-                stream,
-                &provider,
-                &listeners,
-                ConsumerMode::Stream,
-                max_concurrent_fetches,
-                buffer_capacity,
-            )
-            .await;
+            handler.handle(stream).await;
         });
 
-        Ok(())
+        Ok(StartProof::new())
     }
 }
 
@@ -124,7 +132,7 @@ mod tests {
         block_range_scanner::{
             DEFAULT_BLOCK_CONFIRMATIONS, DEFAULT_MAX_BLOCK_RANGE, DEFAULT_STREAM_BUFFER_CAPACITY,
         },
-        event_scanner::scanner::DEFAULT_MAX_CONCURRENT_FETCHES,
+        event_scanner::builder::DEFAULT_MAX_CONCURRENT_FETCHES,
     };
 
     use super::*;
