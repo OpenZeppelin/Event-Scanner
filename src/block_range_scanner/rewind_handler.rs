@@ -106,10 +106,10 @@ impl<N: Network> RewindHandler<N> {
         // NOTE: Edge case - If the chain is too young to expose finalized blocks (height <
         // finalized depth) just use zero.
         // Since we use the finalized block number only to determine whether to run reorg checks
-        // or not, this is a "low-stakes" RPC call, for which, for simplicity, we can default to `0` even
-        // on errors. Here `0` is used because it effectively just enables reorg checks.
-        // If there was actually a provider problem, any subsequent provider call will catch and 
-        // properly log it and return the error to the caller.
+        // or not, this is a "low-stakes" RPC call, for which, for simplicity, we can default to `0`
+        // even on errors. Here `0` is used because it effectively just enables reorg
+        // checks. If there was actually a provider problem, any subsequent provider call
+        // will catch and properly log it and return the error to the caller.
         let finalized_block_num =
             provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
