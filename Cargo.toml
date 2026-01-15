@@ -31,7 +31,7 @@ tokio-stream = "0.1.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 test-log = { version = "0.2.18", features = ["trace"] }
-robust-provider = "0.1.0"
+robust-provider = "0.2.0"
 
 [package]
 name = "event-scanner"
