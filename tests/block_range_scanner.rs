@@ -1,5 +1,5 @@
 use alloy::{
-    eips::{BlockId, BlockNumberOrTag},
+    eips::BlockNumberOrTag,
     providers::{Provider, ProviderBuilder, ext::AnvilApi},
     rpc::types::anvil::ReorgOptions,
 };
@@ -488,10 +488,7 @@ async fn command_rewind_propagates_block_not_found_error() -> anyhow::Result<()>
 
     let stream = brs.stream_rewind(0, 999).await;
 
-    assert!(matches!(
-        stream,
-        Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(999))))
-    ));
+    assert!(matches!(stream, Err(ScannerError::BlockNotFound)));
 
     Ok(())
 }

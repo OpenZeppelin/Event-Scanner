@@ -3,6 +3,14 @@
 //! The main entry point is [`EventScanner`], built via [`EventScannerBuilder`] in one of the
 //! supported modes (e.g. [`Historic`] or [`Live`]).
 //!
+//! # Node compatibility
+//!
+//! Event Scanner's test suite and examples are exercised against Foundry's `anvil` dev node.
+//!
+//! While the library is intended to work with other EVM nodes and RPC providers, behaviour may
+//! vary across implementations. If you encounter errors when using a different node/provider,
+//! please report them at <https://github.com/OpenZeppelin/Event-Scanner/issues>.
+//!
 //! After constructing a scanner, register one or more event subscriptions with
 //! [`EventScanner::subscribe`], then call [`EventScanner::start`] to begin streaming.
 //!
