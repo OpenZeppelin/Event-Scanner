@@ -1,12 +1,11 @@
 use std::{mem::discriminant, sync::Arc};
 
-use alloy::{
-    eips::BlockId,
-    transports::{RpcError, TransportErrorKind},
-};
+use alloy::transports::{RpcError, TransportErrorKind};
 use thiserror::Error;
 
-use crate::{robust_provider::provider::Error as RobustProviderError, types::ScannerResult};
+use crate::types::ScannerResult;
+
+use robust_provider::provider::Error as RobustProviderError;
 
 /// Errors emitted by the scanner.
 ///
@@ -21,8 +20,8 @@ pub enum ScannerError {
     RpcError(Arc<RpcError<TransportErrorKind>>),
 
     /// A requested block (by number, hash or tag) could not be retrieved.
-    #[error("Block not found, Block Id: {0}")]
-    BlockNotFound(BlockId),
+    #[error("Block not found")]
+    BlockNotFound,
 
     /// A timeout elapsed while waiting for an RPC response.
     #[error("Operation timed out")]
@@ -66,7 +65,7 @@ impl From<RobustProviderError> for ScannerError {
         match error {
             RobustProviderError::Timeout => ScannerError::Timeout,
             RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
-            RobustProviderError::BlockNotFound(block) => ScannerError::BlockNotFound(block),
+            RobustProviderError::BlockNotFound => ScannerError::BlockNotFound,
         }
     }
 }

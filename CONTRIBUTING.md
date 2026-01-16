@@ -28,7 +28,8 @@ Thanks for your interest in contributing! This guide explains how to set up your
   - `typos` for spell checking: `cargo install typos-cli` (or `brew install typos`)
   - A recent `rust-analyzer` for IDE support
 - Runtime/dev tools
-  - For examples and some tests, you’ll need an Ethereum dev node such as Foundry’s `anvil`
+  - For examples and some tests, you'll need an Ethereum dev node such as Foundry's `anvil`
+  - The repository is exercised against `anvil`; if you encounter issues on other nodes/providers, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues
 
 ---
 
@@ -91,7 +92,7 @@ You can also combine filters to keep other dependencies quiet:
 RUST_LOG=warn,event_scanner=info cargo run -p historical_scanning --features event-scanner/tracing
 ```
 
-Note: Examples start a local `anvil` instance and deploy a demo contract.
+Note: Examples start a local `anvil` instance and deploy a demo contract. If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.
 
 ---
 

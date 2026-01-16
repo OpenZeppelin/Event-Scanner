@@ -32,8 +32,8 @@
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
 //!     BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS, ScannerError, ScannerMessage,
-//!     robust_provider::RobustProviderBuilder,
 //! };
+//! use robust_provider::RobustProviderBuilder;
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
 //!
@@ -77,6 +77,7 @@
 //! }
 //! ```
 
+use robust_provider::RobustProvider;
 use std::{cmp::Ordering, fmt::Debug};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -90,7 +91,6 @@ use crate::{
         rewind_handler::RewindHandler,
         sync_handler::SyncHandler,
     },
-    robust_provider::RobustProvider,
 };
 
 use alloy::{
@@ -389,7 +389,6 @@ mod tests {
 
     use super::*;
     use alloy::{
-        eips::{BlockId, BlockNumberOrTag},
         network::Ethereum,
         providers::{RootProvider, mock::Asserter},
         rpc::client::RpcClient,
@@ -416,12 +415,9 @@ mod tests {
     async fn try_send_forwards_errors_to_subscribers() {
         let (tx, mut rx) = mpsc::channel::<BlockScannerResult>(1);
 
-        _ = tx.try_stream(ScannerError::BlockNotFound(4.into())).await;
+        _ = tx.try_stream(ScannerError::BlockNotFound).await;
 
-        assert!(matches!(
-            rx.recv().await,
-            Some(Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))))
-        ));
+        assert!(matches!(rx.recv().await, Some(Err(ScannerError::BlockNotFound))));
     }
 
     #[tokio::test]

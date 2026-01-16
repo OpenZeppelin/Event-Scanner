@@ -1,4 +1,5 @@
 use alloy::{eips::BlockId, network::Network, primitives::BlockNumber};
+use robust_provider::RobustProvider;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
         reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
-    robust_provider::RobustProvider,
     types::TryStream,
 };
 

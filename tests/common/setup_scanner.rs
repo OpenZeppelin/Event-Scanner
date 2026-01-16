@@ -7,8 +7,10 @@ use alloy::{
 use alloy_node_bindings::AnvilInstance;
 use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, EventSubscription, Historic, LatestEvents,
-    Live, SyncFromBlock, SyncFromLatestEvents, robust_provider::RobustProvider,
+    Live, SyncFromBlock, SyncFromLatestEvents,
 };
+
+use robust_provider::RobustProvider;
 
 use crate::common::{
     TestCounter::{self, CountIncreased},

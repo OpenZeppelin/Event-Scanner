@@ -16,8 +16,9 @@ use crate::{
         block_range_handler::{BlockRangeHandler, LatestEventsHandler},
         builder::{EventScannerBuilder, LatestEvents},
     },
-    robust_provider::IntoRobustProvider,
 };
+
+use robust_provider::IntoRobustProvider;
 
 impl EventScannerBuilder<LatestEvents> {
     /// Sets the number of confirmations required before a block is considered stable enough to
@@ -344,13 +345,7 @@ mod tests {
         let random_hash = keccak256("Invalid Hash");
         let result = EventScannerBuilder::latest(1).to_block(random_hash).connect(provider).await;
 
-        match result {
-            Err(ScannerError::BlockNotFound(id)) => {
-                assert_eq!(id, BlockId::Hash(random_hash.into()));
-            }
-            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
-            Ok(_) => panic!("Expected error, but got Ok"),
-        }
+        assert!(matches!(result, Err(ScannerError::BlockNotFound)));
     }
 
     #[tokio::test]
@@ -361,13 +356,7 @@ mod tests {
         let random_hash = keccak256("Invalid Hash");
         let result = EventScannerBuilder::latest(1).from_block(random_hash).connect(provider).await;
 
-        match result {
-            Err(ScannerError::BlockNotFound(id)) => {
-                assert_eq!(id, BlockId::Hash(random_hash.into()));
-            }
-            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
-            Ok(_) => panic!("Expected error, but got Ok"),
-        }
+        assert!(matches!(result, Err(ScannerError::BlockNotFound)));
     }
 
     #[tokio::test]
@@ -385,13 +374,7 @@ mod tests {
             .await;
 
         // We expect it to fail on the first checked block (from_block)
-        match result {
-            Err(ScannerError::BlockNotFound(id)) => {
-                assert_eq!(id, BlockId::Hash(random_from_hash.into()));
-            }
-            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
-            Ok(_) => panic!("Expected error, but got Ok"),
-        }
+        assert!(matches!(result, Err(ScannerError::BlockNotFound)));
     }
 
     #[tokio::test]

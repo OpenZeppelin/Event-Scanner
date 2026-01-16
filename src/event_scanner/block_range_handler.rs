@@ -11,7 +11,6 @@ use crate::{
     Message, Notification, ScannerError, ScannerMessage,
     block_range_scanner::BlockScannerResult,
     event_scanner::{filter::EventFilter, listener::EventListener},
-    robust_provider::{RobustProvider, provider::Error as RobustProviderError},
     types::TryStream,
 };
 use alloy::{
@@ -19,6 +18,7 @@ use alloy::{
     rpc::types::{Filter, Log},
 };
 use futures::StreamExt;
+use robust_provider::{RobustProvider, provider::Error as RobustProviderError};
 use tokio::{
     sync::{
         broadcast::{self, Sender, error::RecvError},
@@ -510,7 +510,7 @@ mod tests {
         rpc::client::RpcClient,
     };
 
-    use crate::robust_provider::RobustProviderBuilder;
+    use robust_provider::RobustProviderBuilder;
 
     use super::*;
 

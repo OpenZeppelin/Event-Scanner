@@ -7,13 +7,14 @@ use alloy::{
 };
 use tokio::{sync::mpsc, try_join};
 
+use robust_provider::RobustProvider;
+
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{
         common::BlockScannerResult, range_iterator::RangeIterator, reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
-    robust_provider::RobustProvider,
     types::TryStream,
 };
 
@@ -102,24 +103,22 @@ impl<N: Network> RewindHandler<N> {
         let from = tip.header().number();
         let to = to.header().number();
 
-        let finalized_block = match provider.get_block_by_number(BlockNumberOrTag::Finalized).await
-        {
-            Ok(block) => block,
-            Err(e) => {
-                error!("Failed to get finalized block for rewind");
-                _ = sender.try_stream(e).await;
-                return;
-            }
-        };
-
-        let finalized_number = finalized_block.header().number();
+        // NOTE: Edge case - If the chain is too young to expose finalized blocks (height <
+        // finalized depth) just use zero.
+        // Since we use the finalized block number only to determine whether to run reorg checks
+        // or not, this is a "low-stakes" RPC call, for which, for simplicity, we can default to `0`
+        // even on errors. Here `0` is used because it effectively just enables reorg
+        // checks. If there was actually a provider problem, any subsequent provider call
+        // will catch and properly log it and return the error to the caller.
+        let finalized_block_num =
+            provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
         // only check reorg if our tip is after the finalized block
-        let check_reorg = tip.header().number() > finalized_number;
+        let check_reorg = tip.header().number() > finalized_block_num;
         debug!(
             from = from,
             to = to,
-            finalized = finalized_number,
+            finalized = finalized_block_num,
             check_reorg = check_reorg,
             "Rewind stream configuration"
         );
@@ -197,7 +196,7 @@ impl<N: Network> RewindHandler<N> {
                 block
             }
             Err(e) => {
-                if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
+                if matches!(e, robust_provider::Error::BlockNotFound) {
                     error!(
                         tip_number = tip_number,
                         "Unexpected: chain height decreased after reorg"

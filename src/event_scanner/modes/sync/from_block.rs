@@ -15,8 +15,8 @@ use crate::{
         block_range_handler::{BlockRangeHandler, StreamHandler},
         builder::{EventScannerBuilder, SyncFromBlock},
     },
-    robust_provider::IntoRobustProvider,
 };
+use robust_provider::IntoRobustProvider;
 
 impl EventScannerBuilder<SyncFromBlock> {
     /// Sets the number of confirmations required before a block is considered stable enough to
@@ -120,7 +120,7 @@ impl<N: Network> EventScanner<SyncFromBlock, N> {
 #[cfg(test)]
 mod tests {
     use alloy::{
-        eips::{BlockId, BlockNumberOrTag},
+        eips::BlockNumberOrTag,
         network::Ethereum,
         primitives::keccak256,
         providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi, mock::Asserter},
@@ -258,12 +258,6 @@ mod tests {
         let random_hash = keccak256("Invalid Hash");
         let result = EventScannerBuilder::sync().from_block(random_hash).connect(provider).await;
 
-        match result {
-            Err(ScannerError::BlockNotFound(id)) => {
-                assert_eq!(id, BlockId::Hash(random_hash.into()));
-            }
-            Err(e) => panic!("Expected BlockNotFound error, got {e:?}"),
-            Ok(_) => panic!("Expected error, but got Ok"),
-        }
+        assert!(matches!(result, Err(ScannerError::BlockNotFound)));
     }
 }
