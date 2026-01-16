@@ -34,7 +34,7 @@ pub trait BlockRangeHandler {
     ///
     /// Implementations typically forward data and notifications to registered listeners.
     fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(
-        &self,
+        self,
         stream: S,
     ) -> impl std::future::Future<Output = ()> + Send;
 }
@@ -78,10 +78,10 @@ impl<N: Network> StreamHandler<N> {
         Self { provider, listeners, max_concurrent_fetches, broadcast_channel_capacity }
     }
 
-    fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
+    fn spawn(self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
         let mut join_set = JoinSet::new();
 
-        for listener in self.listeners.iter().cloned() {
+        for listener in self.listeners {
             let max_concurrent_fetches = self.max_concurrent_fetches;
             let provider = self.provider.clone();
             let mut range_rx = range_tx.subscribe();
@@ -157,7 +157,7 @@ impl<N: Network> StreamHandler<N> {
 }
 
 impl<N: Network> BlockRangeHandler for StreamHandler<N> {
-    async fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(&self, stream: S) {
+    async fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(self, stream: S) {
         debug!(
             listener_count = self.listeners.len(),
             max_concurrent_fetches = self.max_concurrent_fetches,
@@ -220,10 +220,10 @@ impl<N: Network> LatestEventsHandler<N> {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn spawn(&self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
+    fn spawn(self, range_tx: &Sender<BlockScannerResult>) -> JoinSet<()> {
         let mut join_set = JoinSet::new();
 
-        for listener in self.listeners.iter().cloned() {
+        for listener in self.listeners {
             let max_concurrent_fetches = self.max_concurrent_fetches;
             let count = self.count;
             let provider = self.provider.clone();
@@ -359,7 +359,7 @@ impl<N: Network> LatestEventsHandler<N> {
 }
 
 impl<N: Network> BlockRangeHandler for LatestEventsHandler<N> {
-    async fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(&self, stream: S) {
+    async fn handle<S: Stream<Item = BlockScannerResult> + Unpin + Send>(self, stream: S) {
         debug!(
             listener_count = self.listeners.len(),
             max_concurrent_fetches = self.max_concurrent_fetches,
