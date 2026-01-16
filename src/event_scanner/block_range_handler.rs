@@ -603,16 +603,16 @@ mod tests {
         let provider = RobustProviderBuilder::fragile(provider).build().await?;
         let (sender, mut receiver) = mpsc::channel(1);
 
-        let broadcast_channel_capacity = 1;
         let stream_handler = StreamHandler {
             provider,
             listeners: vec![EventListener { filter: EventFilter::new(), sender }],
             max_concurrent_fetches: 1,
-            broadcast_channel_capacity,
+            broadcast_channel_capacity: 1,
         };
 
-        let (range_tx, _) =
-            tokio::sync::broadcast::channel::<BlockScannerResult>(broadcast_channel_capacity);
+        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(
+            stream_handler.broadcast_channel_capacity,
+        );
 
         let _set = stream_handler.spawn(&range_tx);
 
@@ -631,17 +631,17 @@ mod tests {
         let provider = RobustProviderBuilder::fragile(provider).build().await?;
         let (sender, mut receiver) = mpsc::channel(1);
 
-        let broadcast_channel_capacity = 1;
         let handler = LatestEventsHandler {
             provider,
             listeners: vec![EventListener { filter: EventFilter::new(), sender }],
             max_concurrent_fetches: 1,
             count: 5,
-            broadcast_channel_capacity,
+            broadcast_channel_capacity: 1,
         };
 
-        let (range_tx, _) =
-            tokio::sync::broadcast::channel::<BlockScannerResult>(broadcast_channel_capacity);
+        let (range_tx, _) = tokio::sync::broadcast::channel::<BlockScannerResult>(
+            handler.broadcast_channel_capacity,
+        );
 
         let _set = handler.spawn(&range_tx);
 
