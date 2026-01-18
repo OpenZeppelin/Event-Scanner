@@ -198,7 +198,7 @@ impl<N: Network> SyncHandler<N> {
             }
         };
 
-        if !sender.try_stream(Notification::SwitchingToLive).await {
+        if sender.try_stream(Notification::SwitchingToLive).await.is_closed() {
             debug!("Channel closed before live streaming could start");
             return;
         }

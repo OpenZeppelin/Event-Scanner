@@ -126,7 +126,7 @@ impl<N: Network> RewindHandler<N> {
         let mut iter = RangeIterator::reverse(from, to, max_block_range);
         for range in &mut iter {
             // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(range).await {
+            if sender.try_stream(range).await.is_closed() {
                 break;
             }
 
@@ -182,7 +182,7 @@ impl<N: Network> RewindHandler<N> {
             "Rescanning reorged blocks"
         );
 
-        if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
+        if sender.try_stream(Notification::ReorgDetected { common_ancestor }).await.is_closed() {
             return false;
         }
 
@@ -212,7 +212,7 @@ impl<N: Network> RewindHandler<N> {
 
         for batch in RangeIterator::forward(rescan_from, tip_number, max_block_range) {
             trace!(range_start = *batch.start(), range_end = *batch.end(), "Rescanning batch");
-            if !sender.try_stream(batch).await {
+            if sender.try_stream(batch).await.is_closed() {
                 return false;
             }
         }

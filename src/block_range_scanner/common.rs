@@ -83,7 +83,9 @@ pub(crate) async fn stream_live_blocks<N: Network>(
     // only once the first relevant block is received from the subscription, and not before that;
     // otherwise callers might perform certain operations expecting the relevant blocks to start
     // coming, when in fact they are not.
-    if notify_after_first_block && !sender.try_stream(Notification::SwitchingToLive).await {
+    if notify_after_first_block &&
+        sender.try_stream(Notification::SwitchingToLive).await.is_closed()
+    {
         return;
     }
 
@@ -300,7 +302,11 @@ async fn handle_reorg_detected<N: Network>(
         "Reorg detected during live streaming"
     );
 
-    if !sender.try_stream(Notification::ReorgDetected { common_ancestor: ancestor_num }).await {
+    if sender
+        .try_stream(Notification::ReorgDetected { common_ancestor: ancestor_num })
+        .await
+        .is_closed()
+    {
         return false;
     }
 
@@ -413,7 +419,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
 
     for range in RangeIterator::forward(start, finalized_batch_end, max_block_range) {
         trace!(range_start = *range.start(), range_end = *range.end(), "Streaming finalized range");
-        if !sender.try_stream(range).await {
+        if sender.try_stream(range).await.is_closed() {
             return None; // channel closed
         }
     }
@@ -484,7 +490,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
             }
         };
 
-        if !sender.try_stream(batch).await {
+        if sender.try_stream(batch).await.is_closed() {
             return None; // channel closed
         }
 
@@ -503,7 +509,8 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
                 common_ancestor = common_ancestor,
                 "Reorg detected during historical streaming, resetting range iterator"
             );
-            if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
+            if sender.try_stream(Notification::ReorgDetected { common_ancestor }).await.is_closed()
+            {
                 return None;
             }
             let reset_to = (common_ancestor + 1).max(min_common_ancestor);

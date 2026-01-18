@@ -123,7 +123,7 @@ impl<N: Network> StreamHandler<N> {
                             continue;
                         }
 
-                        if !listener.sender.try_stream(result).await {
+                        if listener.sender.try_stream(result).await.is_closed() {
                             return;
                         }
                     }
@@ -306,12 +306,12 @@ impl<N: Network> LatestEventsHandler<N> {
                                 // since logs haven't been sent yet
                             }
                             Ok(ScannerMessage::Notification(notification)) => {
-                                if !listener.sender.try_stream(notification).await {
+                                if listener.sender.try_stream(notification).await.is_closed() {
                                     return;
                                 }
                             }
                             Err(e) => {
-                                if !listener.sender.try_stream(e).await {
+                                if listener.sender.try_stream(e).await.is_closed() {
                                     return;
                                 }
                             }
