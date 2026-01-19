@@ -19,7 +19,7 @@ pub(crate) enum ChannelState {
 impl ChannelState {
     /// Returns `true` if the channel is closed.
     #[must_use]
-    pub fn is_closed(self) -> bool {
+    pub(crate) fn is_closed(self) -> bool {
         matches!(self, ChannelState::Closed)
     }
 }
