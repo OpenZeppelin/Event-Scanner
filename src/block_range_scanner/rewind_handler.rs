@@ -15,7 +15,7 @@ use crate::{
         common::BlockScannerResult, range_iterator::RangeIterator, reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
-    types::TryStream,
+    types::{ChannelState, TryStream},
 };
 
 pub(crate) struct RewindHandler<N: Network> {
@@ -146,7 +146,7 @@ impl<N: Network> RewindHandler<N> {
                         tip = tip.header().number(),
                         "Reorg detected during rewind, rescanning affected blocks"
                     );
-                    if !Self::handle_reorg_rescan(
+                    if Self::handle_reorg_rescan(
                         &mut tip,
                         common_ancestor,
                         max_block_range,
@@ -154,6 +154,7 @@ impl<N: Network> RewindHandler<N> {
                         provider,
                     )
                     .await
+                    .is_closed()
                     {
                         return;
                     }
@@ -164,14 +165,15 @@ impl<N: Network> RewindHandler<N> {
 
     /// Handles re-scanning of reorged blocks.
     ///
-    /// Returns `true` on success, `false` if stream closed or terminal error occurred.
+    /// Returns `ChannelState::Closed` if stream closed or terminal error occurred,
+    /// `ChannelState::Open` on success.
     async fn handle_reorg_rescan(
         tip: &mut N::BlockResponse,
         common_ancestor: N::BlockResponse,
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-    ) -> bool {
+    ) -> ChannelState {
         let tip_number = tip.header().number();
         let common_ancestor = common_ancestor.header().number();
 
@@ -183,7 +185,7 @@ impl<N: Network> RewindHandler<N> {
         );
 
         if sender.try_stream(Notification::ReorgDetected { common_ancestor }).await.is_closed() {
-            return false;
+            return ChannelState::Closed;
         }
 
         // Get the new tip block (same height as original tip, but new hash)
@@ -203,7 +205,7 @@ impl<N: Network> RewindHandler<N> {
                     );
                 }
                 _ = sender.try_stream(e).await;
-                return false;
+                return ChannelState::Closed;
             }
         };
 
@@ -213,10 +215,10 @@ impl<N: Network> RewindHandler<N> {
         for batch in RangeIterator::forward(rescan_from, tip_number, max_block_range) {
             trace!(range_start = *batch.start(), range_end = *batch.end(), "Rescanning batch");
             if sender.try_stream(batch).await.is_closed() {
-                return false;
+                return ChannelState::Closed;
             }
         }
 
-        true
+        ChannelState::Open
     }
 }
