@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 event-scanner = { path = ".." }
+robust-provider.workspace = true
 alloy.workspace = true
 alloy-node-bindings.workspace = true
 tokio.workspace = true

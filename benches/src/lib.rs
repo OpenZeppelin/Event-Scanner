@@ -29,9 +29,9 @@ use alloy::{
 };
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use anyhow::Context;
-use event_scanner::robust_provider::{RobustProvider, RobustProviderBuilder};
 use flate2::read::GzDecoder;
 use futures::future::try_join_all;
+use robust_provider::{RobustProvider, RobustProviderBuilder};
 use serde::{Deserialize, Serialize};
 
 sol! {
