@@ -79,7 +79,7 @@ jobs:
             --threshold-max-sample-size 64 \
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
-            --err \
+            ${{ github.event_name == 'workflow_dispatch' && '--err' || '' }} \
             --adapter rust_criterion \
             --github-actions "${{ secrets.GITHUB_TOKEN }}" \
             "cargo bench --manifest-path benches/Cargo.toml --bench historic_scanning"
@@ -130,7 +130,7 @@ jobs:
             --threshold-max-sample-size 64 \
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
-            --err \
+            ${{ github.event_name == 'workflow_dispatch' && '--err' || '' }} \
             --adapter rust_criterion \
             --github-actions "${{ secrets.GITHUB_TOKEN }}" \
             "cargo bench --manifest-path benches/Cargo.toml --bench latest_events_scanning"
