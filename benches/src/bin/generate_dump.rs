@@ -245,9 +245,6 @@ async fn main() -> Result<()> {
     // Drop Anvil to trigger state dump
     eprintln!("\nSaving Anvil state...");
 
-    // Give Anvil a moment to finish any pending operations
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
     // Drop anvil - this triggers the dump
     drop(anvil);
 
