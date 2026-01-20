@@ -7,14 +7,15 @@ use alloy::{
 };
 use tokio::{sync::mpsc, try_join};
 
+use robust_provider::RobustProvider;
+
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{
         common::BlockScannerResult, range_iterator::RangeIterator, reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
-    robust_provider::RobustProvider,
-    types::TryStream,
+    types::{ChannelState, TryStream},
 };
 
 pub(crate) struct RewindHandler<N: Network> {
@@ -102,24 +103,22 @@ impl<N: Network> RewindHandler<N> {
         let from = tip.header().number();
         let to = to.header().number();
 
-        let finalized_block = match provider.get_block_by_number(BlockNumberOrTag::Finalized).await
-        {
-            Ok(block) => block,
-            Err(e) => {
-                error!("Failed to get finalized block for rewind");
-                _ = sender.try_stream(e).await;
-                return;
-            }
-        };
-
-        let finalized_number = finalized_block.header().number();
+        // NOTE: Edge case - If the chain is too young to expose finalized blocks (height <
+        // finalized depth) just use zero.
+        // Since we use the finalized block number only to determine whether to run reorg checks
+        // or not, this is a "low-stakes" RPC call, for which, for simplicity, we can default to `0`
+        // even on errors. Here `0` is used because it effectively just enables reorg
+        // checks. If there was actually a provider problem, any subsequent provider call
+        // will catch and properly log it and return the error to the caller.
+        let finalized_block_num =
+            provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
         // only check reorg if our tip is after the finalized block
-        let check_reorg = tip.header().number() > finalized_number;
+        let check_reorg = tip.header().number() > finalized_block_num;
         debug!(
             from = from,
             to = to,
-            finalized = finalized_number,
+            finalized = finalized_block_num,
             check_reorg = check_reorg,
             "Rewind stream configuration"
         );
@@ -127,7 +126,7 @@ impl<N: Network> RewindHandler<N> {
         let mut iter = RangeIterator::reverse(from, to, max_block_range);
         for range in &mut iter {
             // stream the range regularly, i.e. from smaller block number to greater
-            if !sender.try_stream(range).await {
+            if sender.try_stream(range).await.is_closed() {
                 break;
             }
 
@@ -147,7 +146,7 @@ impl<N: Network> RewindHandler<N> {
                         tip = tip.header().number(),
                         "Reorg detected during rewind, rescanning affected blocks"
                     );
-                    if !Self::handle_reorg_rescan(
+                    if Self::handle_reorg_rescan(
                         &mut tip,
                         common_ancestor,
                         max_block_range,
@@ -155,6 +154,7 @@ impl<N: Network> RewindHandler<N> {
                         provider,
                     )
                     .await
+                    .is_closed()
                     {
                         return;
                     }
@@ -165,14 +165,15 @@ impl<N: Network> RewindHandler<N> {
 
     /// Handles re-scanning of reorged blocks.
     ///
-    /// Returns `true` on success, `false` if stream closed or terminal error occurred.
+    /// Returns `ChannelState::Closed` if stream closed or terminal error occurred,
+    /// `ChannelState::Open` on success.
     async fn handle_reorg_rescan(
         tip: &mut N::BlockResponse,
         common_ancestor: N::BlockResponse,
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-    ) -> bool {
+    ) -> ChannelState {
         let tip_number = tip.header().number();
         let common_ancestor = common_ancestor.header().number();
 
@@ -183,8 +184,8 @@ impl<N: Network> RewindHandler<N> {
             "Rescanning reorged blocks"
         );
 
-        if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
-            return false;
+        if sender.try_stream(Notification::ReorgDetected { common_ancestor }).await.is_closed() {
+            return ChannelState::Closed;
         }
 
         // Get the new tip block (same height as original tip, but new hash)
@@ -197,14 +198,14 @@ impl<N: Network> RewindHandler<N> {
                 block
             }
             Err(e) => {
-                if matches!(e, crate::robust_provider::Error::BlockNotFound(_)) {
+                if matches!(e, robust_provider::Error::BlockNotFound) {
                     error!(
                         tip_number = tip_number,
                         "Unexpected: chain height decreased after reorg"
                     );
                 }
                 _ = sender.try_stream(e).await;
-                return false;
+                return ChannelState::Closed;
             }
         };
 
@@ -213,11 +214,11 @@ impl<N: Network> RewindHandler<N> {
 
         for batch in RangeIterator::forward(rescan_from, tip_number, max_block_range) {
             trace!(range_start = *batch.start(), range_end = *batch.end(), "Rescanning batch");
-            if !sender.try_stream(batch).await {
-                return false;
+            if sender.try_stream(batch).await.is_closed() {
+                return ChannelState::Closed;
             }
         }
 
-        true
+        ChannelState::Open
     }
 }

@@ -4,13 +4,10 @@ use alloy::{
     network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
     primitives::BlockHash,
 };
+use robust_provider::RobustProvider;
 
 use super::ring_buffer::RingBuffer;
-use crate::{
-    ScannerError,
-    block_range_scanner::ring_buffer::RingBufferCapacity,
-    robust_provider::{self, RobustProvider},
-};
+use crate::{ScannerError, block_range_scanner::ring_buffer::RingBufferCapacity};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ReorgHandler<N: Network = Ethereum> {
@@ -97,7 +94,7 @@ impl<N: Network> ReorgHandler<N> {
                     );
                     return self.return_common_ancestor(common_ancestor).await;
                 }
-                Err(robust_provider::Error::BlockNotFound(_)) => {
+                Err(robust_provider::Error::BlockNotFound) => {
                     // block was reorged
                     trace!(block_hash = %block_hash, "Buffered block was reorged, removing from buffer");
                     _ = self.buffer.pop_back();
@@ -121,7 +118,7 @@ impl<N: Network> ReorgHandler<N> {
     async fn reorg_detected(&self, block: &N::HeaderResponse) -> Result<bool, ScannerError> {
         match self.provider.get_block_by_hash(block.hash()).await {
             Ok(_) => Ok(false),
-            Err(robust_provider::Error::BlockNotFound(_)) => Ok(true),
+            Err(robust_provider::Error::BlockNotFound) => Ok(true),
             Err(e) => Err(e.into()),
         }
     }

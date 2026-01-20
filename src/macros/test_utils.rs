@@ -98,7 +98,9 @@ macro_rules! assert_empty {
 /// async fn test_event_order() {
 ///     // scanner setup...
 ///
-///     let mut stream = scanner.subscribe(EventFilter::new().contract_address(contract_address));
+///     let subscription = scanner.subscribe(EventFilter::new().contract_address(contract_address));
+///     let handle = scanner.start().await.unwrap();
+///     let mut stream = subscription.stream(&handle);
 ///
 ///     // Assert these two events are emitted in order
 ///     assert_event_sequence!(
@@ -145,7 +147,7 @@ macro_rules! assert_event_sequence {
     ($stream: expr, &[$($event:expr),+ $(,)?], timeout = $secs: expr) => {
         let expected_options = &[$(alloy::sol_types::SolEvent::encode_log_data(&$event)),+];
 
-       $crate::test_utils::macros::assert_event_sequence(&mut $stream, expected_options, $secs).await
+       $crate::macros::test_utils::assert_event_sequence(&mut $stream, expected_options, $secs).await
     };
     // variables and non-slice expressions
     ($stream: expr, $events: expr) => {
@@ -156,7 +158,7 @@ macro_rules! assert_event_sequence {
         if expected_options.is_empty() {
             panic!("error: assert_event_sequence! called with an empty collection. Use assert_empty! macro instead to check for no pending messages.")
         }
-        $crate::test_utils::macros::assert_event_sequence(&mut $stream, expected_options.iter(), $secs).await
+        $crate::macros::test_utils::assert_event_sequence(&mut $stream, expected_options.iter(), $secs).await
     };
 }
 

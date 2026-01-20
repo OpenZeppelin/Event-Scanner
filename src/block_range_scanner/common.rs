@@ -1,13 +1,13 @@
 use std::ops::RangeInclusive;
 
+use robust_provider::{RobustProvider, RobustSubscription, subscription};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 use crate::{
     ScannerError, ScannerMessage,
     block_range_scanner::{range_iterator::RangeIterator, reorg_handler::ReorgHandler},
-    robust_provider::{RobustProvider, RobustSubscription, subscription},
-    types::{IntoScannerResult, Notification, ScannerResult, TryStream},
+    types::{ChannelState, IntoScannerResult, Notification, ScannerResult, TryStream},
 };
 use alloy::{
     consensus::BlockHeader,
@@ -83,7 +83,9 @@ pub(crate) async fn stream_live_blocks<N: Network>(
     // only once the first relevant block is received from the subscription, and not before that;
     // otherwise callers might perform certain operations expecting the relevant blocks to start
     // coming, when in fact they are not.
-    if notify_after_first_block && !sender.try_stream(Notification::SwitchingToLive).await {
+    if notify_after_first_block &&
+        sender.try_stream(Notification::SwitchingToLive).await.is_closed()
+    {
         return;
     }
 
@@ -258,7 +260,8 @@ async fn stream_blocks_continuously<
         };
 
         if let Some(common_ancestor) = common_ancestor {
-            if !handle_reorg_detected(common_ancestor, stream_start, state, sender).await {
+            if handle_reorg_detected(common_ancestor, stream_start, state, sender).await.is_closed()
+            {
                 return; // Channel closed
             }
         } else {
@@ -268,7 +271,7 @@ async fn stream_blocks_continuously<
 
         // Stream the next batch of confirmed blocks
         let batch_end_num = incoming_block.saturating_sub(block_confirmations);
-        if !stream_next_batch(
+        if stream_next_batch(
             batch_end_num,
             state,
             stream_start,
@@ -278,20 +281,21 @@ async fn stream_blocks_continuously<
             reorg_handler,
         )
         .await
+        .is_closed()
         {
             return; // Channel closed
         }
     }
 }
 
-/// Handles a detected reorg by notifying and adjusting the streaming state
-/// Returns false if the channel is closed
+/// Handles a detected reorg by notifying and adjusting the streaming state.
+/// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
 async fn handle_reorg_detected<N: Network>(
     common_ancestor: N::BlockResponse,
     stream_start: BlockNumber,
     state: &mut LiveStreamingState<N>,
     sender: &mpsc::Sender<BlockScannerResult>,
-) -> bool {
+) -> ChannelState {
     let ancestor_num = common_ancestor.header().number();
 
     info!(
@@ -300,8 +304,11 @@ async fn handle_reorg_detected<N: Network>(
         "Reorg detected during live streaming"
     );
 
-    if !sender.try_stream(Notification::ReorgDetected { common_ancestor: ancestor_num }).await {
-        return false;
+    let channel_state =
+        sender.try_stream(Notification::ReorgDetected { common_ancestor: ancestor_num }).await;
+
+    if channel_state.is_closed() {
+        return ChannelState::Closed;
     }
 
     // Reset streaming position based on common ancestor
@@ -325,11 +332,11 @@ async fn handle_reorg_detected<N: Network>(
         state.previous_batch_end = Some(common_ancestor);
     }
 
-    true
+    ChannelState::Open
 }
 
 /// Streams the next batch of blocks up to `batch_end_num`.
-/// Returns false if the channel is closed
+/// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
 async fn stream_next_batch<N: Network>(
     batch_end_num: BlockNumber,
     state: &mut LiveStreamingState<N>,
@@ -338,10 +345,10 @@ async fn stream_next_batch<N: Network>(
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
-) -> bool {
+) -> ChannelState {
     if batch_end_num < state.batch_start {
         // No new confirmed blocks to stream yet
-        return true;
+        return ChannelState::Open;
     }
 
     // The minimum common ancestor is the block before the stream start
@@ -360,13 +367,13 @@ async fn stream_next_batch<N: Network>(
 
     if state.previous_batch_end.is_none() {
         // Channel closed
-        return false;
+        return ChannelState::Closed;
     }
 
     // SAFETY: Overflow cannot realistically happen
     state.batch_start = batch_end_num + 1;
 
-    true
+    ChannelState::Open
 }
 
 /// Tracks the current state of live streaming
@@ -390,20 +397,18 @@ pub(crate) async fn stream_historical_range<N: Network>(
     provider: &RobustProvider<N>,
     reorg_handler: &mut ReorgHandler<N>,
 ) -> Option<()> {
-    let finalized = match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await
-    {
-        Ok(block) => block,
-        Err(e) => {
-            error!("Failed to get finalized block");
-            _ = sender.try_stream(e).await;
-            return None;
-        }
-    };
-
-    debug!(finalized_block = finalized, "Got finalized block for historical range");
+    // NOTE: Edge case - If the chain is too young to expose finalized blocks (height < finalized
+    // depth) just use zero.
+    // Since we use the finalized block number only to determine whether to run reorg checks
+    // or not, this is a "low-stakes" RPC call, for which, for simplicity, we can default to `0`
+    // even on errors. Here `0` is used because it effectively just enables reorg checks.
+    // If there was actually a provider problem, any subsequent provider call will catch and
+    // properly log it and return the error to the caller.
+    let finalized_block_num =
+        provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
     // no reorg check for finalized blocks
-    let finalized_batch_end = finalized.min(end);
+    let finalized_batch_end = finalized_block_num.min(end);
     let finalized_range_count =
         RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
     trace!(
@@ -415,7 +420,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
 
     for range in RangeIterator::forward(start, finalized_batch_end, max_block_range) {
         trace!(range_start = *range.start(), range_end = *range.end(), "Streaming finalized range");
-        if !sender.try_stream(range).await {
+        if sender.try_stream(range).await.is_closed() {
             return None; // channel closed
         }
     }
@@ -438,7 +443,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     //   on `start + 1`
     // * start < finalized -> if we got here, then `end > finalized`; on reorg, we should only
     //   re-stream non-finalized blocks
-    let min_common_ancestor = (start.saturating_sub(1)).max(finalized);
+    let min_common_ancestor = (start.saturating_sub(1)).max(finalized_block_num);
 
     stream_range_with_reorg_handling(
         min_common_ancestor,
@@ -486,7 +491,7 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
             }
         };
 
-        if !sender.try_stream(batch).await {
+        if sender.try_stream(batch).await.is_closed() {
             return None; // channel closed
         }
 
@@ -505,7 +510,8 @@ pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
                 common_ancestor = common_ancestor,
                 "Reorg detected during historical streaming, resetting range iterator"
             );
-            if !sender.try_stream(Notification::ReorgDetected { common_ancestor }).await {
+            if sender.try_stream(Notification::ReorgDetected { common_ancestor }).await.is_closed()
+            {
                 return None;
             }
             let reset_to = (common_ancestor + 1).max(min_common_ancestor);

@@ -4,6 +4,26 @@ use tokio::sync::mpsc;
 
 use crate::ScannerError;
 
+/// Represents the state of a channel after attempting to send a message.
+///
+/// This enum provides explicit semantics for channel operations, making it clear
+/// whether the downstream receiver is still listening or has been dropped.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ChannelState {
+    /// The channel is open and the message was successfully sent.
+    Open,
+    /// The channel is closed (receiver dropped), no further messages can be sent.
+    Closed,
+}
+
+impl ChannelState {
+    /// Returns `true` if the channel is closed.
+    #[must_use]
+    pub(crate) fn is_closed(self) -> bool {
+        matches!(self, ChannelState::Closed)
+    }
+}
+
 /// Messages streamed by the scanner to subscribers.
 ///
 /// Each message represents either data or a notification about the scanner's state or behavior.
@@ -109,12 +129,93 @@ impl<T: Clone> IntoScannerResult<T> for Notification {
 
 /// Internal helper for attempting to forward a stream item through an `mpsc` channel.
 pub(crate) trait TryStream<T: Clone> {
-    async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool;
+    async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> ChannelState;
 }
 
 impl<T: Clone + Debug> TryStream<T> for mpsc::Sender<ScannerResult<T>> {
-    async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> bool {
+    async fn try_stream<M: IntoScannerResult<T>>(&self, msg: M) -> ChannelState {
         let item = msg.into_scanner_message_result();
-        self.send(item).await.is_ok()
+        if self.send(item).await.is_err() {
+            return ChannelState::Closed;
+        }
+        ChannelState::Open
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ops::RangeInclusive;
+
+    use crate::ScannerError;
+
+    /// Type alias for test results.
+    type TestResult = Result<ScannerMessage<RangeInclusive<u64>>, ScannerError>;
+
+    mod channel_state_enum {
+        use super::*;
+
+        #[test]
+        fn is_closed_returns_false_for_open_state() {
+            assert!(!ChannelState::Open.is_closed());
+        }
+
+        #[test]
+        fn is_closed_returns_true_for_closed_state() {
+            assert!(ChannelState::Closed.is_closed());
+        }
+
+        #[test]
+        fn channel_state_is_copy() {
+            let state = ChannelState::Open;
+            let copied = state; // Copy, not move
+            assert!(!state.is_closed()); // Both are still valid
+            assert!(!copied.is_closed());
+        }
+
+        #[test]
+        fn channel_state_debug_format() {
+            assert_eq!(format!("{:?}", ChannelState::Open), "Open");
+            assert_eq!(format!("{:?}", ChannelState::Closed), "Closed");
+        }
+    }
+
+    mod try_stream {
+        use super::*;
+
+        #[tokio::test]
+        async fn try_stream_returns_open_when_receiver_exists() {
+            let (tx, _rx) = mpsc::channel::<TestResult>(10);
+
+            let result = tx.try_stream(Notification::SwitchingToLive).await;
+
+            assert!(!result.is_closed());
+        }
+
+        #[tokio::test]
+        async fn try_stream_returns_closed_when_receiver_dropped() {
+            let (tx, rx) = mpsc::channel::<TestResult>(10);
+            drop(rx); // Drop the receiver to close the channel
+
+            let result = tx.try_stream(Notification::SwitchingToLive).await;
+
+            assert!(result.is_closed());
+        }
+
+        #[tokio::test]
+        async fn try_stream_sends_message_successfully() {
+            let (tx, mut rx) = mpsc::channel::<TestResult>(10);
+
+            let result = tx.try_stream(Notification::SwitchingToLive).await;
+
+            assert!(!result.is_closed());
+
+            // Verify the message was actually sent
+            let received = rx.recv().await.unwrap();
+            assert!(matches!(
+                received,
+                Ok(ScannerMessage::Notification(Notification::SwitchingToLive))
+            ));
+        }
     }
 }

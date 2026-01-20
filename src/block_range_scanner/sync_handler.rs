@@ -1,4 +1,5 @@
 use alloy::{eips::BlockId, network::Network, primitives::BlockNumber};
+use robust_provider::RobustProvider;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
         reorg_handler::ReorgHandler,
         ring_buffer::RingBufferCapacity,
     },
-    robust_provider::RobustProvider,
     types::TryStream,
 };
 
@@ -198,7 +198,7 @@ impl<N: Network> SyncHandler<N> {
             }
         };
 
-        if !sender.try_stream(Notification::SwitchingToLive).await {
+        if sender.try_stream(Notification::SwitchingToLive).await.is_closed() {
             debug!("Channel closed before live streaming could start");
             return;
         }

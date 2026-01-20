@@ -32,8 +32,8 @@
 //! use alloy::providers::{Provider, ProviderBuilder};
 //! use event_scanner::{
 //!     BlockRangeScannerBuilder, DEFAULT_BLOCK_CONFIRMATIONS, ScannerError, ScannerMessage,
-//!     robust_provider::RobustProviderBuilder,
 //! };
+//! use robust_provider::RobustProviderBuilder;
 //! use tokio::time::Duration;
 //! use tracing::{error, info};
 //!
@@ -77,6 +77,7 @@
 //! }
 //! ```
 
+use robust_provider::RobustProvider;
 use std::{cmp::Ordering, fmt::Debug};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -90,7 +91,6 @@ use crate::{
         rewind_handler::RewindHandler,
         sync_handler::SyncHandler,
     },
-    robust_provider::RobustProvider,
 };
 
 use alloy::{
@@ -102,13 +102,31 @@ use alloy::{
 /// A [`BlockRangeScanner`] connected to a provider.
 #[derive(Debug)]
 pub struct BlockRangeScanner<N: Network> {
-    pub(crate) provider: RobustProvider<N>,
-    pub(crate) max_block_range: u64,
-    pub(crate) past_blocks_storage_capacity: RingBufferCapacity,
-    pub(crate) buffer_capacity: usize,
+    provider: RobustProvider<N>,
+    max_block_range: u64,
+    past_blocks_storage_capacity: RingBufferCapacity,
+    buffer_capacity: usize,
 }
 
 impl<N: Network> BlockRangeScanner<N> {
+    /// Creates a new [`BlockRangeScanner`] with the specified configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The robust provider to use for blockchain interactions
+    /// * `max_block_range` - Maximum number of blocks per streamed range (must be > 0)
+    /// * `past_blocks_storage_capacity` - How many past block hashes to keep for reorg detection
+    /// * `buffer_capacity` - Stream buffer capacity (must be > 0)
+    #[must_use]
+    pub fn new(
+        provider: RobustProvider<N>,
+        max_block_range: u64,
+        past_blocks_storage_capacity: RingBufferCapacity,
+        buffer_capacity: usize,
+    ) -> Self {
+        Self { provider, max_block_range, past_blocks_storage_capacity, buffer_capacity }
+    }
+
     /// Returns the underlying [`RobustProvider`].
     #[must_use]
     pub fn provider(&self) -> &RobustProvider<N> {
@@ -371,7 +389,6 @@ mod tests {
 
     use super::*;
     use alloy::{
-        eips::{BlockId, BlockNumberOrTag},
         network::Ethereum,
         providers::{RootProvider, mock::Asserter},
         rpc::client::RpcClient,
@@ -398,12 +415,9 @@ mod tests {
     async fn try_send_forwards_errors_to_subscribers() {
         let (tx, mut rx) = mpsc::channel::<BlockScannerResult>(1);
 
-        _ = tx.try_stream(ScannerError::BlockNotFound(4.into())).await;
+        _ = tx.try_stream(ScannerError::BlockNotFound).await;
 
-        assert!(matches!(
-            rx.recv().await,
-            Some(Err(ScannerError::BlockNotFound(BlockId::Number(BlockNumberOrTag::Number(4)))))
-        ));
+        assert!(matches!(rx.recv().await, Some(Err(ScannerError::BlockNotFound))));
     }
 
     #[tokio::test]
