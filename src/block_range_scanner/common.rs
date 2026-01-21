@@ -385,6 +385,7 @@ struct LiveStreamingState<N: Network> {
 }
 
 #[must_use]
+#[allow(clippy::too_many_lines)]
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(sender, provider)))]
 pub(crate) async fn stream_historical_range<N: Network>(
     start: BlockNumber,
