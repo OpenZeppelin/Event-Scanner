@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 use alloy::{providers::ProviderBuilder, sol, sol_types::SolEvent};
 use alloy_node_bindings::Anvil;
 use event_scanner::{EventFilter, EventScannerBuilder, Message};
 
 use robust_provider::RobustProviderBuilder;
+use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -72,9 +75,19 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = subscription.stream(&proof);
 
     // emit some events for live mode to pick up
-    _ = counter_contract.increase().send().await?;
-    _ = counter_contract.increase().send().await?;
-    _ = counter_contract.increase().send().await?;
+    tokio::spawn(async move {
+        loop {
+            _ = counter_contract
+                .increase()
+                .send()
+                .await
+                .expect("failed to send transaction")
+                .watch()
+                .await
+                .expect("failed to wait for the transaction to be mined");
+            sleep(Duration::from_secs(1)).await;
+        }
+    });
 
     // only the last 5 events will be streamed before switching to live mode
     while let Some(message) = stream.next().await {

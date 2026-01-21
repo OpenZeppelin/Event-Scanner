@@ -78,11 +78,19 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = subscription.stream(&proof);
 
     info!("Creating live events...");
-    for i in 0..2 {
-        let _ = counter_contract.increase().send().await?.get_receipt().await?;
-        info!("Live event {} created", i + 1);
-        sleep(Duration::from_secs(1)).await;
-    }
+    tokio::spawn(async move {
+        loop {
+            let _ = counter_contract
+                .increase()
+                .send()
+                .await
+                .expect("failed to send transaction")
+                .watch()
+                .await
+                .expect("failed to wait for the transaction to be mined");
+            sleep(Duration::from_secs(1)).await;
+        }
+    });
 
     let mut historical_processed = false;
     let mut live_processed = false;
