@@ -404,7 +404,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     let finalized_block_num =
         provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
 
-    // Phase 1: Stream all finalized blocks without any reorg checks (using RangeIterator)
+    // Phase 1: Stream all finalized blocks without any reorg checks
     let finalized_batch_end = finalized_block_num.min(end);
     let finalized_range_count =
         RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
@@ -433,11 +433,9 @@ pub(crate) async fn stream_historical_range<N: Network>(
 
     // Phase 2: Stream non-finalized blocks, then check for reorg only after the last range.
     // If a reorg occurred, re-stream all non-finalized blocks. Repeat until stable.
-    // This is an optimization: we defer reorg checks to the end instead of checking per-batch.
     let non_finalized_start = batch_start;
 
-    // Get the end block's hash BEFORE streaming (critical for reorg detection)
-    // Block numbers persist through reorgs, only hashes change
+    // Get the end block's hash before streaming
     let mut end_block_hash = match provider.get_block_by_number(end.into()).await {
         Ok(block) => block.header().hash(),
         Err(e) => {
@@ -448,7 +446,7 @@ pub(crate) async fn stream_historical_range<N: Network>(
     };
 
     loop {
-        // Stream all non-finalized ranges without intermediate reorg checks (using RangeIterator)
+        // Stream all non-finalized ranges without intermediate reorg checks
         let non_finalized_range_count =
             RangeIterator::forward(non_finalized_start, end, max_block_range).count();
         trace!(
@@ -469,54 +467,43 @@ pub(crate) async fn stream_historical_range<N: Network>(
             }
         }
 
-        // After streaming the last range, check if end block HASH still exists (reorg check)
-        // Using hash instead of number because block numbers persist through reorgs
-        match provider.get_block_by_hash(end_block_hash).await {
-            Ok(_) => {
-                // Same hash still exists, no reorg - we're done
-                debug!(
-                    end_block_hash = %end_block_hash,
-                    "Historical sync completed, end block hash verified"
-                );
-                return Some(());
-            }
-            Err(robust_provider::Error::BlockNotFound) => {
-                // Reorg detected: the block with our recorded hash no longer exists
-                warn!(
-                    end_block = end,
-                    end_hash = %end_block_hash,
-                    "Reorg detected after streaming last range, re-streaming non-finalized blocks"
-                );
-
-                // Note: For historic mode, we don't have a precise common_ancestor since we
-                // deferred reorg checks. We use `non_finalized_start - 1` as a reasonable estimate.
-                let common_ancestor = non_finalized_start.saturating_sub(1);
-                if sender
-                    .try_stream(Notification::ReorgDetected { common_ancestor })
-                    .await
-                    .is_closed()
-                {
-                    return None; // channel closed
-                }
-
-                // Get the new end block hash for the next iteration
-                end_block_hash = match provider.get_block_by_number(end.into()).await {
-                    Ok(block) => block.header().hash(),
-                    Err(e) => {
-                        error!("Failed to get new end block hash after reorg");
-                        _ = sender.try_stream(e).await;
-                        return None;
-                    }
-                };
-
-                // Re-stream all non-finalized blocks in the next iteration
-            }
+        // After streaming, fetch the current canonical block and compare hashes (reorg check)
+        let current_end_block = match provider.get_block_by_number(end.into()).await {
+            Ok(block) => block,
             Err(e) => {
-                error!("Failed to verify end block hash");
+                error!("Failed to fetch end block for reorg check");
                 _ = sender.try_stream(e).await;
                 return None;
             }
+        };
+
+        let current_hash = current_end_block.header().hash();
+        if current_hash == end_block_hash {
+            // Same hash - no reorg, we're done
+            debug!(
+                end_block_hash = %end_block_hash,
+                "Historical sync completed, end block hash verified"
+            );
+            return Some(());
         }
+
+        // Different hash - reorg detected
+        warn!(
+            end_block = end,
+            old_hash = %end_block_hash,
+            new_hash = %current_hash,
+            "Reorg detected after streaming last range, re-streaming non-finalized blocks"
+        );
+
+        // For historic mode, using `non_finalized_start - 1` as a reasonable estimate for
+        // common_ancestor.
+        let common_ancestor = non_finalized_start.saturating_sub(1);
+        if sender.try_stream(Notification::ReorgDetected { common_ancestor }).await.is_closed() {
+            return None; // channel closed
+        }
+
+        // Update to the new canonical hash for the next iteration
+        end_block_hash = current_hash;
 
         // Check if finalized has advanced past end (all blocks now finalized)
         let current_finalized =
