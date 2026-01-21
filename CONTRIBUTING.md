@@ -8,9 +8,9 @@ Thanks for your interest in contributing! This guide explains how to set up your
 
 `event-scanner` is a Rust library for monitoring and streaming EVM-based smart contract events. It is built on the `alloy` ecosystem and provides in-memory scanning. See `README.md` for features, usage, examples, and testing notes.
 
-- Workspace manifest: `Cargo.toml`
+- Manifest: `Cargo.toml`
 - Library code: `src/`
-- Examples: `examples/simple_counter`, `examples/historical_scanning`
+- Examples: `examples/live_scanning`, `examples/historical_scanning` etc.
 - Integration tests: `tests/`
 - Formatting: `rustfmt.toml`
 - Toolchain pin: `rust-toolchain.toml`
@@ -52,7 +52,7 @@ Thanks for your interest in contributing! This guide explains how to set up your
    - `cargo install cargo-nextest`
    - `cargo install typos-cli`
 
-Build the workspace:
+Build the crate:
 
 ```bash
 cargo build --locked --all-targets --all-features
@@ -69,27 +69,27 @@ cargo test --features test-utils
 Run examples:
 
 ```bash
-RUST_LOG=info cargo run -p live_scanning
+RUST_LOG=info cargo run --example live_scanning
 # or
-RUST_LOG=info cargo run -p historical_scanning
+RUST_LOG=info cargo run --example historical_scanning
 ```
 
 Logging / observability notes:
 
-- The library's internal logs are **compile-time opt-in** via the `event-scanner` crate feature `tracing`.
+- The library's internal logs are **compile-time opt-in** via the `tracing` feature.
 - If the feature is disabled, internal logging calls compile to **no-ops**.
 - Examples install a `tracing_subscriber` and read filters from `RUST_LOG`.
 
-Enable `event-scanner` internal logs when running an example:
+Enable internal logs when running an example:
 
 ```bash
-RUST_LOG=event_scanner=debug cargo run -p historical_scanning --features event-scanner/tracing
+RUST_LOG=event_scanner=debug cargo run --example historical_scanning --features tracing
 ```
 
 You can also combine filters to keep other dependencies quiet:
 
 ```bash
-RUST_LOG=warn,event_scanner=info cargo run -p historical_scanning --features event-scanner/tracing
+RUST_LOG=warn,event_scanner=info cargo run --example historical_scanning --features tracing
 ```
 
 Note: Examples start a local `anvil` instance and deploy a demo contract. If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.
