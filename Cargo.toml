@@ -1,6 +1,7 @@
 [workspace]
 members = [
     ".",
+    "benches",
     "examples/historical_scanning",
     "examples/live_scanning",
     "examples/latest_events_scanning",
@@ -31,6 +32,8 @@ tokio-stream = "0.1.17"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 test-log = { version = "0.2.18", features = ["trace"] }
+backon = "1.6.0"
+criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
 robust-provider = "0.2.0"
 
 [package]
