@@ -10,8 +10,10 @@ categories = [
 keywords = ["evm", "ethereum", "blockchain", "events", "alloy"]
 authors = ["OpenZeppelin"]
 edition = "2024"
+readme = "README.md"
 license = "MIT"
 repository = "https://github.com/OpenZeppelin/Event-Scanner"
+documentation = "https://docs.rs/event-scanner"
 version = "1.0.0"
 publish = true
 
