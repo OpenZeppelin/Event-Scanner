@@ -5,7 +5,7 @@
 //!
 //! # Node compatibility
 //!
-//! Event Scanner's test suite and examples are exercised against Foundry's `anvil` dev node.
+//! Event Scanner's test suite and examples are exercised against Foundry's [anvil][anvil] dev node.
 //!
 //! While the library is intended to work with other EVM nodes and RPC providers, behaviour may
 //! vary across implementations. If you encounter errors when using a different node/provider,
@@ -50,6 +50,7 @@
 //! the subscription stream yields [`ScannerError::Lagged`].
 //!
 //! [finalized]: alloy::eips::BlockNumberOrTag::Finalized
+//! [anvil]: https://github.com/foundry-rs/foundry?tab=readme-ov-file#anvil
 
 #[macro_use]
 pub mod macros;

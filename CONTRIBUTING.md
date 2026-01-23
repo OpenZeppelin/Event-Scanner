@@ -28,8 +28,10 @@ Thanks for your interest in contributing! This guide explains how to set up your
   - `typos` for spell checking: `cargo install typos-cli` (or `brew install typos`)
   - A recent `rust-analyzer` for IDE support
 - Runtime/dev tools
-  - For examples and some tests, you'll need an Ethereum dev node such as Foundry's `anvil`
-  - The repository is exercised against `anvil`; if you encounter issues on other nodes/providers, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues
+  - For examples and some tests, you'll need an Ethereum dev node such as Foundry's [anvil][anvil]
+  - The repository is exercised against [anvil][anvil]; if you encounter issues on other nodes/providers, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues
+  
+[anvil]: https://github.com/foundry-rs/foundry?tab=readme-ov-file#anvil
 
 ---
 
