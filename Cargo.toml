@@ -28,6 +28,9 @@ tokio-stream = "0.1.17"
 tracing = "0.1"
 robust-provider = "0.2.0"
 tokio-util = "0.7.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+flate2 = "1.1"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
@@ -40,6 +43,14 @@ all-features = true
 [lints.clippy]
 pedantic = "warn"
 all = "warn"
+
+[[bench]]
+name = "historic_scanning"
+harness = false
+
+[[bench]]
+name = "latest_events_scanning"
+harness = false
 
 [features]
 test-utils = []

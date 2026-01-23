@@ -17,12 +17,13 @@ use std::{
 use anyhow::{Result, bail, ensure};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use event_scanner::{EventFilter, EventScannerBuilder, Message};
-use event_scanner_benches::{BenchEnvironment, count_increased_signature, setup_from_dump};
 use tokio_stream::StreamExt;
+
+mod helpers;
 
 /// Returns the path to the dump file, resolved from the crate's manifest directory.
 fn dump_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("dumps/state_100000.json.gz")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("benches/dumps/state_100000.json.gz")
 }
 
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -34,16 +35,20 @@ fn get_runtime() -> &'static tokio::runtime::Runtime {
 /// Runs a single latest events scan and asserts the expected event count.
 ///
 /// This fetches the `latest_count` most recent events.
-async fn run_latest_events_scan(env: &BenchEnvironment, latest_count: usize) -> Result<()> {
+async fn run_latest_events_scan(
+    env: &helpers::BenchEnvironment,
+    latest_count: usize,
+) -> Result<()> {
     let filter = EventFilter::new()
         .contract_address(env.contract_address)
-        .event(count_increased_signature());
+        .event(helpers::count_increased_signature());
 
     let mut scanner =
         EventScannerBuilder::latest(latest_count).connect(env.provider.clone()).await?;
 
-    let mut stream = scanner.subscribe(filter);
-    scanner.start().await?;
+    let subscription = scanner.subscribe(filter);
+    let proof = scanner.start().await?;
+    let mut stream = subscription.stream(&proof);
 
     let mut log_count = 0;
     while let Some(message) = stream.next().await {
@@ -76,8 +81,10 @@ fn latest_events_scanning_benchmark(c: &mut Criterion) {
 
     // Load environment from pre-generated dump (100k events)
     println!("Loading benchmark environment from dump file...");
-    let env: BenchEnvironment = rt.block_on(async {
-        setup_from_dump(&dump_path()).await.expect("failed to load benchmark environment from dump")
+    let env: helpers::BenchEnvironment = rt.block_on(async {
+        helpers::setup_from_dump(&dump_path())
+            .await
+            .expect("failed to load benchmark environment from dump")
     });
     println!(
         "Environment ready: {} events across {} blocks at contract {}",
