@@ -305,8 +305,10 @@ If you run into issues when using a different node/provider, please report them 
 
 Integration tests cover all modes:
 
-Note: Tests are exercised against a local Foundry `anvil` instance.
+Note: Tests are exercised against a local Foundry [anvil][anvil] instance.
 
 ```bash
 cargo nextest run --features test-utils
 ```
+
+[anvil]: https://github.com/foundry-rs/foundry?tab=readme-ov-file#anvil
