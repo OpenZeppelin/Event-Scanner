@@ -20,8 +20,13 @@ use std::{
     path::Path,
 };
 
-use alloy::{network::Ethereum, primitives::Address, providers::ProviderBuilder, sol};
-use alloy_node_bindings::{Anvil, AnvilInstance};
+use alloy::{
+    network::Ethereum,
+    node_bindings::{Anvil, AnvilInstance},
+    primitives::Address,
+    providers::ProviderBuilder,
+    sol,
+};
 use anyhow::Context;
 use flate2::read::GzDecoder;
 use robust_provider::{RobustProvider, RobustProviderBuilder};

@@ -12,8 +12,11 @@ pub(crate) use setup_scanner::{
 };
 pub(crate) use test_counter::{TestCounter, deploy_counter};
 
-use alloy::{network::Ethereum, providers::ProviderBuilder};
-use alloy_node_bindings::{Anvil, AnvilInstance};
+use alloy::{
+    network::Ethereum,
+    node_bindings::{Anvil, AnvilInstance},
+    providers::ProviderBuilder,
+};
 
 pub fn spawn_anvil(block_time: Option<f64>) -> anyhow::Result<AnvilInstance> {
     let mut anvil = Anvil::new();

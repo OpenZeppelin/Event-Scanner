@@ -1,5 +1,4 @@
-use alloy::{providers::ProviderBuilder, sol, sol_types::SolEvent};
-use alloy_node_bindings::Anvil;
+use alloy::{node_bindings::Anvil, providers::ProviderBuilder, sol, sol_types::SolEvent};
 use event_scanner::{EventFilter, EventScannerBuilder, Message};
 
 use robust_provider::RobustProviderBuilder;

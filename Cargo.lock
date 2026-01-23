@@ -44,6 +44,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-network",
+ "alloy-node-bindings",
  "alloy-provider",
  "alloy-pubsub",
  "alloy-rpc-client",
@@ -380,6 +381,7 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-network",
  "alloy-network-primitives",
+ "alloy-node-bindings",
  "alloy-primitives",
  "alloy-pubsub",
  "alloy-rpc-client",
@@ -1875,7 +1877,6 @@ name = "event-scanner"
 version = "1.0.0"
 dependencies = [
  "alloy",
- "alloy-node-bindings",
  "anyhow",
  "criterion",
  "flate2",

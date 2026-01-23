@@ -108,10 +108,10 @@ impl<N: Network> EventScanner<Live, N> {
 mod tests {
     use alloy::{
         network::Ethereum,
+        node_bindings::Anvil,
         providers::{ProviderBuilder, RootProvider, mock::Asserter},
         rpc::client::RpcClient,
     };
-    use alloy_node_bindings::Anvil;
 
     use crate::{
         block_range_scanner::{
