@@ -8,10 +8,10 @@
 //! For benchmarks, use `setup_from_dump` to load pre-generated state:
 //!
 //! ```rust,ignore
-//! use event_scanner_benches::setup_from_dump;
+//! mod helpers;
 //! use std::path::Path;
 //!
-//! let env = setup_from_dump(Path::new("benches/dumps/state_100000.json.gz")).await?;
+//! let env = helpers::setup_from_dump(Path::new("benches/dumps/state_100000.json.gz")).await?;
 //! ```
 
 use std::{
