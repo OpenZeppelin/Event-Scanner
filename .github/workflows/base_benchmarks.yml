@@ -1,0 +1,72 @@
+name: Base Benchmarks
+
+# TODO: re-enable once we have a valid Bencher
+# on:
+#   push:
+#     branches: main
+#     paths:
+#       - "src/**"
+#       - "benches/**"
+#       - "Cargo.toml"
+#       - "Cargo.lock"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  benchmark:
+    name: "Continuous Benchmarking: ${{ matrix.suite }}"
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - historic_scanning
+          - latest_events_scanning
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+
+      - name: Setup Foundry
+        uses: foundry-rs/foundry-toolchain@8b0419c685ef46cb79ec93fbdc131174afceb730 # v1.6.0
+
+      - name: Setup Bencher
+        uses: bencherdev/bencher@2f1532643adc0e69e52acaec936d227ff14da24f # v0.5.9
+
+      - name: Prepare benchmark state
+        run: |
+          gunzip -kf benches/dumps/*.json.gz
+          ls -lh benches/dumps/
+
+      - name: Run benchmark
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bencher run \
+            --project "$BENCHER_PROJECT" \
+            --token "$BENCHER_API_TOKEN" \
+            --branch main \
+            --testbed ubuntu-latest \
+            --adapter rust_criterion \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-max-sample-size 64 \
+            --threshold-upper-boundary 0.99 \
+            --thresholds-reset \
+            --github-actions "$GITHUB_TOKEN" \
+            --err \
+            "cargo bench --bench ${{ matrix.suite }} --features bench-utils"

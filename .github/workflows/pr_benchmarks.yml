@@ -1,23 +1,9 @@
-name: Benchmarks
+name: PR Benchmarks
 
-on:
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "benches/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-  pull_request:
-    paths:
-      - "src/**"
-      - "benches/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-
-permissions:
-  contents: read
-  checks: write
+# TODO: re-enable once we have a valid Bencher API token
+# on:
+#   pull_request:
+#     types: [opened, reopened, edited, synchronize]
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,8 +11,11 @@ env:
 
 jobs:
   benchmark:
-    name: "${{ matrix.suite }}"
+    name: "Continuous PR Benchmarking: ${{ matrix.suite }}"
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
     strategy:
       fail-fast: false
       matrix:
@@ -69,11 +58,10 @@ jobs:
             --branch "${{ github.head_ref || github.ref_name }}" \
             --testbed ubuntu-latest \
             --adapter rust_criterion \
-            --threshold-measure latency \
-            --threshold-test t_test \
-            --threshold-max-sample-size 64 \
-            --threshold-upper-boundary 0.99 \
-            --thresholds-reset \
+            --start-point "${{ github.base_ref }}" \
+            --start-point-hash "${{ github.event.pull_request.base.sha }}" \
+            --start-point-clone-thresholds \
+            --start-point-reset \
             --github-actions "$GITHUB_TOKEN" \
             --err \
             "cargo bench --bench ${{ matrix.suite }} --features bench-utils"
