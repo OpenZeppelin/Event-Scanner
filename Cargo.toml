@@ -29,14 +29,14 @@ tokio-stream = "0.1.17"
 tracing = "0.1"
 robust-provider = "0.2.0"
 tokio-util = "0.7.17"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+flate2 = { version = "1.1", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 test-log = { version = "0.2.18", features = ["trace"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
-flate2 = { version = "1.1" }
 
 [package.metadata.docs.rs]
 all-features = true
@@ -48,17 +48,21 @@ all = "warn"
 [[bench]]
 name = "historic_scanning"
 harness = false
+required-features = ["bench-utils"]
 
 [[bench]]
 name = "latest_events_scanning"
 harness = false
+required-features = ["bench-utils"]
 
 [[bin]]
 name = "generate_dump"
+required-features = ["bench-utils"]
 
 [features]
 test-utils = []
 tracing = []
+bench-utils = ["dep:serde", "dep:serde_json", "dep:flate2"]
 
 [profile.release]
 lto = "thin"
