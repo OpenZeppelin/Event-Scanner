@@ -14,6 +14,7 @@ use std::{
     sync::OnceLock,
 };
 
+use alloy::sol_types::SolEvent;
 use anyhow::{Result, bail, ensure};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use event_scanner::{EventFilter, EventScannerBuilder, Message};
@@ -41,7 +42,7 @@ async fn run_latest_events_scan(
 ) -> Result<()> {
     let filter = EventFilter::new()
         .contract_address(env.contract_address)
-        .event(helpers::count_increased_signature());
+        .event(helpers::Counter::CountIncreased::SIGNATURE);
 
     let mut scanner =
         EventScannerBuilder::latest(latest_count).connect(env.provider.clone()).await?;

@@ -13,6 +13,7 @@ use std::{
     sync::OnceLock,
 };
 
+use alloy::sol_types::SolEvent;
 use anyhow::{Result, bail};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use event_scanner::{EventFilter, EventScannerBuilder, Message};
@@ -37,7 +38,7 @@ fn get_runtime() -> &'static tokio::runtime::Runtime {
 async fn run_historic_scan(env: &helpers::BenchEnvironment, to_block: u64) -> Result<()> {
     let filter = EventFilter::new()
         .contract_address(env.contract_address)
-        .event(helpers::count_increased_signature());
+        .event(helpers::Counter::CountIncreased::SIGNATURE);
 
     let mut scanner = EventScannerBuilder::historic()
         .max_block_range(100)

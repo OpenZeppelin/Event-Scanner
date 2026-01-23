@@ -20,17 +20,10 @@ use std::{
     path::Path,
 };
 
-use alloy::{
-    network::Ethereum,
-    primitives::Address,
-    providers::{Provider, ProviderBuilder},
-    sol,
-    sol_types::SolEvent,
-};
+use alloy::{network::Ethereum, primitives::Address, providers::ProviderBuilder, sol};
 use alloy_node_bindings::{Anvil, AnvilInstance};
 use anyhow::Context;
 use flate2::read::GzDecoder;
-use futures::future::try_join_all;
 use robust_provider::{RobustProvider, RobustProviderBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -60,12 +53,6 @@ sol! {
     }
 }
 
-/// Returns the event signature for `CountIncreased`.
-#[must_use]
-pub fn count_increased_signature() -> &'static str {
-    Counter::CountIncreased::SIGNATURE
-}
-
 /// Pre-configured benchmark environment with an Anvil instance,
 /// deployed contract, and generated events.
 pub struct BenchEnvironment {
@@ -80,22 +67,6 @@ pub struct BenchEnvironment {
     pub event_count: usize,
     /// The latest block number at the time of dump.
     pub block_number: u64,
-}
-
-/// Configuration for setting up a benchmark environment.
-pub struct BenchConfig {
-    /// Number of events to generate.
-    pub event_count: usize,
-    /// Block time in seconds for Anvil.
-    pub block_time: f64,
-}
-
-impl BenchConfig {
-    /// Creates a new configuration with the specified event count.
-    #[must_use]
-    pub fn new(event_count: usize) -> Self {
-        Self { event_count, block_time: 0.01 }
-    }
 }
 
 /// Metadata for a dump file, stored alongside the dump.
@@ -210,76 +181,6 @@ fn decompress_dump(compressed_path: &Path, output_path: &Path) -> anyhow::Result
     output_file
         .write_all(&decompressed)
         .with_context(|| format!("Failed to write decompressed dump: {}", output_path.display()))?;
-
-    Ok(())
-}
-
-/// Sets up a benchmark environment by spawning Anvil, deploying a contract,
-/// and generating the specified number of events.
-///
-/// **Note:** For benchmarks, prefer `setup_from_dump` which loads pre-generated
-/// state and is much faster.
-///
-/// # Errors
-///
-/// Returns an error if Anvil fails to spawn, the contract fails to deploy,
-/// or event generation fails.
-///
-/// # Panics
-///
-/// Panics if Anvil does not return a default wallet.
-#[allow(dead_code)]
-pub async fn setup_environment(config: BenchConfig) -> anyhow::Result<BenchEnvironment> {
-    let anvil = Anvil::new().block_time_f64(config.block_time).try_spawn()?;
-
-    let wallet = anvil.wallet().expect("anvil should return a default wallet");
-    let provider =
-        ProviderBuilder::new().wallet(wallet).connect(anvil.ws_endpoint_url().as_str()).await?;
-
-    let contract = Counter::deploy(provider.clone()).await?;
-    let contract_address = *contract.address();
-
-    // Generate events by sending transactions
-    generate_events(&contract, config.event_count).await?;
-
-    // Get latest block number
-    let block_number = provider.get_block_number().await?;
-
-    // Build robust provider for the scanner
-    let robust_provider = RobustProviderBuilder::new(provider)
-        .call_timeout(std::time::Duration::from_secs(30))
-        .max_retries(5)
-        .min_delay(std::time::Duration::from_millis(500))
-        .build()
-        .await?;
-
-    Ok(BenchEnvironment {
-        anvil,
-        provider: robust_provider,
-        contract_address,
-        event_count: config.event_count,
-        block_number,
-    })
-}
-
-/// Generates the specified number of events by calling the contract's `increase` function.
-#[allow(dead_code)]
-async fn generate_events<P>(
-    contract: &Counter::CounterInstance<P>,
-    count: usize,
-) -> anyhow::Result<()>
-where
-    P: Provider<Ethereum> + Clone,
-{
-    // Send all transactions
-    let mut pending_txs = Vec::with_capacity(count);
-    for _ in 0..count {
-        pending_txs.push(contract.increase().send().await?);
-    }
-
-    // Wait for all transactions to be confirmed
-    let watch_futures = pending_txs.into_iter().map(|tx| async move { tx.watch().await });
-    try_join_all(watch_futures).await?;
 
     Ok(())
 }
