@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "benches/**"
       - "Cargo.toml"
       - "Cargo.lock"
   pull_request:
     paths:
       - "src/**"
+      - "benches/**"
       - "Cargo.toml"
       - "Cargo.lock"
 
@@ -74,4 +76,4 @@ jobs:
             --thresholds-reset \
             --github-actions "$GITHUB_TOKEN" \
             --err \
-            "cargo bench --bench ${{ matrix.suite }}"
+            "cargo bench --bench ${{ matrix.suite }} --features bench-utils"
