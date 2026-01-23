@@ -33,7 +33,6 @@ serde_json = { version = "1.0", optional = true }
 flate2 = { version = "1.1", optional = true }
 
 [dev-dependencies]
-alloy = { version = "1.1.2", features = ["node-bindings"] }
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 test-log = { version = "0.2.18", features = ["trace"] }
@@ -62,9 +61,14 @@ required-features = ["bench-utils"]
 # required-features = ["bench-utils"]
 
 [features]
-test-utils = []
+test-utils = ["alloy/node-bindings"]
 tracing = []
-bench-utils = ["dep:serde", "dep:serde_json", "dep:flate2"]
+bench-utils = [
+    "dep:serde",
+    "dep:serde_json",
+    "dep:flate2",
+    "alloy/node-bindings",
+]
 
 [profile.release]
 lto = "thin"
