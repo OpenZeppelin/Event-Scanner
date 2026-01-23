@@ -8,25 +8,25 @@
 use std::ops::RangeInclusive;
 
 use crate::{
+    Message, Notification, ScannerError, ScannerMessage,
     block_range_scanner::BlockScannerResult,
     event_scanner::{filter::EventFilter, listener::EventListener},
     types::TryStream,
-    Message, Notification, ScannerError, ScannerMessage,
 };
 use alloy::{
     network::Network,
     rpc::types::{Filter, Log},
 };
 use futures::StreamExt;
-use robust_provider::{provider::Error as RobustProviderError, RobustProvider};
+use robust_provider::{RobustProvider, provider::Error as RobustProviderError};
 use tokio::{
     sync::{
-        broadcast::{self, error::RecvError, Sender},
+        broadcast::{self, Sender, error::RecvError},
         mpsc,
     },
     task::JoinSet,
 };
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 /// Handles a stream of scanned block ranges.
 pub trait BlockRangeHandler {
@@ -117,10 +117,10 @@ impl<N: Network> StreamHandler<N> {
 
                     // process all of the buffered results
                     while let Some(result) = stream.next().await {
-                        if let Ok(ScannerMessage::Data(logs)) = result.as_ref() {
-                            if logs.is_empty() {
-                                continue;
-                            }
+                        if let Ok(ScannerMessage::Data(logs)) = result.as_ref() &&
+                            logs.is_empty()
+                        {
+                            continue;
                         }
 
                         if listener.sender.try_stream(result).await.is_closed() {
@@ -491,7 +491,7 @@ async fn get_logs<N: Network>(
 mod tests {
     use alloy::{
         network::Ethereum,
-        providers::{mock::Asserter, RootProvider},
+        providers::{RootProvider, mock::Asserter},
         rpc::client::RpcClient,
     };
 
