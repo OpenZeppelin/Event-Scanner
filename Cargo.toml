@@ -63,3 +63,9 @@ required-features = ["bench-utils"]
 test-utils = []
 tracing = []
 bench-utils = ["dep:serde", "dep:serde_json", "dep:flate2"]
+
+[profile.release]
+lto = "thin"
+panic = "abort"
+codegen-units = 1
+strip = true
