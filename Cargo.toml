@@ -19,8 +19,8 @@ publish = true
 exclude = [".github/", ".vscode/", ".config/", ".cargo/", "benches/", "tests/"]
 
 [dependencies]
-alloy = { version = "1.1.2" }
-tokio = { version = "1.48" }
+alloy = "1.1.2"
+tokio = "1.48"
 futures = "0.3.31"
 anyhow = "1.0"
 thiserror = "2.0.17"
@@ -48,28 +48,19 @@ all = "warn"
 [[bench]]
 name = "historic_scanning"
 harness = false
-required-features = ["bench-utils"]
 
 [[bench]]
 name = "latest_events_scanning"
 harness = false
-required-features = ["bench-utils"]
 
 # uncomment only when new dumps need to be generated, see CONTRIBUTING.md
 # [[bin]]
 # name = "generate_dump"
 # path = "benches/generate_dump.rs"
-# required-features = ["bench-utils"]
 
 [features]
 test-utils = ["alloy/node-bindings"]
 tracing = []
-bench-utils = [
-    "dep:serde",
-    "dep:serde_json",
-    "dep:flate2",
-    "alloy/node-bindings",
-]
 
 [profile.release]
 lto = "thin"

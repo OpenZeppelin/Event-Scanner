@@ -64,4 +64,4 @@ jobs:
             --start-point-reset \
             --github-actions "$GITHUB_TOKEN" \
             --err \
-            "cargo bench --bench ${{ matrix.suite }} --features bench-utils"
+            "cargo bench --bench ${{ matrix.suite }}"

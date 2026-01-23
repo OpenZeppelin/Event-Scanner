@@ -209,7 +209,6 @@ Uncomment the `[[bin]]` section:
 [[bin]]
 name = "generate_dump"
 path = "benches/generate_dump.rs"
-required-features = ["bench-utils"]
 ```
 
 ### 2. Enable `node-bindings` for `alloy`
@@ -224,12 +223,10 @@ alloy = { version = "1.1.2", features = ["node-bindings"] }
 ### 3. Run the generator
 
 ```bash
-cargo run --release --bin generate_dump --features bench-utils -- \
+cargo run --release --bin generate_dump -- \
   --events 100000 \
   --output benches/dumps/state_100000.json
 ```
-
-**Note**: The `--features bench-utils` flag is required to enable the dependencies needed by the generator.
 
 This creates:
 - `benches/dumps/state_100000.json.gz` (compressed state dump)
