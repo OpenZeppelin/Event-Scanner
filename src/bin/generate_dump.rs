@@ -19,11 +19,11 @@
 
 use alloy::{
     network::Ethereum,
+    node_bindings::Anvil,
     primitives::Address,
     providers::{Provider, ProviderBuilder},
     sol,
 };
-use alloy_node_bindings::Anvil;
 use anyhow::{Context, Result};
 use flate2::{Compression, write::GzEncoder};
 use futures::future::try_join_all;

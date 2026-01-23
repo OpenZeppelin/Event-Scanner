@@ -19,8 +19,7 @@ publish = true
 exclude = [".github/", ".vscode/", ".config/", ".cargo/", "benches/", "tests/"]
 
 [dependencies]
-alloy = { version = "1.1.2", features = ["full"] }
-alloy-node-bindings = "1.1.2"
+alloy = { version = "1.1.2", features = ["node-bindings"] }
 tokio = { version = "1.48", features = ["full"] }
 futures = "0.3.31"
 anyhow = "1.0"
