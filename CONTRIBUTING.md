@@ -195,6 +195,56 @@ Key implementation details, trade-offs, and alternatives considered.
 
 ---
 
+## Generating Benchmark Dumps
+
+Benchmark dumps are pre-generated Anvil state files with events, stored in `benches/dumps/`. They allow benchmarks to run without regenerating events each time.
+
+**The `benches/generate_dump.rs` binary is normally disabled** to avoid requiring `node-bindings` in production dependencies. To generate new dumps:
+
+### 1. Enable the binary in `Cargo.toml`
+
+Uncomment the `[[bin]]` section:
+
+```toml
+[[bin]]
+name = "generate_dump"
+path = "benches/generate_dump.rs"
+required-features = ["bench-utils"]
+```
+
+### 2. Enable `node-bindings` for `alloy`
+
+Temporarily add the `node-bindings` feature to the `alloy` dependency:
+
+```toml
+[dependencies]
+alloy = { version = "1.1.2", features = ["node-bindings"] }
+```
+
+### 3. Run the generator
+
+```bash
+cargo run --release --bin generate_dump --features bench-utils -- \
+  --events 100000 \
+  --output benches/dumps/state_100000.json
+```
+
+This creates:
+- `benches/dumps/state_100000.json.gz` (compressed state dump)
+- `benches/dumps/state_100000.metadata.json` (metadata)
+
+### 4. Revert changes
+
+After generating dumps, **revert both changes** to `Cargo.toml`:
+- Re-comment the `[[bin]]` section
+- Remove `node-bindings` from the `alloy` dependency
+
+### 5. Commit the dumps
+
+Commit the generated `.json.gz` and `.metadata.json` files to the repository.
+
+---
+
 ## Design & Architecture
 
 - High-level architecture and core traits/components are described in `README.md`.
