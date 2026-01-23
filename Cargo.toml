@@ -16,14 +16,7 @@ repository = "https://github.com/OpenZeppelin/Event-Scanner"
 documentation = "https://docs.rs/event-scanner"
 version = "1.0.0"
 publish = true
-exclude = [
-    ".github/",
-    ".vscode/",
-    ".config/",
-    "benches/",
-    "examples/",
-    "tests/",
-]
+exclude = [".github/", ".vscode/", ".config/", "benches/", "tests/"]
 
 [dependencies]
 alloy = { version = "1.1.2", features = ["full"] }
