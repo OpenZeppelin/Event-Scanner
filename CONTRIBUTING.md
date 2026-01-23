@@ -229,8 +229,6 @@ cargo run --release --bin generate_dump --features bench-utils -- \
   --output benches/dumps/state_100000.json
 ```
 
-**Note**: The `--features bench-utils` flag is required to enable the dependencies needed by the generator.
-
 This creates:
 - `benches/dumps/state_100000.json.gz` (compressed state dump)
 - `benches/dumps/state_100000.metadata.json` (metadata)
