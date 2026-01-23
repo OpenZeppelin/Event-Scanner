@@ -16,7 +16,16 @@ repository = "https://github.com/OpenZeppelin/Event-Scanner"
 documentation = "https://docs.rs/event-scanner"
 version = "1.0.0"
 publish = true
-exclude = [".github/", ".vscode/", ".config/", ".cargo/", "benches/", "tests/"]
+exclude = [
+    ".github/",
+    ".vscode/",
+    ".config/",
+    ".cargo/",
+    "benches/",
+    "tests/",
+    "src/bin/generate_dump.rs",
+]
+autobins = true
 
 [dependencies]
 alloy = "1.1.2"
@@ -56,15 +65,20 @@ harness = false
 required-features = ["bench-utils"]
 
 # uncomment only when new dumps need to be generated, see CONTRIBUTING.md
-# [[bin]]
-# name = "generate_dump"
-# path = "benches/generate_dump.rs"
-# required-features = ["bench-utils"]
+[[bin]]
+name = "generate_dump"
+path = "src/bin/generate_dump.rs"
+required-features = ["bench-utils"]
 
 [features]
 test-utils = []
 tracing = []
-bench-utils = ["dep:serde", "dep:serde_json", "dep:flate2"]
+bench-utils = [
+    "dep:serde",
+    "dep:serde_json",
+    "dep:flate2",
+    "alloy/node-bindings",
+]
 
 [profile.release]
 lto = "thin"
