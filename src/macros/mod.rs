@@ -1,5 +1,5 @@
 #[macro_use]
-mod logging;
+mod tracing;
 
 #[cfg(any(test, feature = "test-utils"))]
 #[macro_use]
