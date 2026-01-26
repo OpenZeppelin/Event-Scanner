@@ -2,6 +2,7 @@ name: PR Benchmarks
 
 on:
   pull_request:
+    types: [opened, reopened, edited, synchronize]
     paths:
       - "src/**"
       - "benches/**"
@@ -48,7 +49,10 @@ jobs:
         uses: foundry-rs/foundry-toolchain@8b0419c685ef46cb79ec93fbdc131174afceb730 # v1.6.0
 
       - name: Setup Bencher
-        uses: bencherdev/bencher@2f1532643adc0e69e52acaec936d227ff14da24f # v0.5.9
+        # Official docs recommend using `main` commit, because discrepancies between CI version and Bencher's API version
+        # can cause bench failures.
+        # https://bencher.dev/docs/how-to/github-actions/
+        uses: bencherdev/bencher@main
 
       - name: Prepare benchmark state
         run: |
