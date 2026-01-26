@@ -1,14 +1,25 @@
 name: Base Benchmarks
 
-# TODO: re-enable once we have a valid Bencher
-# on:
-#   push:
-#     branches: main
-#     paths:
-#       - "src/**"
-#       - "benches/**"
-#       - "Cargo.toml"
-#       - "Cargo.lock"
+on:
+  push:
+    branches: [main, release-v*]
+    paths:
+      - "src/**"
+      - "benches/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  pull_request:
+    paths:
+      - "src/**"
+      - "benches/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+# If new code is pushed to a PR branch, then cancel in progress workflows for
+# that PR. Ensures that we don't waste CI time, and returns results quicker.
+# https://github.com/jonhoo/rust-ci-conf/pull/5
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
