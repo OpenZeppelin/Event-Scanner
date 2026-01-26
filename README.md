@@ -3,10 +3,6 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://opensource.org/licenses/MIT)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner/badge)](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner)
 
-> ⚠️ **WARNING: ACTIVE DEVELOPMENT** ⚠️
->
-> This project is under active development and likely contains bugs. APIs and behaviour may change without notice. Use at your own risk.
-
 ## Node compatibility
 
 Event Scanner's test suite and examples are exercised against Foundry's `anvil` dev node.

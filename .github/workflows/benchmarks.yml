@@ -1,0 +1,134 @@
+name: Benchmarks
+
+# Runs benchmarks to track performance and detect regressions.
+# - On push to main: automatically updates baseline in Bencher
+# - On manual dispatch: run specific benchmarks on-demand
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Only run benchmarks if relevant code changes
+      - "src/**"
+      - "benches/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: "Benchmark to run"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - historic_scanning
+          - latest_events_scanning
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Run historic benchmarks
+  benchmark_historic:
+    name: Run Historic Benchmarks
+    runs-on: ubuntu-latest
+    # Run on push to main, or when manually selecting 'all' or 'historic_scanning'
+    if: ${{ github.event_name == 'push' || inputs.benchmark == 'all' || inputs.benchmark == 'historic_scanning' }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9 # v2.14.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+
+      - name: Install Foundry (Anvil)
+        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+
+      - name: Install Bencher CLI
+        uses: bencherdev/bencher@8151077aa7b1bceaac11c4b308265417cae60e2b # v0.5.10
+
+      - name: Decompress benchmark state dumps
+        run: |
+          echo "Decompressing Anvil state dumps..."
+          gunzip -k benches/dumps/*.json.gz
+          ls -lh benches/dumps/
+
+      - name: Run historic benchmarks and track with Bencher
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+        run: |
+          bencher run \
+            --project "$BENCHER_PROJECT" \
+            --token "$BENCHER_API_TOKEN" \
+            --branch main \
+            --testbed ubuntu-latest \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-max-sample-size 64 \
+            --threshold-upper-boundary 0.99 \
+            --thresholds-reset \
+            --adapter rust_criterion \
+            --github-actions "${{ secrets.GITHUB_TOKEN }}" \
+            "cargo bench --manifest-path benches/Cargo.toml --bench historic_scanning"
+
+  # Run latest events benchmarks
+  benchmark_latest:
+    name: Run Latest Events Benchmarks
+    runs-on: ubuntu-latest
+    # Run on push to main, or when manually selecting 'all' or 'latest_events_scanning'
+    if: ${{ github.event_name == 'push' || inputs.benchmark == 'all' || inputs.benchmark == 'latest_events_scanning' }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9 # v2.14.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+
+      - name: Install Foundry (Anvil)
+        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+
+      - name: Install Bencher CLI
+        uses: bencherdev/bencher@8151077aa7b1bceaac11c4b308265417cae60e2b # v0.5.10
+
+      - name: Decompress benchmark state dumps
+        run: |
+          echo "Decompressing Anvil state dumps..."
+          gunzip -k benches/dumps/*.json.gz
+          ls -lh benches/dumps/
+
+      - name: Run latest events benchmarks and track with Bencher
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+        run: |
+          bencher run \
+            --project "$BENCHER_PROJECT" \
+            --token "$BENCHER_API_TOKEN" \
+            --branch main \
+            --testbed ubuntu-latest \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-max-sample-size 64 \
+            --threshold-upper-boundary 0.99 \
+            --thresholds-reset \
+            --adapter rust_criterion \
+            --github-actions "${{ secrets.GITHUB_TOKEN }}" \
+            "cargo bench --manifest-path benches/Cargo.toml --bench latest_events_scanning"

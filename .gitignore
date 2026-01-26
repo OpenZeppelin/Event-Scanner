@@ -1,3 +1,7 @@
 /target
 /examples/**/target
 .DS_Store
+
+# Benchmark dumps - only commit compressed files
+benches/dumps/*.json
+!benches/dumps/*.metadata.json
