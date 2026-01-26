@@ -72,6 +72,7 @@ fn historic_scanning_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("historic_scanning");
 
     group.warm_up_time(std::time::Duration::from_secs(5));
+    group.measurement_time(std::time::Duration::from_secs(60));
 
     // Load environment from pre-generated dump (100k events)
     println!("Loading benchmark environment from dump file...");
