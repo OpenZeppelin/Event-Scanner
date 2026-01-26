@@ -64,7 +64,6 @@ name = "latest_events_scanning"
 harness = false
 required-features = ["bench-utils"]
 
-# uncomment only when new dumps need to be generated, see CONTRIBUTING.md
 [[bin]]
 name = "generate_dump"
 path = "src/bin/generate_dump.rs"
