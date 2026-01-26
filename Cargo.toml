@@ -23,9 +23,8 @@ exclude = [
     ".cargo/",
     "benches/",
     "tests/",
-    "src/bin/generate_dump.rs",
+    "bin/generate_dump.rs",
 ]
-autobins = true
 
 [dependencies]
 alloy = "1.1.2"
@@ -66,7 +65,7 @@ required-features = ["bench-utils"]
 
 [[bin]]
 name = "generate_dump"
-path = "src/bin/generate_dump.rs"
+path = "bin/generate_dump.rs"
 required-features = ["bench-utils"]
 
 [features]

@@ -199,7 +199,7 @@ Key implementation details, trade-offs, and alternatives considered.
 
 Benchmark dumps are pre-generated Anvil state files with events, stored in `benches/dumps/`. They allow benchmarks to run without regenerating events each time.
 
-**The `src/bin/generate_dump.rs` binary is not autodetected by `cargo`** to avoid requiring `node-bindings` in production dependencies. To generate new dumps run the generator:
+To generate new dumps run the generator:
 
 ```bash
 cargo run --release --bin generate_dump --features bench-utils -- \
