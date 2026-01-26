@@ -1,7 +1,7 @@
 {
   "event_count": 100000,
   "contract_address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
-  "block_number": 4139,
-  "generation_time_secs": 41.419269874,
+  "block_number": 4073,
+  "generation_time_secs": 40.748213375,
   "anvil_version": "anvil 0.2.0 (c13d42e 2024-11-19T00:21:45.718659032Z)"
 }
