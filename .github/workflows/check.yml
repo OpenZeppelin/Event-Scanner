@@ -13,7 +13,15 @@ permissions:
 on:
   push:
     branches: [main, release-v*]
+    paths-ignore:
+      - "**.md"
+      - ".vscode"
+      - ".cargo"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - ".vscode"
+      - ".cargo"
 # If new code is pushed to a PR branch, then cancel in progress workflows for
 # that PR. Ensures that we don't waste CI time, and returns results quicker.
 # https://github.com/jonhoo/rust-ci-conf/pull/5
