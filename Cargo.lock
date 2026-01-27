@@ -44,6 +44,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-network",
+ "alloy-node-bindings",
  "alloy-provider",
  "alloy-pubsub",
  "alloy-rpc-client",
@@ -380,6 +381,7 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-network",
  "alloy-network-primitives",
+ "alloy-node-bindings",
  "alloy-primitives",
  "alloy-pubsub",
  "alloy-rpc-client",
@@ -1875,10 +1877,13 @@ name = "event-scanner"
 version = "1.0.0"
 dependencies = [
  "alloy",
- "alloy-node-bindings",
  "anyhow",
+ "criterion",
+ "flate2",
  "futures",
  "robust-provider",
+ "serde",
+ "serde_json",
  "test-log",
  "thiserror",
  "tokio",
@@ -1886,24 +1891,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "event-scanner-benches"
-version = "1.0.0"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "criterion",
- "event-scanner",
- "flate2",
- "futures",
- "robust-provider",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -2222,21 +2209,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fda06d18ac606267c40c04e41b9947729bf8b9efe74bd4e82b61a5f26a510b9f"
 dependencies = [
  "arrayvec",
-]
-
-[[package]]
-name = "historical_scanning"
-version = "1.0.0"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "event-scanner",
- "robust-provider",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2638,21 +2610,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "latest_events_scanning"
-version = "1.0.0"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "event-scanner",
- "robust-provider",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2681,21 +2638,6 @@ name = "litemap"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
-
-[[package]]
-name = "live_scanning"
-version = "1.0.0"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "event-scanner",
- "robust-provider",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "lock_api"
@@ -4006,36 +3948,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
-]
-
-[[package]]
-name = "sync_from_block_scanning"
-version = "0.1.0"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "event-scanner",
- "robust-provider",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "sync_from_latest_scanning"
-version = "1.0.0"
-dependencies = [
- "alloy",
- "alloy-node-bindings",
- "anyhow",
- "event-scanner",
- "robust-provider",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

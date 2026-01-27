@@ -284,13 +284,13 @@ Notes:
 Run an example with:
 
 ```bash
-RUST_LOG=info cargo run -p live_scanning
+RUST_LOG=info cargo run --example live_scanning
 ```
 
 To also enable `event-scanner` internal logs in the examples:
 
 ```bash
-RUST_LOG=event_scanner=debug cargo run -p live_scanning --features event-scanner/tracing
+RUST_LOG=event_scanner=debug cargo run --example live_scanning --features tracing
 ```
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
@@ -305,8 +305,10 @@ If you run into issues when using a different node/provider, please report them 
 
 Integration tests cover all modes:
 
-Note: Tests are exercised against a local Foundry `anvil` instance.
+Note: Tests are exercised against a local Foundry [anvil][anvil] instance.
 
 ```bash
 cargo nextest run --features test-utils
 ```
+
+[anvil]: https://github.com/foundry-rs/foundry?tab=readme-ov-file#anvil

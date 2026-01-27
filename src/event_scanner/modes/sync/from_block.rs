@@ -122,11 +122,11 @@ mod tests {
     use alloy::{
         eips::BlockNumberOrTag,
         network::Ethereum,
+        node_bindings::Anvil,
         primitives::keccak256,
         providers::{Provider, ProviderBuilder, RootProvider, ext::AnvilApi, mock::Asserter},
         rpc::client::RpcClient,
     };
-    use alloy_node_bindings::Anvil;
 
     use crate::{
         block_range_scanner::{

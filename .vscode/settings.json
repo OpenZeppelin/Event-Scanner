@@ -1,4 +1,4 @@
 {
-  "rust-analyzer.cargo.features": ["test-utils"],
+  "rust-analyzer.cargo.features": ["test-utils", "bench-utils"],
   "rust-analyzer.rustfmt.extraArgs": ["+nightly"]
 }
