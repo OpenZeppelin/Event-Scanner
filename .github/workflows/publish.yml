@@ -51,7 +51,7 @@ jobs:
           fi
 
       - name: Check event-scanner
-        run: cargo publish -p event-scanner --locked --dry-run
+        run: cargo publish --locked --dry-run
 
       # cargo automatically picks up CARGO_REGISTRY_TOKEN from environment variables
       - name: Publish event-scanner
@@ -62,4 +62,4 @@ jobs:
             echo "CARGO_REGISTRY_TOKEN is not set in repository secrets" >&2
             exit 1
           fi
-          cargo publish -p event-scanner --locked
+          cargo publish --locked

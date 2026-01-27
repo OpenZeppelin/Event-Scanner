@@ -1,10 +1,10 @@
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
     network::Ethereum,
+    node_bindings::AnvilInstance,
     providers::{Provider, RootProvider},
     sol_types::SolEvent,
 };
-use alloy_node_bindings::AnvilInstance;
 use event_scanner::{
     EventFilter, EventScanner, EventScannerBuilder, EventSubscription, Historic, LatestEvents,
     Live, SyncFromBlock, SyncFromLatestEvents,

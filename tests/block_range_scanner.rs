@@ -1,9 +1,9 @@
 use alloy::{
     eips::BlockNumberOrTag,
+    node_bindings::Anvil,
     providers::{Provider, ProviderBuilder, ext::AnvilApi},
     rpc::types::anvil::ReorgOptions,
 };
-use alloy_node_bindings::Anvil;
 use event_scanner::{
     BlockRangeScannerBuilder, Notification, ScannerError, assert_closed, assert_empty, assert_next,
     assert_range_coverage,

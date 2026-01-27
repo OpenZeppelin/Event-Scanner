@@ -5,9 +5,23 @@ permissions:
 
 on:
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - ".vscode"
+      - ".cargo"
+      - "benches/**"
+      - "examples/**"
+      - "src/bin/generate_dump.rs"
   merge_group:
   push:
-    branches: [main]
+    branches: [main, release-v*]
+    paths-ignore:
+      - "**.md"
+      - ".vscode"
+      - ".cargo"
+      - "benches/**"
+      - "examples/**"
+      - "src/bin/generate_dump.rs"
 
 env:
   CARGO_TERM_COLOR: always
@@ -50,7 +64,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Cargo test
-        run: cargo nextest run --locked --all-targets --all-features --no-tests=pass --no-fail-fast
+        run: cargo nextest run --locked --bins --lib --tests --all-features --no-tests=pass --no-fail-fast
 
         # https://github.com/rust-lang/cargo/issues/6669
       - name: Run doc tests
