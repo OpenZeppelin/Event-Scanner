@@ -11,7 +11,6 @@ use crate::{
 };
 use alloy::{
     consensus::BlockHeader,
-    eips::BlockNumberOrTag,
     network::{BlockResponse, Network},
     primitives::BlockNumber,
 };
@@ -383,81 +382,6 @@ struct LiveStreamingState<N: Network> {
     batch_start: BlockNumber,
     /// The last block from the previous batch (used for reorg detection)
     previous_batch_end: Option<N::BlockResponse>,
-}
-
-#[must_use]
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
-)]
-pub(crate) async fn stream_historical_range<N: Network, R: ReorgHandler<N>>(
-    start: BlockNumber,
-    end: BlockNumber,
-    max_block_range: u64,
-    sender: &mpsc::Sender<BlockScannerResult>,
-    provider: &RobustProvider<N>,
-    reorg_handler: &mut R,
-) -> Option<()> {
-    // NOTE: Edge case - If the chain is too young to expose finalized blocks (height < finalized
-    // depth) just use zero.
-    // Since we use the finalized block number only to determine whether to run reorg checks
-    // or not, this is a "low-stakes" RPC call, for which, for simplicity, we can default to `0`
-    // even on errors. Here `0` is used because it effectively just enables reorg checks.
-    // If there was actually a provider problem, any subsequent provider call will catch and
-    // properly log it and return the error to the caller.
-    let finalized_block_num =
-        provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
-
-    // no reorg check for finalized blocks
-    let finalized_batch_end = finalized_block_num.min(end);
-    let finalized_range_count =
-        RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
-    trace!(
-        start = start,
-        finalized_batch_end = finalized_batch_end,
-        batch_count = finalized_range_count,
-        "Streaming finalized blocks (no reorg check)"
-    );
-
-    for range in RangeIterator::forward(start, finalized_batch_end, max_block_range) {
-        trace!(range_start = *range.start(), range_end = *range.end(), "Streaming finalized range");
-        if sender.try_stream(range).await.is_closed() {
-            return None; // channel closed
-        }
-    }
-
-    // If start > finalized_batch_end, the loop above was empty and we should
-    // continue from start. Otherwise, continue from after finalized_batch_end.
-    let batch_start = start.max(finalized_batch_end + 1);
-
-    // covers case when `end <= finalized`
-    if batch_start > end {
-        return Some(()); // we're done
-    }
-
-    // we have non-finalized block numbers to stream, a reorg can occur
-
-    // Possible minimal common ancestors when a reorg occurs:
-    // * start > finalized -> the common ancestor we care about is the block before `start`, that's
-    //   where the stream should restart -> this is why we used `start - 1`
-    // * start == finalized -> `start` should never be re-streamed on reorgs; stream should restart
-    //   on `start + 1`
-    // * start < finalized -> if we got here, then `end > finalized`; on reorg, we should only
-    //   re-stream non-finalized blocks
-    let min_common_ancestor = (start.saturating_sub(1)).max(finalized_block_num);
-
-    stream_range_with_reorg_handling(
-        min_common_ancestor,
-        batch_start,
-        end,
-        max_block_range,
-        sender,
-        provider,
-        reorg_handler,
-    )
-    .await?;
-
-    Some(())
 }
 
 /// Assumes that `min_common_ancestor <= next_start_block <= end`, performs no internal checks.
