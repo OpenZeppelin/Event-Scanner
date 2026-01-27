@@ -6,7 +6,7 @@ use crate::{
     Notification, ScannerError,
     block_range_scanner::{
         common::{self, BlockScannerResult},
-        reorg_handler::ReorgHandler,
+        reorg_handler::{DefaultReorgHandler, ReorgHandler},
         ring_buffer::RingBufferCapacity,
     },
     types::TryStream,
@@ -18,7 +18,7 @@ pub(crate) struct SyncHandler<N: Network> {
     start_id: BlockId,
     block_confirmations: u64,
     sender: mpsc::Sender<BlockScannerResult>,
-    reorg_handler: ReorgHandler<N>,
+    reorg_handler: DefaultReorgHandler<N>,
 }
 
 impl<N: Network> SyncHandler<N> {
@@ -30,7 +30,8 @@ impl<N: Network> SyncHandler<N> {
         past_blocks_storage_capacity: RingBufferCapacity,
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Self {
-        let reorg_handler = ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
+        let reorg_handler =
+            DefaultReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
         Self { provider, max_block_range, start_id, block_confirmations, sender, reorg_handler }
     }
 
@@ -147,14 +148,14 @@ impl<N: Network> SyncHandler<N> {
 
     /// Catches up on historical blocks until we reach the chain tip
     /// Returns the block number where live streaming should begin
-    async fn catchup_historical_blocks(
+    async fn catchup_historical_blocks<R: ReorgHandler<N>>(
         mut start_block: BlockNumber,
         mut confirmed_tip: BlockNumber,
         block_confirmations: u64,
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-        reorg_handler: &mut ReorgHandler<N>,
+        reorg_handler: &mut R,
     ) -> Result<Option<BlockNumber>, ScannerError> {
         while start_block < confirmed_tip {
             if common::stream_historical_range(
@@ -181,13 +182,13 @@ impl<N: Network> SyncHandler<N> {
     }
 
     /// Subscribes to live blocks and begins streaming
-    async fn transition_to_live(
+    async fn transition_to_live<R: ReorgHandler<N>>(
         start_block: BlockNumber,
         block_confirmations: u64,
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-        reorg_handler: &mut ReorgHandler<N>,
+        reorg_handler: &mut R,
     ) {
         let subscription = match provider.subscribe_blocks().await {
             Ok(sub) => sub,

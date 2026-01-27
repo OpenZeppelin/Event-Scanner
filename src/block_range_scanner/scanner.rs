@@ -87,7 +87,7 @@ use crate::{
     block_range_scanner::{
         RingBufferCapacity,
         common::{self, BlockScannerResult},
-        reorg_handler::ReorgHandler,
+        reorg_handler::DefaultReorgHandler,
         rewind_handler::RewindHandler,
         sync_handler::SyncHandler,
     },
@@ -178,7 +178,7 @@ impl<N: Network> BlockRangeScanner<N> {
 
         tokio::spawn(async move {
             let mut reorg_handler =
-                ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
+                DefaultReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
             common::stream_live_blocks(
                 start_block,
@@ -246,7 +246,7 @@ impl<N: Network> BlockRangeScanner<N> {
 
         tokio::spawn(async move {
             let mut reorg_handler =
-                ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
+                DefaultReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
 
             _ = common::stream_historical_range(
                 start_block_num,

@@ -12,7 +12,9 @@ use robust_provider::RobustProvider;
 use crate::{
     Notification, ScannerError,
     block_range_scanner::{
-        common::BlockScannerResult, range_iterator::RangeIterator, reorg_handler::ReorgHandler,
+        common::BlockScannerResult,
+        range_iterator::RangeIterator,
+        reorg_handler::{DefaultReorgHandler, ReorgHandler},
         ring_buffer::RingBufferCapacity,
     },
     types::{ChannelState, TryStream},
@@ -24,7 +26,7 @@ pub(crate) struct RewindHandler<N: Network> {
     start_id: BlockId,
     end_id: BlockId,
     sender: mpsc::Sender<BlockScannerResult>,
-    reorg_handler: ReorgHandler<N>,
+    reorg_handler: DefaultReorgHandler<N>,
 }
 
 impl<N: Network> RewindHandler<N> {
@@ -36,7 +38,8 @@ impl<N: Network> RewindHandler<N> {
         past_blocks_storage_capacity: RingBufferCapacity,
         sender: mpsc::Sender<BlockScannerResult>,
     ) -> Self {
-        let reorg_handler = ReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
+        let reorg_handler =
+            DefaultReorgHandler::new(provider.clone(), past_blocks_storage_capacity);
         Self { provider, max_block_range, start_id, end_id, sender, reorg_handler }
     }
 
@@ -89,13 +92,13 @@ impl<N: Network> RewindHandler<N> {
         feature = "tracing",
         tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
     )]
-    async fn handle_stream_rewind(
+    async fn handle_stream_rewind<R: ReorgHandler<N>>(
         from: N::BlockResponse,
         to: N::BlockResponse,
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-        reorg_handler: &mut ReorgHandler<N>,
+        reorg_handler: &mut R,
     ) {
         // for checking whether reorg occurred
         let mut tip = from;
