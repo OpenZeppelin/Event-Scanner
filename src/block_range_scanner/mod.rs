@@ -9,6 +9,7 @@ mod sync_handler;
 
 pub use builder::BlockRangeScannerBuilder;
 pub use common::BlockScannerResult;
+pub use reorg_handler::ReorgHandler;
 pub use ring_buffer::RingBufferCapacity;
 pub use scanner::BlockRangeScanner;
 

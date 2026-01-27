@@ -54,14 +54,14 @@ impl IntoScannerResult<RangeInclusive<BlockNumber>> for RangeInclusive<BlockNumb
     feature = "tracing",
     tracing::instrument(level = "trace", skip(subscription, sender, provider, reorg_handler))
 )]
-pub(crate) async fn stream_live_blocks<N: Network>(
+pub(crate) async fn stream_live_blocks<N: Network, R: ReorgHandler<N>>(
     stream_start: BlockNumber,
     subscription: RobustSubscription<N>,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
     block_confirmations: u64,
     max_block_range: u64,
-    reorg_handler: &mut ReorgHandler<N>,
+    reorg_handler: &mut R,
     notify_after_first_block: bool,
 ) {
     // Phase 1: Wait for first relevant block
@@ -169,14 +169,14 @@ fn skip_to_first_relevant_block<N: Network>(
 
 /// Initializes the streaming state after receiving the first block.
 /// Returns None if the channel is closed.
-async fn initialize_live_streaming_state<N: Network>(
+async fn initialize_live_streaming_state<N: Network, R: ReorgHandler<N>>(
     first_block: N::HeaderResponse,
     stream_start: BlockNumber,
     block_confirmations: u64,
     max_block_range: u64,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
-    reorg_handler: &mut ReorgHandler<N>,
+    reorg_handler: &mut R,
 ) -> Option<LiveStreamingState<N>> {
     let confirmed = first_block.number().saturating_sub(block_confirmations);
 
@@ -206,6 +206,7 @@ async fn initialize_live_streaming_state<N: Network>(
 async fn stream_blocks_continuously<
     N: Network,
     S: tokio_stream::Stream<Item = Result<N::HeaderResponse, subscription::Error>> + Unpin,
+    R: ReorgHandler<N>,
 >(
     stream: &mut S,
     state: &mut LiveStreamingState<N>,
@@ -214,7 +215,7 @@ async fn stream_blocks_continuously<
     max_block_range: u64,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
-    reorg_handler: &mut ReorgHandler<N>,
+    reorg_handler: &mut R,
 ) {
     while let Some(incoming_block) = stream.next().await {
         let incoming_block = match incoming_block {
@@ -337,14 +338,14 @@ async fn handle_reorg_detected<N: Network>(
 
 /// Streams the next batch of blocks up to `batch_end_num`.
 /// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
-async fn stream_next_batch<N: Network>(
+async fn stream_next_batch<N: Network, R: ReorgHandler<N>>(
     batch_end_num: BlockNumber,
     state: &mut LiveStreamingState<N>,
     stream_start: BlockNumber,
     max_block_range: u64,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
-    reorg_handler: &mut ReorgHandler<N>,
+    reorg_handler: &mut R,
 ) -> ChannelState {
     if batch_end_num < state.batch_start {
         // No new confirmed blocks to stream yet
@@ -389,13 +390,13 @@ struct LiveStreamingState<N: Network> {
     feature = "tracing",
     tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
 )]
-pub(crate) async fn stream_historical_range<N: Network>(
+pub(crate) async fn stream_historical_range<N: Network, R: ReorgHandler<N>>(
     start: BlockNumber,
     end: BlockNumber,
     max_block_range: u64,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
-    reorg_handler: &mut ReorgHandler<N>,
+    reorg_handler: &mut R,
 ) -> Option<()> {
     // NOTE: Edge case - If the chain is too young to expose finalized blocks (height < finalized
     // depth) just use zero.
@@ -464,14 +465,14 @@ pub(crate) async fn stream_historical_range<N: Network>(
     feature = "tracing",
     tracing::instrument(level = "trace", skip(sender, provider, reorg_handler))
 )]
-pub(crate) async fn stream_range_with_reorg_handling<N: Network>(
+pub(crate) async fn stream_range_with_reorg_handling<N: Network, R: ReorgHandler<N>>(
     min_common_ancestor: BlockNumber,
     next_start_block: BlockNumber,
     end: BlockNumber,
     max_block_range: u64,
     sender: &mpsc::Sender<BlockScannerResult>,
     provider: &RobustProvider<N>,
-    reorg_handler: &mut ReorgHandler<N>,
+    reorg_handler: &mut R,
 ) -> Option<N::BlockResponse> {
     let mut last_batch_end: Option<N::BlockResponse> = None;
     let mut iter = RangeIterator::forward(next_start_block, end, max_block_range);
