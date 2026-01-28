@@ -448,15 +448,6 @@ pub(crate) async fn stream_historical_range<N: Network>(
 
     loop {
         // Stream all non-finalized ranges without intermediate reorg checks
-        let non_finalized_range_count =
-            RangeIterator::forward(non_finalized_start, end, max_block_range).count();
-        trace!(
-            non_finalized_start = non_finalized_start,
-            end = end,
-            batch_count = non_finalized_range_count,
-            "Streaming non-finalized blocks (deferred reorg check)"
-        );
-
         for range in RangeIterator::forward(non_finalized_start, end, max_block_range) {
             trace!(
                 range_start = *range.start(),
