@@ -147,7 +147,7 @@ impl<N: Network> SyncHandler<N> {
 
     /// Catches up on historical blocks until we reach the chain tip
     /// Returns the block number where live streaming should begin
-    async fn catchup_historical_blocks<R: ReorgHandler<N>>(
+    async fn catchup_historical_blocks(
         mut start_block: BlockNumber,
         mut confirmed_tip: BlockNumber,
         block_confirmations: u64,
