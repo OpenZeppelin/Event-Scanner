@@ -9,17 +9,34 @@ use robust_provider::RobustProvider;
 use super::ring_buffer::RingBuffer;
 use crate::{ScannerError, block_range_scanner::ring_buffer::RingBufferCapacity};
 
+/// Trait for handling chain reorganizations.
+#[allow(async_fn_in_trait)]
+pub trait ReorgHandler<N: Network> {
+    /// Checks if a block was reorged and returns the common ancestor if found.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - The block to check for reorg.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(common_ancestor))` - If a reorg was detected, returns the common ancestor block.
+    /// * `Ok(None)` - If no reorg was detected, returns `None`.
+    /// * `Err(e)` - If an error occurred while checking for reorg.
+    async fn check(
+        &mut self,
+        block: &N::BlockResponse,
+    ) -> Result<Option<N::BlockResponse>, ScannerError>;
+}
+
+/// Default implementation of [`ReorgHandler`] that uses an RPC provider.
 #[derive(Clone, Debug)]
-pub(crate) struct ReorgHandler<N: Network = Ethereum> {
+pub(crate) struct DefaultReorgHandler<N: Network = Ethereum> {
     provider: RobustProvider<N>,
     buffer: RingBuffer<BlockHash>,
 }
 
-impl<N: Network> ReorgHandler<N> {
-    pub fn new(provider: RobustProvider<N>, capacity: RingBufferCapacity) -> Self {
-        Self { provider, buffer: RingBuffer::new(capacity) }
-    }
-
+impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
     /// Checks if a block was reorged and returns the common ancestor if found.
     ///
     /// # Arguments
@@ -57,7 +74,7 @@ impl<N: Network> ReorgHandler<N> {
         feature = "tracing",
         tracing::instrument(level = "trace", fields(block.hash = %block.header().hash(), block.number = block.header().number()))
     )]
-    pub async fn check(
+    async fn check(
         &mut self,
         block: &N::BlockResponse,
     ) -> Result<Option<N::BlockResponse>, ScannerError> {
@@ -113,6 +130,12 @@ impl<N: Network> ReorgHandler<N> {
         let finalized = self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
 
         Ok(Some(finalized))
+    }
+}
+
+impl<N: Network> DefaultReorgHandler<N> {
+    pub fn new(provider: RobustProvider<N>, capacity: RingBufferCapacity) -> Self {
+        Self { provider, buffer: RingBuffer::new(capacity) }
     }
 
     async fn reorg_detected(&self, block: &N::HeaderResponse) -> Result<bool, ScannerError> {
