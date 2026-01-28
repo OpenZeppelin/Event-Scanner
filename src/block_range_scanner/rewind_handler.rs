@@ -62,12 +62,10 @@ impl<N: Network> RewindHandler<N> {
             _ => (end_block, start_block),
         };
 
-        let from_num = from.header().number();
-        let to_num = to.header().number();
         info!(
-            from_block = from_num,
-            to_block = to_num,
-            total_blocks = from_num.saturating_sub(to_num) + 1,
+            from_block = from.header().number(),
+            to_block = to.header().number(),
+            total_blocks = from.header().number().saturating_sub(to.header().number()) + 1,
             "Starting rewind stream"
         );
 

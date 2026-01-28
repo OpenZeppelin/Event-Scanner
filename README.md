@@ -284,14 +284,10 @@ Notes:
 Run an example with:
 
 ```bash
-RUST_LOG=info cargo run --example live_scanning
+RUST_LOG=info cargo run --example live_scanning --features example
 ```
 
-To also enable `event-scanner` internal logs in the examples:
-
-```bash
-RUST_LOG=event_scanner=debug cargo run --example live_scanning --features tracing
-```
+This will also enable `event-scanner` internal logs in the example.
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
 

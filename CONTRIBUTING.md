@@ -71,9 +71,9 @@ cargo test --features test-utils
 Run examples:
 
 ```bash
-RUST_LOG=info cargo run --example live_scanning
+RUST_LOG=info cargo run --example live_scanningu --features example
 # or
-RUST_LOG=info cargo run --example historical_scanning
+RUST_LOG=info cargo run --example historical_scanning --features example
 ```
 
 Logging / observability notes:
@@ -82,16 +82,16 @@ Logging / observability notes:
 - If the feature is disabled, internal logging calls compile to **no-ops**.
 - Examples install a `tracing_subscriber` and read filters from `RUST_LOG`.
 
-Enable internal logs when running an example:
+When running an example with internal logging, simply enable the `example` feature:
 
 ```bash
-RUST_LOG=event_scanner=debug cargo run --example historical_scanning --features tracing
+RUST_LOG=event_scanner=debug cargo run --example historical_scanning --features example
 ```
 
 You can also combine filters to keep other dependencies quiet:
 
 ```bash
-RUST_LOG=warn,event_scanner=info cargo run --example historical_scanning --features tracing
+RUST_LOG=warn,event_scanner=info cargo run --example historical_scanning --features example
 ```
 
 Note: Examples start a local `anvil` instance and deploy a demo contract. If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.

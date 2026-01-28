@@ -68,6 +68,31 @@ name = "generate_dump"
 path = "bin/generate_dump.rs"
 required-features = ["bench-utils"]
 
+[[example]]
+name = "historical_scanning"
+path = "examples/historical_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "latest_events_scanning"
+path = "examples/latest_events_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "live_scanning"
+path = "examples/live_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "sync_from_block_scanning"
+path = "examples/sync_from_block_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "sync_from_latest_scanning"
+path = "examples/sync_from_latest_scanning.rs"
+required-features = ["example"]
+
 [features]
 test-utils = ["dep:anyhow"]
 tracing = ["dep:tracing"]
@@ -79,6 +104,7 @@ bench-utils = [
     "dep:tracing",
     "alloy/node-bindings",
 ]
+example = ["tracing", "dep:anyhow"]
 
 [profile.release]
 lto = "thin"
