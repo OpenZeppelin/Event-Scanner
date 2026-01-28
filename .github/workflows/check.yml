@@ -156,4 +156,4 @@ jobs:
       # intentionally no target specifier; see https://github.com/jonhoo/rust-ci-conf/pull/4
       # --feature-powerset runs for every combination of features
       - name: cargo hack
-        run: cargo hack --feature-powerset check
+        run: cargo hack --feature-powerset --no-dev-deps check
