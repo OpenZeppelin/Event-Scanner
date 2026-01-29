@@ -87,6 +87,7 @@ use crate::{
     block_range_scanner::{
         RingBufferCapacity,
         common::{self, BlockScannerResult},
+        historical_range_handler::HistoricalRangeHandler,
         reorg_handler::DefaultReorgHandler,
         rewind_handler::RewindHandler,
         sync_handler::SyncHandler,
@@ -242,18 +243,14 @@ impl<N: Network> BlockRangeScanner<N> {
             "Starting historical block stream"
         );
 
-        tokio::spawn(async move {
-            _ = common::stream_historical_range(
-                start_block_num,
-                end_block_num,
-                max_block_range,
-                &blocks_sender,
-                &provider,
-            )
-            .await;
-
-            debug!("Historical block stream completed");
-        });
+        let handler = HistoricalRangeHandler::new(
+            provider,
+            max_block_range,
+            start_block_num,
+            end_block_num,
+            blocks_sender,
+        );
+        handler.run();
 
         Ok(ReceiverStream::new(blocks_receiver))
     }

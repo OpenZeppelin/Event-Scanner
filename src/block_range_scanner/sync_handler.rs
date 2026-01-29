@@ -6,6 +6,7 @@ use crate::{
     Notification, ScannerError,
     block_range_scanner::{
         common::{self, BlockScannerResult},
+        historical_range_handler::HistoricalRangeHandler,
         reorg_handler::{DefaultReorgHandler, ReorgHandler},
         ring_buffer::RingBufferCapacity,
     },
@@ -156,7 +157,7 @@ impl<N: Network> SyncHandler<N> {
         provider: &RobustProvider<N>,
     ) -> Result<Option<BlockNumber>, ScannerError> {
         while start_block < confirmed_tip {
-            if common::stream_historical_range(
+            if HistoricalRangeHandler::stream_historical_range(
                 start_block,
                 confirmed_tip,
                 max_block_range,
