@@ -27,18 +27,18 @@ exclude = [
 ]
 
 [dependencies]
-alloy = "1.1.2"
-tokio = { version = "1.48", features = ["full"] }
-futures = "0.3.31"
-anyhow = "1.0"
+alloy = { version = "1.1.2", default-features = false }
+tokio = "1.48"
+futures = { version = "0.3.31", default-features = false }
 thiserror = "2.0.17"
-tokio-stream = "0.1.17"
-tracing = "0.1"
+tokio-stream = { version = "0.1.17", default-features = false }
 robust-provider = "0.2.0"
-tokio-util = "0.7.17"
+
+anyhow = { version = "1.0", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 flate2 = { version = "1.1", optional = true }
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 alloy = { version = "1.1.2", features = ["node-bindings"] }
@@ -68,15 +68,43 @@ name = "generate_dump"
 path = "bin/generate_dump.rs"
 required-features = ["bench-utils"]
 
+[[example]]
+name = "historical_scanning"
+path = "examples/historical_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "latest_events_scanning"
+path = "examples/latest_events_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "live_scanning"
+path = "examples/live_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "sync_from_block_scanning"
+path = "examples/sync_from_block_scanning.rs"
+required-features = ["example"]
+
+[[example]]
+name = "sync_from_latest_scanning"
+path = "examples/sync_from_latest_scanning.rs"
+required-features = ["example"]
+
 [features]
-test-utils = []
-tracing = []
+test-utils = ["dep:anyhow"]
+tracing = ["dep:tracing"]
 bench-utils = [
+    "dep:anyhow",
     "dep:serde",
     "dep:serde_json",
     "dep:flate2",
+    "dep:tracing",
     "alloy/node-bindings",
 ]
+example = ["tracing", "dep:anyhow"]
 
 [profile.release]
 lto = "thin"

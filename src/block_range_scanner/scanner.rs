@@ -235,11 +235,10 @@ impl<N: Network> BlockRangeScanner<N> {
             _ => (start_block_num, end_block_num),
         };
 
-        let total_blocks = end_block_num.saturating_sub(start_block_num) + 1;
         debug!(
             from_block = start_block_num,
             to_block = end_block_num,
-            total_blocks = total_blocks,
+            total_blocks = end_block_num.saturating_sub(start_block_num) + 1,
             max_block_range = max_block_range,
             "Starting historical block stream"
         );
