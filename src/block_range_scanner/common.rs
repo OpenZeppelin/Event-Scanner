@@ -407,12 +407,10 @@ pub(crate) async fn stream_historical_range<N: Network>(
 
     // Phase 1: Stream all finalized blocks without any reorg checks
     let finalized_batch_end = finalized_block_num.min(end);
-    let finalized_range_count =
-        RangeIterator::forward(start, finalized_batch_end, max_block_range).count();
     trace!(
         start = start,
         finalized_batch_end = finalized_batch_end,
-        batch_count = finalized_range_count,
+        batch_count = RangeIterator::forward(start, finalized_batch_end, max_block_range).count(),
         "Streaming finalized blocks (no reorg check)"
     );
 

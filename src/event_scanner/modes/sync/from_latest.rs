@@ -113,7 +113,7 @@ impl<N: Network> EventScanner<SyncFromLatestEvents, N> {
             self.block_range_scanner.provider().clone(),
             listeners.clone(),
             self.config.max_concurrent_fetches,
-            self.config.count,
+            count,
             broadcast_channel_capacity,
         );
         let stream_handler = StreamHandler::new(
