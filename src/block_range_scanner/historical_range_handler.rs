@@ -200,26 +200,6 @@ impl<N: Network> HistoricalRangeHandler<N> {
             return None;
         }
 
-        // Check if finalized has advanced past end
-        let current_finalized =
-            match provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await {
-                Ok(block) => block,
-                Err(e) => {
-                    error!("Failed to get updated finalized block");
-                    _ = sender.try_stream(e).await;
-                    return None;
-                }
-            };
-
-        if current_finalized >= end {
-            debug!(
-                finalized = current_finalized,
-                end = end,
-                "End block is now finalized, historical sync completed"
-            );
-            return None;
-        }
-
         Some(current_hash)
     }
 }
