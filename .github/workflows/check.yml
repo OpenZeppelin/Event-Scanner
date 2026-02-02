@@ -43,7 +43,7 @@ jobs:
           egress-policy: audit
 
       - name: Fetch Repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
@@ -62,7 +62,7 @@ jobs:
           egress-policy: audit
 
       - name: Fetch Repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
@@ -84,7 +84,7 @@ jobs:
           egress-policy: audit
 
       - name: Fetch Repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
@@ -105,7 +105,7 @@ jobs:
           egress-policy: audit
 
       - name: Fetch Repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
@@ -126,10 +126,10 @@ jobs:
           egress-policy: audit
 
       - name: Fetch Repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check spelling of files in the workspace
-        uses: crate-ci/typos@65120634e79d8374d1aa2f27e54baa0c364fff5a # v1.42.1
+        uses: crate-ci/typos@06d010dfe4c84fdab1a25ea02b57b3585018ba80 # v1.42.3
         
   hack:
     # cargo-hack checks combinations of feature flags to ensure that features are all additive
@@ -143,13 +143,13 @@ jobs:
           egress-policy: audit
 
       - name: Fetch Repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
 
       - name: cargo install cargo-hack
-        uses: taiki-e/install-action@7e574ed8bb89811282a11aecb3fe1d043bf5bf0e # v2.67.15
+        uses: taiki-e/install-action@650c5ca14212efbbf3e580844b04bdccf68dac31 # v2.67.18
         with:
           tool: cargo-hack
 
