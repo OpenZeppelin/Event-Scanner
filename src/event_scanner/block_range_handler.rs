@@ -302,7 +302,7 @@ impl<N: Network> LatestEventsHandler<N> {
                                 collected =
                                     discard_logs_from_orphaned_blocks(collected, common_ancestor);
 
-                                // Don't forward the notification to the user in CollectLatest mode
+                                // Don't forward the notification to the user in this mode
                                 // since logs haven't been sent yet
                             }
                             Ok(ScannerMessage::Notification(notification)) => {
