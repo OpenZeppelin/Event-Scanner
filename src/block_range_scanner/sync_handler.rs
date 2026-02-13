@@ -165,7 +165,7 @@ impl<N: Network> SyncHandler<N> {
                 provider,
             )
             .await
-            .is_none()
+            .is_closed()
             {
                 return Ok(None);
             }

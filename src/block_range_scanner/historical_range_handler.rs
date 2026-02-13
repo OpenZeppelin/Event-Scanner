@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use crate::{
     Notification,
     block_range_scanner::{common::BlockScannerResult, range_iterator::RangeIterator},
-    types::TryStream,
+    types::{ChannelState, TryStream},
 };
 
 pub(crate) struct HistoricalRangeHandler<N: Network> {
@@ -48,6 +48,8 @@ impl<N: Network> HistoricalRangeHandler<N> {
     }
 
     /// Public method for use by `sync_handler` during catchup phase.
+    ///
+    /// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
     #[must_use]
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(sender, provider)))]
     pub async fn stream_historical_range(
@@ -56,7 +58,7 @@ impl<N: Network> HistoricalRangeHandler<N> {
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-    ) -> Option<()> {
+    ) -> ChannelState {
         Self::handle_stream_historical_range(start, end, max_block_range, sender, provider).await
     }
 
@@ -67,14 +69,17 @@ impl<N: Network> HistoricalRangeHandler<N> {
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-    ) -> Option<()> {
+    ) -> ChannelState {
         // Phase 1: Stream all finalized blocks without any reorg checks
-        let non_finalized_start =
-            Self::stream_finalized_blocks(provider, start, end, max_block_range, sender).await?;
+        let Some(non_finalized_start) =
+            Self::stream_finalized_blocks(provider, start, end, max_block_range, sender).await
+        else {
+            return ChannelState::Closed;
+        };
 
         // All blocks already finalized
         if non_finalized_start > end {
-            return Some(());
+            return ChannelState::Open;
         }
 
         // Phase 2: Stream non-finalized blocks with reorg detection
@@ -123,20 +128,22 @@ impl<N: Network> HistoricalRangeHandler<N> {
 
     /// Streams non-finalized blocks with reorg detection.
     /// Re-streams if a reorg is detected, repeating until stable.
+    ///
+    /// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
     async fn stream_non_finalized_blocks(
         non_finalized_start: BlockNumber,
         end: BlockNumber,
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-    ) -> Option<()> {
+    ) -> ChannelState {
         // Get the end block's hash before streaming
         let mut end_block_hash = match provider.get_block_by_number(end.into()).await {
             Ok(block) => block.header().hash(),
             Err(e) => {
                 error!("Failed to get end block hash");
                 _ = sender.try_stream(e).await;
-                return None;
+                return ChannelState::Closed;
             }
         };
 
@@ -149,7 +156,7 @@ impl<N: Network> HistoricalRangeHandler<N> {
                     "Streaming non-finalized range"
                 );
                 if sender.try_stream(range).await.is_closed() {
-                    return None;
+                    return ChannelState::Closed;
                 }
             }
 
@@ -158,7 +165,7 @@ impl<N: Network> HistoricalRangeHandler<N> {
                 .await
             {
                 Some(new_hash) => end_block_hash = new_hash,
-                None => return Some(()),
+                None => return ChannelState::Open,
             }
         }
     }
