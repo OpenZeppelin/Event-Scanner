@@ -47,19 +47,20 @@ impl<N: Network> HistoricalRangeHandler<N> {
         });
     }
 
-    /// Public method for use by `sync_handler` during catchup phase.
+    /// Run the handler in the current task.
     ///
     /// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
     #[must_use]
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(sender, provider)))]
-    pub async fn stream_historical_range(
-        start: BlockNumber,
-        end: BlockNumber,
-        max_block_range: u64,
-        sender: &mpsc::Sender<BlockScannerResult>,
-        provider: &RobustProvider<N>,
-    ) -> ChannelState {
-        Self::handle_stream_historical_range(start, end, max_block_range, sender, provider).await
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
+    pub async fn run_sync(self) -> ChannelState {
+        Self::handle_stream_historical_range(
+            self.start,
+            self.end,
+            self.max_block_range,
+            &self.sender,
+            &self.provider,
+        )
+        .await
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(sender, provider)))]

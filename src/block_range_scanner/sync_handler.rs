@@ -157,16 +157,15 @@ impl<N: Network> SyncHandler<N> {
         provider: &RobustProvider<N>,
     ) -> Result<Option<BlockNumber>, ScannerError> {
         while start_block < confirmed_tip {
-            if HistoricalRangeHandler::stream_historical_range(
+            let handler = HistoricalRangeHandler::new(
+                provider.clone(),
+                max_block_range,
                 start_block,
                 confirmed_tip,
-                max_block_range,
-                sender,
-                provider,
-            )
-            .await
-            .is_closed()
-            {
+                sender.clone(),
+            );
+
+            if handler.run_sync().await.is_closed() {
                 return Ok(None);
             }
 
