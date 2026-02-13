@@ -8,9 +8,9 @@ Thanks for your interest in contributing! This guide explains how to set up your
 
 `event-scanner` is a Rust library for monitoring and streaming EVM-based smart contract events. It is built on the `alloy` ecosystem and provides in-memory scanning. See `README.md` for features, usage, examples, and testing notes.
 
-- Workspace manifest: `Cargo.toml`
+- Manifest: `Cargo.toml`
 - Library code: `src/`
-- Examples: `examples/simple_counter`, `examples/historical_scanning`
+- Examples: `examples/live_scanning`, `examples/historical_scanning` etc.
 - Integration tests: `tests/`
 - Formatting: `rustfmt.toml`
 - Toolchain pin: `rust-toolchain.toml`
@@ -28,7 +28,10 @@ Thanks for your interest in contributing! This guide explains how to set up your
   - `typos` for spell checking: `cargo install typos-cli` (or `brew install typos`)
   - A recent `rust-analyzer` for IDE support
 - Runtime/dev tools
-  - For examples and some tests, you’ll need an Ethereum dev node such as Foundry’s `anvil`
+  - For examples and some tests, you'll need an Ethereum dev node such as Foundry's [anvil][anvil]
+  - The repository is exercised against [anvil][anvil]; if you encounter issues on other nodes/providers, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues
+  
+[anvil]: https://github.com/foundry-rs/foundry?tab=readme-ov-file#anvil
 
 ---
 
@@ -51,7 +54,7 @@ Thanks for your interest in contributing! This guide explains how to set up your
    - `cargo install cargo-nextest`
    - `cargo install typos-cli`
 
-Build the workspace:
+Build the crate:
 
 ```bash
 cargo build --locked --all-targets --all-features
@@ -68,12 +71,30 @@ cargo test --features test-utils
 Run examples:
 
 ```bash
-RUST_LOG=info cargo run -p simple_counter
+RUST_LOG=info cargo run --example live_scanningu --features example
 # or
-RUST_LOG=info cargo run -p historical_scanning
+RUST_LOG=info cargo run --example historical_scanning --features example
 ```
 
-Note: Examples start a local `anvil` instance and deploy a demo contract.
+Logging / observability notes:
+
+- The library's internal logs are **compile-time opt-in** via the `tracing` feature.
+- If the feature is disabled, internal logging calls compile to **no-ops**.
+- Examples install a `tracing_subscriber` and read filters from `RUST_LOG`.
+
+When running an example with internal logging, simply enable the `example` feature:
+
+```bash
+RUST_LOG=event_scanner=debug cargo run --example historical_scanning --features example
+```
+
+You can also combine filters to keep other dependencies quiet:
+
+```bash
+RUST_LOG=warn,event_scanner=info cargo run --example historical_scanning --features example
+```
+
+Note: Examples start a local `anvil` instance and deploy a demo contract. If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.
 
 ---
 
@@ -171,6 +192,28 @@ Key implementation details, trade-offs, and alternatives considered.
 - Integration tests live under `tests/` and cover live, historical, and hybrid flows.
 - Prefer `cargo-nextest` for speed and improved output.
 - Where practical, add regression tests when fixing bugs.
+
+---
+
+## Generating Benchmark Dumps
+
+Benchmark dumps are pre-generated Anvil state files with events, stored in `benches/dumps/`. They allow benchmarks to run without regenerating events each time.
+
+To generate new dumps run the generator:
+
+```bash
+cargo run --release --bin generate_dump --features bench-utils -- \
+  --events 100000 \
+  --output benches/dumps/state_100000.json
+```
+
+**Note**: The `--features bench-utils` flag is required to enable the dependencies needed by the generator.
+
+This creates:
+- `benches/dumps/state_100000.json.gz` (compressed state dump)
+- `benches/dumps/state_100000.metadata.json` (metadata)
+
+Afterwards, if necessary, commit the generated `.json.gz` and `.metadata.json` files to the repository.
 
 ---
 

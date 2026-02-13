@@ -14,17 +14,34 @@ use crate::{
 
 use super::ring_buffer::{BlockInfo, RingBuffer};
 
-#[derive(Clone)]
-pub(crate) struct ReorgHandler<N: Network = Ethereum> {
+/// Trait for handling chain reorganizations.
+#[allow(async_fn_in_trait)]
+pub trait ReorgHandler<N: Network> {
+    /// Checks if a block was reorged and returns the common ancestor if found.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - The block to check for reorg.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(common_ancestor))` - If a reorg was detected, returns the common ancestor block.
+    /// * `Ok(None)` - If no reorg was detected, returns `None`.
+    /// * `Err(e)` - If an error occurred while checking for reorg.
+    async fn check(
+        &mut self,
+        block: &N::BlockResponse,
+    ) -> Result<Option<N::BlockResponse>, ScannerError>;
+}
+
+/// Default implementation of [`ReorgHandler`] that uses an RPC provider.
+#[derive(Clone, Debug)]
+pub(crate) struct DefaultReorgHandler<N: Network = Ethereum> {
     provider: RobustProvider<N>,
     buffer: RingBuffer<BlockInfo<BlockHash>>,
 }
 
-impl<N: Network> ReorgHandler<N> {
-    pub fn new(provider: RobustProvider<N>, capacity: RingBufferCapacity) -> Self {
-        Self { provider, buffer: RingBuffer::new(capacity) }
-    }
-
+impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
     /// Checks if a block was reorged and returns the common ancestor if found.
     ///
     /// This implementation uses a hybrid approach:
@@ -255,6 +272,12 @@ impl<N: Network> ReorgHandler<N> {
         // Chain is continuous, add the incoming block
         self.buffer.push(BlockInfo { number: block_number, hash: block_hash });
         Ok(None)
+    }
+}
+
+impl<N: Network> DefaultReorgHandler<N> {
+    pub fn new(provider: RobustProvider<N>, capacity: RingBufferCapacity) -> Self {
+        Self { provider, buffer: RingBuffer::new(capacity) }
     }
 
     /// Finds the common ancestor by walking back through the buffer and verifying

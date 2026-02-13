@@ -1,3 +1,8 @@
+//! Event filtering for blockchain log queries.
+//!
+//! This module provides [`EventFilter`] which allows specifying contract addresses and event
+//! signatures to filter logs when scanning the blockchain.
+
 use std::fmt::{Debug, Display};
 
 use alloy::{

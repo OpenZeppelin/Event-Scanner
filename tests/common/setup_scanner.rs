@@ -1,15 +1,16 @@
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
     network::Ethereum,
+    node_bindings::AnvilInstance,
     providers::{Provider, RootProvider},
     sol_types::SolEvent,
 };
-use alloy_node_bindings::AnvilInstance;
 use event_scanner::{
-    EventFilter, EventScanner, EventScannerBuilder, EventScannerResult, Historic, LatestEvents,
-    Live, SyncFromBlock, SyncFromLatestEvents, robust_provider::RobustProvider,
+    EventFilter, EventScanner, EventScannerBuilder, EventSubscription, Historic, LatestEvents,
+    Live, SyncFromBlock, SyncFromLatestEvents,
 };
-use tokio_stream::wrappers::ReceiverStream;
+
+use robust_provider::RobustProvider;
 
 use crate::common::{
     TestCounter::{self, CountIncreased},
@@ -24,7 +25,7 @@ where
     pub provider: RobustProvider<Ethereum>,
     pub contract: TestCounter::TestCounterInstance<P>,
     pub scanner: S,
-    pub stream: ReceiverStream<EventScannerResult>,
+    pub subscription: EventSubscription,
     #[allow(dead_code)]
     pub anvil: AnvilInstance,
 }
@@ -68,9 +69,9 @@ pub async fn setup_live_scanner(
         .connect(provider.clone())
         .await?;
 
-    let stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+    Ok(ScannerSetup { provider, contract, scanner, subscription, anvil })
 }
 
 pub async fn setup_sync_scanner(
@@ -87,9 +88,9 @@ pub async fn setup_sync_scanner(
         .connect(provider.clone())
         .await?;
 
-    let stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+    Ok(ScannerSetup { provider, contract, scanner, subscription, anvil })
 }
 
 pub async fn setup_sync_from_latest_scanner(
@@ -106,9 +107,9 @@ pub async fn setup_sync_from_latest_scanner(
         .connect(provider.clone())
         .await?;
 
-    let stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+    Ok(ScannerSetup { provider, contract, scanner, subscription, anvil })
 }
 
 pub async fn setup_historic_scanner(
@@ -124,9 +125,9 @@ pub async fn setup_historic_scanner(
         .connect(provider.clone())
         .await?;
 
-    let stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+    Ok(ScannerSetup { provider, contract, scanner, subscription, anvil })
 }
 
 pub async fn setup_latest_scanner(
@@ -147,7 +148,7 @@ pub async fn setup_latest_scanner(
 
     let mut scanner = builder.connect(provider.clone()).await?;
 
-    let stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    Ok(ScannerSetup { provider, contract, scanner, stream, anvil })
+    Ok(ScannerSetup { provider, contract, scanner, subscription, anvil })
 }

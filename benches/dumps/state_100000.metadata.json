@@ -1,0 +1,7 @@
+{
+  "event_count": 100000,
+  "contract_address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "block_number": 3298,
+  "generation_time_secs": 32.816945,
+  "anvil_version": "anvil Version: 1.5.1-stable\nCommit SHA: b0a9dd9ceda36f63e2326ce530c10e6916f4b8a2\nBuild Timestamp: 2025-12-22T11:41:09.812070000Z (1766403669)\nBuild Profile: maxperf"
+}

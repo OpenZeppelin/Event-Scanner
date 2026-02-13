@@ -3,9 +3,13 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://opensource.org/licenses/MIT)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner/badge)](https://api.securityscorecards.dev/projects/github.com/OpenZeppelin/Event-Scanner)
 
-> ⚠️ **WARNING: ACTIVE DEVELOPMENT** ⚠️
->
-> This project is under active development and likely contains bugs. APIs and behaviour may change without notice. Use at your own risk.
+## Node compatibility
+
+Event Scanner's test suite and examples are exercised against Foundry's `anvil` dev node.
+
+While the library is intended to work with other EVM nodes and RPC providers, behaviour may vary across implementations. If you encounter errors when using a different node/provider, please open an issue at:
+
+https://github.com/OpenZeppelin/Event-Scanner/issues
 
 ## About
 
@@ -53,14 +57,15 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "0.7.0-alpha"
+event-scanner = "1.0.0"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
 
 ```rust
-use alloy::{network::Ethereum, providers::{Provider, ProviderBuilder}, sol_types::SolEvent};
-use event_scanner::{EventFilter, EventScannerBuilder, Message, robust_provider::RobustProviderBuilder};
+use alloy::{network::Ethereum, providers::ProviderBuilder, sol_types::SolEvent};
+use event_scanner::{EventFilter, EventScannerBuilder, Message};
+use robust_provider::RobustProviderBuilder;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 
@@ -85,10 +90,13 @@ async fn run_scanner(
         .contract_address(contract)
         .event(MyContract::SomeEvent::SIGNATURE);
 
-    let mut stream = scanner.subscribe(filter);
+    let subscription = scanner.subscribe(filter);
 
-    // Start the scanner
-    scanner.start().await?;
+    // Start the scanner and get the proof
+    let proof = scanner.start().await?;
+
+    // Access the stream using the proof
+    let mut stream = subscription.stream(&proof);
 
     // Process messages from the stream
     while let Some(message) = stream.next().await {
@@ -120,13 +128,14 @@ async fn run_scanner(
 `EventScannerBuilder` provides mode-specific constructors and functions to configure settings before connecting.
 Once configured, connect using:
 
-- `connect(provider)` - Connect using a `RobustProvider` wrapping your alloy provider or using an alloy provider directly
+- `connect(provider)` - Connect using a [Robust Provider](https://github.com/OpenZeppelin/Robust-Provider) wrapping your alloy provider or using an alloy provider directly
 
 This will connect the `EventScanner` and allow you to create event streams and start scanning in various [modes](#scanning-modes).
 
 ```rust
-use alloy::providers::{Provider, ProviderBuilder};
-use event_scanner::robust_provider::RobustProviderBuilder;
+use alloy::providers::ProviderBuilder;
+use event_scanner::EventScannerBuilder;
+use robust_provider::RobustProviderBuilder;
 
 // Connect to provider (example with WebSocket)
 let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
@@ -135,14 +144,16 @@ let provider = ProviderBuilder::new().connect("ws://localhost:8545").await?;
 let scanner = EventScannerBuilder::live()
     .max_block_range(500)  // Optional: set max blocks per read (default: 1000)
     .block_confirmations(12)  // Optional: set block confirmations (default: 12)
-    .connect(provider.clone());
+    .connect(provider.clone())
+    .await?;
 
 // Historical block range mode
 let scanner = EventScannerBuilder::historic()
     .from_block(1_000_000)
     .to_block(2_000_000)
     .max_block_range(500)
-    .connect(provider.clone());
+    .connect(provider.clone())
+    .await?;
 
 // we can also wrap the provider in a RobustProvider
 // for more advanced configurations like retries and fallbacks
@@ -153,48 +164,54 @@ let scanner = EventScannerBuilder::latest(100)
     // .from_block(1_000_000)  // Optional: set start of search range
     // .to_block(2_000_000)    // Optional: set end of search range
     .max_block_range(500)
-    .connect(robust_provider.clone());
+    .connect(robust_provider.clone())
+    .await?;
 
 // Sync from block then switch to live mode
 let scanner = EventScannerBuilder::sync()
     .from_block(100)
     .max_block_range(500)
     .block_confirmations(12)
-    .connect(robust_provider.clone());
+    .connect(robust_provider.clone())
+    .await?;
 
 // Sync the latest 60 events then switch to live mode
 let scanner = EventScannerBuilder::sync()
     .from_latest(60)
     .block_confirmations(12)
-    .connect(robust_provider);
+    .connect(robust_provider)
+    .await?;
 ```
 
-Invoking `scanner.start()` starts the scanner in the specified mode.
+Invoking `scanner.start()` starts the scanner in the specified mode and returns a `StartProof` that must be passed to `subscription.stream()` to access the event stream. This compile-time guarantee ensures the scanner is started before attempting to read events.
 
 ### Defining Event Filters
 
 Create an `EventFilter` for each event stream you wish to process. The filter specifies the contract address where events originated, and event signatures (tip: you can use the value stored in `SolEvent::SIGNATURE`).
 
 ```rust
+use alloy::sol_types::SolEvent;
+use event_scanner::EventFilter;
+
 // Track a SPECIFIC event from a SPECIFIC contract
 let specific_filter = EventFilter::new()
-    .contract_address(*counter_contract.address())
-    .event(Counter::CountIncreased::SIGNATURE);
+    .contract_address(*my_contract.address())
+    .event(MyContract::SomeEvent::SIGNATURE);
 
 // Track multiple events from a SPECIFIC contract
 let specific_filter = EventFilter::new()
-    .contract_address(*counter_contract.address())
-    .event(Counter::CountIncreased::SIGNATURE)
-    .event(Counter::CountDecreased::SIGNATURE);
+    .contract_address(*my_contract.address())
+    .event(MyContract::SomeEvent::SIGNATURE)
+    .event(MyContract::OtherEvent::SIGNATURE);
 
 // Track a SPECIFIC event from ALL contracts
 let specific_filter = EventFilter::new()
-    .event(Counter::CountIncreased::SIGNATURE);
+    .event(MyContract::SomeEvent::SIGNATURE);
 
 // Track ALL events from SPECIFIC contracts
 let all_contract_events_filter = EventFilter::new()
-    .contract_address(*counter_contract.address())
-    .contract_address(*other_counter_contract.address());
+    .contract_address(*my_contract.address())
+    .contract_address(*other_contract.address());
 
 // Track ALL events from ALL contracts
 let all_events_filter = EventFilter::new();
@@ -211,17 +228,17 @@ Batch builder examples:
 ```rust
 // Multiple contract addresses at once
 let multi_addr = EventFilter::new()
-    .contract_addresses([*counter_contract.address(), *other_counter_contract.address()]);
+    .contract_addresses([*my_contract.address(), *other_contract.address()]);
 
 // Multiple event names at once
 let multi_events = EventFilter::new()
-    .events([Counter::CountIncreased::SIGNATURE, Counter::CountDecreased::SIGNATURE]);
+    .events([MyContract::SomeEvent::SIGNATURE, MyContract::OtherEvent::SIGNATURE]);
 
 // Multiple event signature hashes at once
 let multi_sigs = EventFilter::new()
     .event_signatures([
-        Counter::CountIncreased::SIGNATURE_HASH,
-        Counter::CountDecreased::SIGNATURE_HASH,
+        MyContract::SomeEvent::SIGNATURE_HASH,
+        MyContract::OtherEvent::SIGNATURE_HASH,
     ]);
 ```
 
@@ -230,11 +247,15 @@ let multi_sigs = EventFilter::new()
 The scanner delivers three types of messages through the event stream:
 
 - **`Message::Data(Vec<Log>)`** – Contains a batch of matching event logs. Each log includes the raw event data, transaction hash, block number, and other metadata.
-- **`Message::Notification(Notification)`** – Notifications from the scanner:
-- **`ScannerError`** – Errors indicating that the scanner has encountered issues (e.g., RPC failures, connection problems)
+- **`Message::Notification(Notification)`** – Notifications from the scanner.
+- **`ScannerError`** – Errors indicating that the scanner has encountered issues (e.g., RPC failures, connection problems, or a lagging consumer).
 
 Always handle all message types in your stream processing loop to ensure robust error handling and proper reorg detection.
 
+Notes:
+
+- Ordering is guaranteed only within a single subscription stream. There is no global ordering guarantee across multiple subscriptions.
+- When the scanner detects a reorg, it emits `Notification::ReorgDetected`. Consumers should assume the same events might be delivered more than once around reorgs (i.e. benign duplicates are possible). Depending on the application's needs, this could be handled via idempotency/deduplication or by rolling back application state on reorg notifications.
 
 ### Scanning Modes
 
@@ -248,7 +269,7 @@ Always handle all message types in your stream processing loop to ensure robust 
 
 - Set `max_block_range` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks). Default is 1000 blocks.
 - The modes come with sensible defaults; for example, not specifying a start block for historic mode automatically sets it to the genesis block.
-- For live mode, if the WebSocket subscription lags significantly (e.g., >2000 blocks), ranges are automatically capped to prevent RPC errors.
+- In live mode, if the block subscription lags and the scanner needs to catch up by querying past blocks, catch-up queries are performed in ranges bounded by `max_block_range` to respect provider limits.
 
 ---
 
@@ -263,48 +284,14 @@ Always handle all message types in your stream processing loop to ensure robust 
 Run an example with:
 
 ```bash
-RUST_LOG=info cargo run -p live_scanning
+RUST_LOG=info cargo run --example live_scanning --features example
 ```
+
+This will also enable `event-scanner` internal logs in the example.
 
 All examples spin up a local `anvil` instance, deploy a demo counter contract, and demonstrate using event streams to process events.
 
----
-
-## Robust Provider
-
-`event-scanner` ships with a `robust_provider` module that wraps Alloy providers with:
-
-- bounded per-call timeouts and exponential backoff retries
-- automatic failover from a primary provider to one or more fallbacks
-- resilient WebSocket block subscriptions with timeout handling and reconnection.
-
-The main entry point is `robust_provider::RobustProviderBuilder`, which accepts a wide
-range of provider types (URLs, `RootProvider`, layered providers, etc.) through the
-`IntoRobustProvider` and `IntoRobustProvider` traits.
-
-A typical setup looks like:
-
-```rust
-use alloy::providers::ProviderBuilder;
-use event_scanner::robust_provider::RobustProviderBuilder;
-use std::time::Duration;
-
-async fn example() -> anyhow::Result<()> {
-    let ws = ProviderBuilder::new().connect("ws://localhost:8545").await?;
-    let http = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
-
-    let provider = RobustProviderBuilder::new(ws)
-        .fallback(http)
-        .call_timeout(Duration::from_secs(30))
-        .subscription_timeout(Duration::from_secs(120))
-        .build()
-        .await?;
-    Ok(())
-}
-```
-
-You can then pass this `robust` provider into `EventScannerBuilder::connect` just like
-any other provider.
+If you run into issues when using a different node/provider, please report them at https://github.com/OpenZeppelin/Event-Scanner/issues.
 
 ---
 
@@ -314,6 +301,10 @@ any other provider.
 
 Integration tests cover all modes:
 
+Note: Tests are exercised against a local Foundry [anvil][anvil] instance.
+
 ```bash
 cargo nextest run --features test-utils
 ```
+
+[anvil]: https://github.com/foundry-rs/foundry?tab=readme-ov-file#anvil

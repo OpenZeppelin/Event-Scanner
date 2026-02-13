@@ -1,3 +1,8 @@
+//! Types yielded by event subscription streams.
+//!
+//! Defines [`Message`] and [`EventScannerResult`], along with conversions and comparisons
+//! for working with logs.
+
 use alloy::{rpc::types::Log, sol_types::SolEvent};
 
 use crate::{
@@ -5,7 +10,14 @@ use crate::{
     types::{IntoScannerResult, ScannerResult},
 };
 
+/// The item type yielded by event subscription streams.
+///
+/// This is a [`ScannerMessage`] whose data payload is a batch of [`Log`] values.
 pub type Message = ScannerMessage<Vec<Log>>;
+
+/// The `Result` type yielded by event subscription streams.
+///
+/// Successful items are [`Message`] values; failures are [`crate::ScannerError`].
 pub type EventScannerResult = ScannerResult<Vec<Log>>;
 
 impl From<Vec<Log>> for Message {
