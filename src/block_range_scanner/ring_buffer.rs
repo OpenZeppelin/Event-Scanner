@@ -37,7 +37,7 @@ pub(crate) struct BlockInfo<H> {
     pub hash: H,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct RingBuffer<T> {
     inner: VecDeque<T>,
     capacity: RingBufferCapacity,

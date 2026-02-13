@@ -4,15 +4,10 @@ use alloy::{
     network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
     primitives::{BlockHash, BlockNumber},
 };
-use tracing::{debug, info, warn};
-
-use crate::{
-    ScannerError,
-    block_range_scanner::ring_buffer::RingBufferCapacity,
-    robust_provider::{self, RobustProvider},
-};
+use robust_provider::RobustProvider;
 
 use super::ring_buffer::{BlockInfo, RingBuffer};
+use crate::{ScannerError, block_range_scanner::ring_buffer::RingBufferCapacity};
 
 /// Trait for handling chain reorganizations.
 #[allow(async_fn_in_trait)]
@@ -78,7 +73,7 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
     ///
     /// * **Network errors during lookup** - Non-`BlockNotFound` errors (e.g., RPC failures) are
     ///   propagated immediately rather than being treated as reorgs.
-    pub async fn check(
+    async fn check(
         &mut self,
         block: &N::BlockResponse,
     ) -> Result<Option<N::BlockResponse>, ScannerError> {
@@ -152,6 +147,12 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
         // Parent not in buffer - might be a gap, need to verify chain continuity
         self.handle_gap(block, parent_number).await
     }
+}
+
+impl<N: Network> DefaultReorgHandler<N> {
+    pub fn new(provider: RobustProvider<N>, capacity: RingBufferCapacity) -> Self {
+        Self { provider, buffer: RingBuffer::new(capacity) }
+    }
 
     /// Verifies that a previously seen block still exists on-chain.
     /// Used for duplicate blocks to detect if they were reorged out.
@@ -161,18 +162,17 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
     ) -> Result<Option<N::BlockResponse>, ScannerError> {
         let header = block.header();
         let block_hash = header.hash();
-        let block_number = header.number();
 
         match self.provider.get_block_by_hash(block_hash).await {
             Ok(_) => {
                 // Block still exists on-chain, no reorg
-                debug!(block_number = block_number, "Block verified on-chain, no reorg");
+                debug!(block_number = header.number(), "Block verified on-chain, no reorg");
                 Ok(None)
             }
-            Err(robust_provider::Error::BlockNotFound(_)) => {
+            Err(robust_provider::Error::BlockNotFound) => {
                 // Block was reorged out
                 info!(
-                    block_number = block_number,
+                    block_number = header.number(),
                     block_hash = %block_hash,
                     "Block no longer exists on-chain, reorg detected"
                 );
@@ -273,12 +273,6 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
         self.buffer.push(BlockInfo { number: block_number, hash: block_hash });
         Ok(None)
     }
-}
-
-impl<N: Network> DefaultReorgHandler<N> {
-    pub fn new(provider: RobustProvider<N>, capacity: RingBufferCapacity) -> Self {
-        Self { provider, buffer: RingBuffer::new(capacity) }
-    }
 
     /// Finds the common ancestor by walking back through the buffer and verifying
     /// each block's existence on-chain.
@@ -301,7 +295,7 @@ impl<N: Network> DefaultReorgHandler<N> {
                     // Found a block that exists on-chain - this is our common ancestor
                     return self.validate_and_return_ancestor(block).await;
                 }
-                Err(robust_provider::Error::BlockNotFound(_)) => {
+                Err(robust_provider::Error::BlockNotFound) => {
                     // Block was reorged, continue walking back
                     debug!(
                         block_number = block_info.number,
@@ -356,11 +350,10 @@ impl<N: Network> DefaultReorgHandler<N> {
         warn!("Buffer exhausted, falling back to finalized block as common ancestor");
 
         let finalized = self.provider.get_block_by_number(BlockNumberOrTag::Finalized).await?;
-        let finalized_header = finalized.header();
 
         info!(
-            finalized_number = finalized_header.number(),
-            finalized_hash = %finalized_header.hash(),
+            finalized_number = finalized.header().number(),
+            finalized_hash = %finalized.header().hash(),
             "Using finalized block as common ancestor"
         );
 
