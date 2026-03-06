@@ -1,7 +1,8 @@
 use alloy::{
+    consensus::BlockHeader,
     eips::BlockNumberOrTag,
     network::{BlockResponse, Network, primitives::HeaderResponse},
-    primitives::{BlockHash, BlockNumber},
+    primitives::BlockNumber,
 };
 use robust_provider::RobustProvider;
 use tokio::sync::mpsc;
@@ -32,17 +33,8 @@ impl<N: Network> HistoricalRangeHandler<N> {
     }
 
     pub fn run(self) {
-        let HistoricalRangeHandler { provider, max_block_range, start, end, sender } = self;
-
         tokio::spawn(async move {
-            let _ = Self::handle_stream_historical_range(
-                start,
-                end,
-                max_block_range,
-                &sender,
-                &provider,
-            )
-            .await;
+            _ = self.handle_stream_historical_range().await;
             debug!("Historical range stream ended");
         });
     }
@@ -51,133 +43,122 @@ impl<N: Network> HistoricalRangeHandler<N> {
     ///
     /// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
     #[must_use]
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     pub async fn run_sync(self) -> ChannelState {
-        Self::handle_stream_historical_range(
-            self.start,
-            self.end,
-            self.max_block_range,
-            &self.sender,
-            &self.provider,
-        )
-        .await
+        self.handle_stream_historical_range().await
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(sender, provider)))]
-    async fn handle_stream_historical_range(
-        start: BlockNumber,
-        end: BlockNumber,
-        max_block_range: u64,
-        sender: &mpsc::Sender<BlockScannerResult>,
-        provider: &RobustProvider<N>,
-    ) -> ChannelState {
+    async fn handle_stream_historical_range(self) -> ChannelState {
         // Phase 1: Stream all finalized blocks without any reorg checks
-        let Some((non_finalized_start, finalized_block_num)) =
-            Self::stream_finalized_blocks(provider, start, end, max_block_range, sender).await
+        let Some((non_finalized_start, finalized_block_num)) = self.stream_finalized_blocks().await
         else {
             return ChannelState::Closed;
         };
 
         // All blocks already finalized
-        if non_finalized_start > end {
+        if non_finalized_start > self.end {
             return ChannelState::Open;
         }
 
         // Phase 2: Stream non-finalized blocks with reorg detection
-        Self::stream_non_finalized_blocks(
-            non_finalized_start,
-            end,
-            max_block_range,
-            finalized_block_num,
-            sender,
-            provider,
-        )
-        .await
+        self.stream_non_finalized_blocks(non_finalized_start, finalized_block_num).await
     }
 
     /// Streams finalized blocks without reorg checks.
     ///
     /// Returns `(non_finalized_start, finalized_block_num)`, or `None` if the channel closed.
-    async fn stream_finalized_blocks(
-        provider: &RobustProvider<N>,
-        start: BlockNumber,
-        end: BlockNumber,
-        max_block_range: u64,
-        sender: &mpsc::Sender<BlockScannerResult>,
-    ) -> Option<(BlockNumber, BlockNumber)> {
+    async fn stream_finalized_blocks(&self) -> Option<(BlockNumber, BlockNumber)> {
         // NOTE: Edge case - If the chain is too young to expose finalized blocks (height <
         // finalized depth) just use zero. Since we use the finalized block number only to
         // determine whether to run reorg checks or not, this is a "low-stakes" RPC call.
-        let finalized_block_num =
-            provider.get_block_number_by_id(BlockNumberOrTag::Finalized.into()).await.unwrap_or(0);
+        let finalized_block_num = self
+            .provider
+            .get_block_number_by_id(BlockNumberOrTag::Finalized.into())
+            .await
+            .unwrap_or(0);
 
-        let finalized_batch_end = finalized_block_num.min(end);
+        let finalized_batch_end = finalized_block_num.min(self.end);
 
-        for range in RangeIterator::forward(start, finalized_batch_end, max_block_range) {
+        let iter = RangeIterator::forward(self.start, finalized_batch_end, self.max_block_range);
+
+        for range in iter {
             trace!(
                 range_start = *range.start(),
                 range_end = *range.end(),
                 "Streaming finalized range"
             );
-            if sender.try_stream(range).await.is_closed() {
+            if self.sender.try_stream(range).await.is_closed() {
                 return None;
             }
         }
 
         // If start > finalized_batch_end, the loop above was empty and we should
         // continue from start. Otherwise, continue from after finalized_batch_end.
-        Some((start.max(finalized_batch_end + 1), finalized_block_num))
+        Some((self.start.max(finalized_batch_end + 1), finalized_block_num))
     }
 
-    /// Streams non-finalized blocks with per-range reorg detection.
+    /// Streams non-finalized blocks with end-of-range reorg detection.
     ///
-    /// After each range, the end block's hash is compared against a pre-streaming snapshot.
-    /// If a reorg is detected, the iterator resets to `min_common_ancestor + 1` and re-streams.
+    /// The handler takes a snapshot of the requested end block before streaming the
+    /// non-finalized portion of the range. After streaming that portion, it re-fetches the end
+    /// block and compares hashes. If a reorg is detected, it emits a
+    /// [`Notification::ReorgDetected`] with the common ancestor and re-streams the non-finalized
+    /// portion starting from `min_common_ancestor + 1`. This process repeats until the end block
+    /// remains stable.
     ///
     /// Returns `ChannelState::Closed` if the channel is closed, `ChannelState::Open` otherwise.
     async fn stream_non_finalized_blocks(
+        &self,
         non_finalized_start: BlockNumber,
-        end: BlockNumber,
-        max_block_range: u64,
         finalized_block_num: BlockNumber,
-        sender: &mpsc::Sender<BlockScannerResult>,
-        provider: &RobustProvider<N>,
     ) -> ChannelState {
         let min_common_ancestor = non_finalized_start.saturating_sub(1).max(finalized_block_num);
 
-        let mut end_block_hash = match provider.get_block_by_number(end.into()).await {
-            Ok(block) => block.header().hash(),
+        let mut end_block = match self.provider.get_block_by_number(self.end.into()).await {
+            Ok(block) => block,
             Err(e) => {
-                error!("Failed to get end block hash");
-                _ = sender.try_stream(e).await;
+                error!("Failed to get end block");
+                _ = self.sender.try_stream(e).await;
                 return ChannelState::Closed;
             }
         };
 
-        let mut iter = RangeIterator::forward(non_finalized_start, end, max_block_range);
+        // the only way to break out of the loop is for no reorg to happen while streaming
+        loop {
+            let iter = RangeIterator::forward(non_finalized_start, self.end, self.max_block_range);
 
-        while let Some(range) = iter.next() {
-            trace!(
-                range_start = *range.start(),
-                range_end = *range.end(),
-                "Streaming non-finalized range"
-            );
-            if sender.try_stream(range).await.is_closed() {
-                return ChannelState::Closed;
-            }
-
-            if let Some(new_hash) = Self::check_reorg(end, end_block_hash, sender, provider).await {
-                if sender
-                    .try_stream(Notification::ReorgDetected {
-                        common_ancestor: min_common_ancestor,
-                    })
-                    .await
-                    .is_closed()
-                {
+            for range in iter {
+                trace!(
+                    range_start = *range.start(),
+                    range_end = *range.end(),
+                    "Streaming non-finalized range"
+                );
+                if self.sender.try_stream(range).await.is_closed() {
                     return ChannelState::Closed;
                 }
-                end_block_hash = new_hash;
-                iter.reset_to(min_common_ancestor + 1);
+            }
+
+            let reorged_end_block = self.get_reorged_end_block(&end_block).await;
+
+            match reorged_end_block {
+                None => {
+                    break;
+                }
+                Some(new_end_block) => {
+                    // notify the receiver and update the tracked end block
+
+                    if self
+                        .sender
+                        .try_stream(Notification::ReorgDetected {
+                            common_ancestor: min_common_ancestor,
+                        })
+                        .await
+                        .is_closed()
+                    {
+                        return ChannelState::Closed;
+                    }
+                    end_block = new_end_block;
+                }
             }
         }
 
@@ -188,33 +169,32 @@ impl<N: Network> HistoricalRangeHandler<N> {
     /// Checks if a reorg occurred by comparing block hashes.
     ///
     /// Returns `Some(new_hash)` if a reorg was detected, `None` otherwise.
-    async fn check_reorg(
-        end: BlockNumber,
-        expected_hash: BlockHash,
-        sender: &mpsc::Sender<BlockScannerResult>,
-        provider: &RobustProvider<N>,
-    ) -> Option<BlockHash> {
-        let current_end_block = match provider.get_block_by_number(end.into()).await {
-            Ok(block) => block,
-            Err(e) => {
-                error!("Failed to fetch end block for reorg check");
-                _ = sender.try_stream(e).await;
-                return None;
-            }
-        };
+    async fn get_reorged_end_block(
+        &self,
+        end_block: &N::BlockResponse,
+    ) -> Option<N::BlockResponse> {
+        let new_end_block =
+            match self.provider.get_block_by_number(end_block.header().number().into()).await {
+                Ok(block) => block,
+                Err(e) => {
+                    error!("Failed to fetch end block for reorg check");
+                    _ = self.sender.try_stream(e).await;
+                    return None;
+                }
+            };
 
-        let current_hash = current_end_block.header().hash();
-        if current_hash == expected_hash {
+        let new_block_hash = new_end_block.header().hash();
+        if new_block_hash == end_block.header().hash() {
             return None;
         }
 
         warn!(
-            end_block = end,
-            old_hash = %expected_hash,
-            new_hash = %current_hash,
+            end_block = end_block.header().number(),
+            old_hash = %end_block.header().hash(),
+            new_hash = %new_block_hash,
             "Reorg detected, re-streaming non-finalized blocks"
         );
 
-        Some(current_hash)
+        Some(new_end_block)
     }
 }
