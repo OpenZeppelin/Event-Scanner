@@ -256,11 +256,12 @@ Notes:
 
 - Ordering is guaranteed only within a single subscription stream. There is no global ordering guarantee across multiple subscriptions.
 - When the scanner detects a reorg, it emits `Notification::ReorgDetected`. Consumers should assume the same events might be delivered more than once around reorgs (i.e. benign duplicates are possible). Depending on the application's needs, this could be handled via idempotency/deduplication or by rolling back application state on reorg notifications.
+- In **Historic** mode specifically, reorg checks are only performed while streaming the **non-finalized** portion of the requested range. Blocks at or below the chain's `finalized` height are streamed without reorg checks.
 
 ### Scanning Modes
 
 - **Live** – scanner that streams new blocks as they arrive. 
-- **Historic** – scanner for streaming events from a past block range (default: genesis..=latest).
+- **Historic** – scanner for streaming events from a past block range (default: genesis..=latest). For non-finalized blocks, the scanner may re-stream parts of the range if it detects a reorg, and will emit `Notification::ReorgDetected`.
 - **Latest Events** – scanner that collects up to `count` most recent events per listener. Final delivery is in chronological order (oldest to newest).
 - **Sync from Block** – scanner that streams events from a given start block up to the current confirmed tip, then automatically transitions to live streaming.
 - **Sync from Latest Events** - scanner that collects the most recent `count` events, then automatically transitions to live streaming.

@@ -6,6 +6,7 @@ use crate::{
     Notification, ScannerError,
     block_range_scanner::{
         common::{self, BlockScannerResult},
+        historical_range_handler::HistoricalRangeHandler,
         reorg_handler::{DefaultReorgHandler, ReorgHandler},
         ring_buffer::RingBufferCapacity,
     },
@@ -114,7 +115,6 @@ impl<N: Network> SyncHandler<N> {
                 max_block_range,
                 &sender,
                 &provider,
-                &mut reorg_handler,
             )
             .await
             {
@@ -148,27 +148,24 @@ impl<N: Network> SyncHandler<N> {
 
     /// Catches up on historical blocks until we reach the chain tip
     /// Returns the block number where live streaming should begin
-    async fn catchup_historical_blocks<R: ReorgHandler<N>>(
+    async fn catchup_historical_blocks(
         mut start_block: BlockNumber,
         mut confirmed_tip: BlockNumber,
         block_confirmations: u64,
         max_block_range: u64,
         sender: &mpsc::Sender<BlockScannerResult>,
         provider: &RobustProvider<N>,
-        reorg_handler: &mut R,
     ) -> Result<Option<BlockNumber>, ScannerError> {
         while start_block < confirmed_tip {
-            if common::stream_historical_range(
+            let handler = HistoricalRangeHandler::new(
+                provider.clone(),
+                max_block_range,
                 start_block,
                 confirmed_tip,
-                max_block_range,
-                sender,
-                provider,
-                reorg_handler,
-            )
-            .await
-            .is_none()
-            {
+                sender.clone(),
+            );
+
+            if handler.run_sync().await.is_closed() {
                 return Ok(None);
             }
 

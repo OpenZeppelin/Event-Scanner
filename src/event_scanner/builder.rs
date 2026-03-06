@@ -175,12 +175,21 @@ impl EventScannerBuilder<Unspecified> {
     /// * **Default range**: By default, scans from `Earliest` to `Latest` block
     /// * **Batch control**: Use [`max_block_range`][max_block_range] to control how many blocks are
     ///   queried per RPC call
-    /// * **Reorg handling**: Performs reorg checks when streaming events from non-finalized blocks;
-    ///   if a reorg is detected, streams events from the reorged blocks
+    /// * **Reorg handling**:
+    ///   * Blocks up to the chain's `finalized` height are streamed without reorg checks.
+    ///   * For the non-finalized portion of the range, the scanner takes a snapshot of the
+    ///     requested end block, streams the non-finalized portion once, and then verifies that the
+    ///     end block is still the same. If a reorg is detected, it emits
+    ///     [`Notification::ReorgDetected`][reorg] and re-streams the non-finalized portion of the
+    ///     range from the reported common ancestor.
+    ///
+    ///   Consumers should be prepared to observe benign duplicate events around reorg boundaries
+    ///   (e.g. by applying idempotency/deduplication).
     /// * **Completion**: The scanner completes when the entire range has been processed.
     ///
     /// [max_block_range]: crate::EventScannerBuilder::max_block_range
     /// [max_concurrent_fetches]: crate::EventScannerBuilder::max_concurrent_fetches
+    /// [reorg]: crate::types::Notification::ReorgDetected
     #[must_use]
     pub fn historic() -> EventScannerBuilder<Historic> {
         EventScannerBuilder::default()
