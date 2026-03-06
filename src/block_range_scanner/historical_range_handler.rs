@@ -47,7 +47,7 @@ impl<N: Network> HistoricalRangeHandler<N> {
         self.handle_stream_historical_range().await
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(sender, provider)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", skip(self)))]
     async fn handle_stream_historical_range(self) -> ChannelState {
         // Phase 1: Stream all finalized blocks without any reorg checks
         let Some((non_finalized_start, finalized_block_num)) = self.stream_finalized_blocks().await
@@ -162,7 +162,7 @@ impl<N: Network> HistoricalRangeHandler<N> {
             }
         }
 
-        debug!(end_block_hash = %end_block_hash, "Historical sync completed");
+        debug!(end_block_hash = %end_block.header().hash(), "Historical sync completed");
         ChannelState::Open
     }
 
