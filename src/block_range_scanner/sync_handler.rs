@@ -37,10 +37,12 @@ impl<N: Network> SyncHandler<N> {
     }
 
     pub async fn run(mut self) -> Result<(), ScannerError> {
-        let (start_block, confirmed_tip) = tokio::try_join!(
+        let (start_block, latest_block) = tokio::try_join!(
             self.provider.get_block_number_by_id(self.start_id),
-            self.provider.get_latest_confirmed(self.block_confirmations)
+            self.provider.get_block_number()
         )?;
+
+        let confirmed_tip = latest_block.saturating_sub(self.block_confirmations);
 
         if start_block > confirmed_tip {
             debug!(

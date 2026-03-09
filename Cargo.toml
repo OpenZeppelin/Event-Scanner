@@ -14,7 +14,7 @@ readme = "README.md"
 license = "MIT"
 repository = "https://github.com/OpenZeppelin/Event-Scanner"
 documentation = "https://docs.rs/event-scanner"
-version = "1.0.0"
+version = "1.1.0"
 publish = true
 exclude = [
     ".github/",
@@ -28,11 +28,11 @@ exclude = [
 
 [dependencies]
 alloy = { version = "1.1.2", default-features = false }
-tokio = "1.48"
+tokio = { version = "1.48", features = ["rt-multi-thread"] }
 futures = { version = "0.3.31", default-features = false }
 thiserror = "2.0.17"
 tokio-stream = { version = "0.1.17", default-features = false }
-robust-provider = "0.2.0"
+robust-provider = "1.0.1"
 
 anyhow = { version = "1.0", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
@@ -41,7 +41,7 @@ flate2 = { version = "1.1", optional = true }
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
-alloy = { version = "1.1.2", features = ["node-bindings"] }
+alloy = { version = "1.1.2", features = ["node-bindings", "provider-ws", "rpc-types-anvil"] }
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 test-log = { version = "0.2.18", features = ["trace"] }
@@ -84,6 +84,11 @@ path = "examples/live_scanning.rs"
 required-features = ["example"]
 
 [[example]]
+name = "live_scanning_http"
+path = "examples/live_scanning_http.rs"
+required-features = ["example", "http-subscription"]
+
+[[example]]
 name = "sync_from_block_scanning"
 path = "examples/sync_from_block_scanning.rs"
 required-features = ["example"]
@@ -105,6 +110,7 @@ bench-utils = [
     "alloy/node-bindings",
 ]
 example = ["tracing", "dep:anyhow"]
+http-subscription = ["robust-provider/http-subscription"]
 
 [profile.release]
 lto = "thin"

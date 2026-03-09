@@ -1,6 +1,6 @@
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, sync::Arc};
 
-use robust_provider::{RobustProvider, RobustSubscription, subscription};
+use robust_provider::{Error as SubscriptionError, RobustProvider, RobustSubscription};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
@@ -119,7 +119,7 @@ pub(crate) async fn stream_live_blocks<N: Network, R: ReorgHandler<N>>(
 
 async fn get_first_block<
     N: Network,
-    S: tokio_stream::Stream<Item = Result<N::HeaderResponse, subscription::Error>> + Unpin,
+    S: tokio_stream::Stream<Item = Result<N::HeaderResponse, SubscriptionError>> + Unpin,
 >(
     stream: &mut S,
     sender: &mpsc::Sender<BlockScannerResult>,
@@ -129,20 +129,24 @@ async fn get_first_block<
             Ok(block) => return Some(block),
             Err(e) => {
                 match e {
-                    subscription::Error::Lagged(_) => {
+                    SubscriptionError::Lagged(_) => {
                         // scanner already accounts for skipped block numbers
                         // next block will be the actual incoming block
                     }
-                    subscription::Error::Timeout => {
+                    SubscriptionError::Timeout => {
                         _ = sender.try_stream(ScannerError::Timeout).await;
                         break;
                     }
-                    subscription::Error::RpcError(rpc_err) => {
-                        _ = sender.try_stream(ScannerError::RpcError(rpc_err)).await;
+                    SubscriptionError::RpcError(rpc_err) => {
+                        _ = sender.try_stream(ScannerError::RpcError(Arc::new(rpc_err))).await;
                         break;
                     }
-                    subscription::Error::Closed => {
+                    SubscriptionError::Closed => {
                         _ = sender.try_stream(ScannerError::SubscriptionClosed).await;
+                        break;
+                    }
+                    SubscriptionError::BlockNotFound => {
+                        _ = sender.try_stream(ScannerError::BlockNotFound).await;
                         break;
                     }
                 }
@@ -158,10 +162,10 @@ fn skip_to_first_relevant_block<N: Network>(
     subscription: RobustSubscription<N>,
     stream_start: BlockNumber,
     block_confirmations: u64,
-) -> impl tokio_stream::Stream<Item = Result<N::HeaderResponse, subscription::Error>> {
+) -> impl tokio_stream::Stream<Item = Result<N::HeaderResponse, SubscriptionError>> {
     subscription.into_stream().skip_while(move |header| match header {
         Ok(header) => header.number().saturating_sub(block_confirmations) < stream_start,
-        Err(subscription::Error::Lagged(_)) => true,
+        Err(SubscriptionError::Lagged(_)) => true,
         Err(_) => false,
     })
 }
@@ -204,7 +208,7 @@ async fn initialize_live_streaming_state<N: Network, R: ReorgHandler<N>>(
 #[allow(clippy::too_many_arguments)]
 async fn stream_blocks_continuously<
     N: Network,
-    S: tokio_stream::Stream<Item = Result<N::HeaderResponse, subscription::Error>> + Unpin,
+    S: tokio_stream::Stream<Item = Result<N::HeaderResponse, SubscriptionError>> + Unpin,
     R: ReorgHandler<N>,
 >(
     stream: &mut S,
@@ -221,22 +225,26 @@ async fn stream_blocks_continuously<
             Ok(block) => block,
             Err(e) => {
                 match e {
-                    subscription::Error::Lagged(_) => {
+                    SubscriptionError::Lagged(_) => {
                         // scanner already accounts for skipped block numbers,
                         // next block will be the actual incoming block
                         continue;
                     }
-                    subscription::Error::Timeout => {
+                    SubscriptionError::Timeout => {
                         _ = sender.try_stream(ScannerError::Timeout).await;
                         return;
                     }
-                    subscription::Error::RpcError(rpc_err) => {
-                        _ = sender.try_stream(ScannerError::RpcError(rpc_err)).await;
+                    SubscriptionError::RpcError(rpc_err) => {
+                        _ = sender.try_stream(ScannerError::RpcError(Arc::new(rpc_err))).await;
                         return;
                     }
-                    subscription::Error::Closed => {
+                    SubscriptionError::Closed => {
                         _ = sender.try_stream(ScannerError::SubscriptionClosed).await;
                         return;
+                    }
+                    SubscriptionError::BlockNotFound => {
+                        _ = sender.try_stream(ScannerError::BlockNotFound).await;
+                        break;
                     }
                 }
             }

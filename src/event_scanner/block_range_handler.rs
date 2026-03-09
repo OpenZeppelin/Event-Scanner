@@ -18,7 +18,7 @@ use alloy::{
     rpc::types::{Filter, Log},
 };
 use futures::StreamExt;
-use robust_provider::{RobustProvider, provider::Error as RobustProviderError};
+use robust_provider::{Error as RobustProviderError, RobustProvider};
 use tokio::{
     sync::{
         broadcast::{self, Sender, error::RecvError},
