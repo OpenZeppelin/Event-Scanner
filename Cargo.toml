@@ -84,6 +84,11 @@ path = "examples/live_scanning.rs"
 required-features = ["example"]
 
 [[example]]
+name = "live_scanning_http"
+path = "examples/live_scanning_http.rs"
+required-features = ["example", "http-subscription"]
+
+[[example]]
 name = "sync_from_block_scanning"
 path = "examples/sync_from_block_scanning.rs"
 required-features = ["example"]

@@ -269,12 +269,21 @@ Notes:
 
 #### HTTP Subscription Support
 
-By default, live block subscriptions rely on WebSocket or IPC transports. If your provider only supports HTTP, enable the `http-subscription` feature flag to use HTTP polling-based subscriptions instead:
+By default, live block subscriptions rely on WebSocket or IPC transports. If your provider only supports HTTP, enable the `http-subscription` feature flag and opt in on the `RobustProviderBuilder`:
 
 ```toml
 [dependencies]
 event-scanner = { version = "1.1.0", features = ["http-subscription"] }
 ```
+
+```rust
+let robust_provider = RobustProviderBuilder::new(provider)
+    .allow_http_subscriptions(true)
+    .build()
+    .await?;
+```
+
+Both steps are required — the feature flag makes the API available, and `.allow_http_subscriptions(true)` enables it at runtime.
 
 This applies to all modes that include a live streaming phase: **Live**, **Sync from Block**, and **Sync from Latest Events**.
 
@@ -289,6 +298,7 @@ This applies to all modes that include a live streaming phase: **Live**, **Sync 
 ## Examples
 
 - `examples/live_scanning` – minimal live-mode scanner using `EventScannerBuilder::live()`
+- `examples/live_scanning_http` – live-mode scanner over HTTP transport using the `http-subscription` feature flag
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScannerBuilder::historic()`
 - `examples/sync_from_block_scanning` – demonstrates replaying from genesis (block 0) before continuing to stream the latest blocks using `EventScannerBuilder::sync().from_block(block_id)`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScannerBuilder::latest()`
@@ -298,6 +308,12 @@ Run an example with:
 
 ```bash
 RUST_LOG=info cargo run --example live_scanning --features example
+```
+
+For the HTTP subscription example:
+
+```bash
+RUST_LOG=info cargo run --example live_scanning_http --features "example http-subscription"
 ```
 
 This will also enable `event-scanner` internal logs in the example.
