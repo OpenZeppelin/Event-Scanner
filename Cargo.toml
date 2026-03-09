@@ -105,7 +105,7 @@ bench-utils = [
     "alloy/node-bindings",
 ]
 example = ["tracing", "dep:anyhow"]
-http-subscriptions = ["robust-provider/http-subscriptions"]
+http-subscription = ["robust-provider/http-subscription"]
 
 [profile.release]
 lto = "thin"
