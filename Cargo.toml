@@ -32,7 +32,7 @@ tokio = { version = "1.48", features = ["rt-multi-thread"] }
 futures = { version = "0.3.31", default-features = false }
 thiserror = "2.0.17"
 tokio-stream = { version = "0.1.17", default-features = false }
-robust-provider = "1.0.0"
+robust-provider = "1.0.1"
 
 anyhow = { version = "1.0", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }

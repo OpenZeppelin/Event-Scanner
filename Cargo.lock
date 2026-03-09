@@ -3287,9 +3287,9 @@ dependencies = [
 
 [[package]]
 name = "robust-provider"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1509aab477a238d3839d4f567bc81674c71ae8ed898b9df8b51fd5e5ff545bd8"
+checksum = "51b0a08304216d2f44a24a35dbefe4dc7ceb84713818bcd3562bdb20233643f1"
 dependencies = [
  "alloy",
  "backon",
