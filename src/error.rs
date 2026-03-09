@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::types::ScannerResult;
 
-use robust_provider::provider::Error as RobustProviderError;
+use robust_provider::Error as RobustProviderError;
 
 /// Errors emitted by the scanner.
 ///
@@ -64,8 +64,10 @@ impl From<RobustProviderError> for ScannerError {
     fn from(error: RobustProviderError) -> ScannerError {
         match error {
             RobustProviderError::Timeout => ScannerError::Timeout,
-            RobustProviderError::RpcError(err) => ScannerError::RpcError(err),
+            RobustProviderError::RpcError(err) => ScannerError::RpcError(Arc::new(err)),
             RobustProviderError::BlockNotFound => ScannerError::BlockNotFound,
+            RobustProviderError::Lagged(blocks) => ScannerError::Lagged(blocks),
+            RobustProviderError::Closed => ScannerError::SubscriptionClosed,
         }
     }
 }
