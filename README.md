@@ -26,6 +26,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Building a Scanner](#building-a-scanner)
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
+    - [HTTP Subscription Support](#http-subscription-support)
 - [Examples](#examples)
 - [Testing](#testing)
 
@@ -34,7 +35,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
 ## Features
 
 - **Historical replay** – stream events from past block ranges.
-- **Live subscriptions** – stay up to date with latest events via WebSocket or IPC transports.
+- **Live subscriptions** – stay up to date with latest events via WebSocket, IPC, or HTTP transports (HTTP requires the `http-subscription` feature flag).
 - **Hybrid flow** – automatically transition from historical catch-up into streaming mode.
 - **Latest events fetch** – one-shot rewind to collect the most recent matching logs.
 - **Composable filters** – register one or many contract + event signature pairs.
@@ -57,7 +58,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "1.0.0"
+event-scanner = "1.1.0"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
@@ -265,6 +266,17 @@ Notes:
 - **Latest Events** – scanner that collects up to `count` most recent events per listener. Final delivery is in chronological order (oldest to newest).
 - **Sync from Block** – scanner that streams events from a given start block up to the current confirmed tip, then automatically transitions to live streaming.
 - **Sync from Latest Events** - scanner that collects the most recent `count` events, then automatically transitions to live streaming.
+
+#### HTTP Subscription Support
+
+By default, live block subscriptions rely on WebSocket or IPC transports. If your provider only supports HTTP, enable the `http-subscription` feature flag to use HTTP polling-based subscriptions instead:
+
+```toml
+[dependencies]
+event-scanner = { version = "1.1.0", features = ["http-subscription"] }
+```
+
+This applies to all modes that include a live streaming phase: **Live**, **Sync from Block**, and **Sync from Latest Events**.
 
 #### Important Notes
 
