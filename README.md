@@ -299,6 +299,7 @@ This applies to all modes that include a live streaming phase: **Live**, **Sync 
 ## Examples
 
 - `examples/live_scanning` – minimal live-mode scanner using `EventScannerBuilder::live()`
+- `examples/live_scanning_http` – live-mode scanner over HTTP transport using the `http-subscription` feature flag
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScannerBuilder::historic()`
 - `examples/sync_from_block_scanning` – demonstrates replaying from genesis (block 0) before continuing to stream the latest blocks using `EventScannerBuilder::sync().from_block(block_id)`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScannerBuilder::latest()`
@@ -308,6 +309,12 @@ Run an example with:
 
 ```bash
 RUST_LOG=info cargo run --example live_scanning --features example
+```
+
+For the HTTP subscription example:
+
+```bash
+RUST_LOG=info cargo run --example live_scanning_http --features "example http-subscription"
 ```
 
 This will also enable `event-scanner` internal logs in the example.
