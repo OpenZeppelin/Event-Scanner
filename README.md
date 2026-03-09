@@ -26,6 +26,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
   - [Building a Scanner](#building-a-scanner)
   - [Defining Event Filters](#defining-event-filters)
   - [Scanning Modes](#scanning-modes)
+    - [HTTP Subscription Support](#http-subscription-support)
 - [Examples](#examples)
 - [Testing](#testing)
 
@@ -34,7 +35,7 @@ Event Scanner is a Rust library for streaming EVM-based smart contract events. I
 ## Features
 
 - **Historical replay** – stream events from past block ranges.
-- **Live subscriptions** – stay up to date with latest events via WebSocket or IPC transports.
+- **Live subscriptions** – stay up to date with latest events via WebSocket, IPC, or HTTP transports (HTTP requires the `http-subscription` feature flag).
 - **Hybrid flow** – automatically transition from historical catch-up into streaming mode.
 - **Latest events fetch** – one-shot rewind to collect the most recent matching logs.
 - **Composable filters** – register one or many contract + event signature pairs.
@@ -57,7 +58,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "1.0.0"
+event-scanner = "1.1.0"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
@@ -266,6 +267,27 @@ Notes:
 - **Sync from Block** – scanner that streams events from a given start block up to the current confirmed tip, then automatically transitions to live streaming.
 - **Sync from Latest Events** - scanner that collects the most recent `count` events, then automatically transitions to live streaming.
 
+#### HTTP Subscription Support
+
+By default, live block subscriptions rely on WebSocket or IPC transports. If your provider only supports HTTP, enable the `http-subscription` feature flag and opt in on the `RobustProviderBuilder`:
+
+```toml
+[dependencies]
+event-scanner = { version = "1.1.0", features = ["http-subscription"] }
+```
+
+```rust
+let robust_provider = RobustProviderBuilder::new(provider)
+    .allow_http_subscriptions(true)
+    .build()
+    .await?;
+```
+
+Both steps are required — the feature flag makes the API available, and `.allow_http_subscriptions(true)` enables it at runtime.
+
+This applies to all modes that include a live streaming phase: **Live**, **Sync from Block**, and **Sync from Latest Events**.
+
+
 #### Important Notes
 
 - Set `max_block_range` based on your RPC provider's limits (e.g., Alchemy, Infura may limit queries to 2000 blocks). Default is 1000 blocks.
@@ -277,6 +299,7 @@ Notes:
 ## Examples
 
 - `examples/live_scanning` – minimal live-mode scanner using `EventScannerBuilder::live()`
+- `examples/live_scanning_http` – live-mode scanner over HTTP transport using the `http-subscription` feature flag
 - `examples/historical_scanning` – demonstrates replaying historical data using `EventScannerBuilder::historic()`
 - `examples/sync_from_block_scanning` – demonstrates replaying from genesis (block 0) before continuing to stream the latest blocks using `EventScannerBuilder::sync().from_block(block_id)`
 - `examples/latest_events_scanning` – demonstrates scanning the latest events using `EventScannerBuilder::latest()`
@@ -286,6 +309,12 @@ Run an example with:
 
 ```bash
 RUST_LOG=info cargo run --example live_scanning --features example
+```
+
+For the HTTP subscription example:
+
+```bash
+RUST_LOG=info cargo run --example live_scanning_http --features "example http-subscription"
 ```
 
 This will also enable `event-scanner` internal logs in the example.
