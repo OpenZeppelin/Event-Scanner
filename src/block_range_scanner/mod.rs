@@ -1,5 +1,6 @@
 mod builder;
 mod common;
+mod historical_range_handler;
 mod range_iterator;
 mod reorg_handler;
 mod rewind_handler;
