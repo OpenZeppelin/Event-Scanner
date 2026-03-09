@@ -55,11 +55,13 @@ async fn main() -> anyhow::Result<()> {
         .contract_address(*contract_address)
         .event(Counter::CountIncreased::SIGNATURE);
 
+    // set http subscription to true + add 1 second poll interval to match anvil block time
     let robust_provider = RobustProviderBuilder::new(provider)
         .call_timeout(std::time::Duration::from_secs(30))
         .max_retries(5)
         .min_delay(std::time::Duration::from_millis(500))
         .allow_http_subscriptions(true)
+        .poll_interval(Duration::from_secs(1))
         .build()
         .await?;
 
