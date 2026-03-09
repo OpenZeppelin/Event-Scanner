@@ -269,14 +269,24 @@ Notes:
 
 #### HTTP Subscription Support
 
-By default, live block subscriptions rely on WebSocket or IPC transports. If your provider only supports HTTP, enable the `http-subscription` feature flag to use HTTP polling-based subscriptions instead:
+By default, live block subscriptions rely on WebSocket or IPC transports. If your provider only supports HTTP, enable the `http-subscription` feature flag and opt in on the `RobustProviderBuilder`:
 
 ```toml
 [dependencies]
 event-scanner = { version = "1.1.0", features = ["http-subscription"] }
 ```
 
+```rust
+let robust_provider = RobustProviderBuilder::new(provider)
+    .allow_http_subscriptions(true)
+    .build()
+    .await?;
+```
+
+Both steps are required — the feature flag makes the API available, and `.allow_http_subscriptions(true)` enables it at runtime.
+
 This applies to all modes that include a live streaming phase: **Live**, **Sync from Block**, and **Sync from Latest Events**.
+
 
 #### Important Notes
 
