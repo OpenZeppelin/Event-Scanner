@@ -29,21 +29,27 @@ pub trait ReorgHandler<N: Network> {
     ) -> Result<Option<N::BlockResponse>, ScannerError>;
 }
 
-/// Default implementation of [`ReorgHandler`] that uses parent hash verification
-/// against a ring buffer of `(block_number, block_hash)` pairs.
+/// Default implementation of [`ReorgHandler`] that combines on-chain hash
+/// verification with parent hash validation against a ring buffer of
+/// `(block_number, block_hash)` pairs.
 ///
-/// # Core Invariant
+/// # Detection Strategy
 ///
-/// Every incoming block's parent hash is verified against the buffer, rather than
-/// checking on-chain hash existence. This is cleaner and more performant for common
-/// reorg scenarios.
+/// 1. **On-chain verification**: Every incoming block's hash is checked via `get_block_by_hash`. If
+///    the hash no longer exists on the canonical chain, a reorg is detected immediately. This is
+///    essential for stale/stored blocks (e.g., `previous_batch_end`) that may have been reorged
+///    since last seen.
+///
+/// 2. **Parent hash verification**: For sequential blocks (live subscription), the incoming block's
+///    parent hash is compared against the buffer back. This avoids extra RPC calls in the common
+///    case.
 ///
 /// # Scenarios Handled
 ///
 /// - **Happy path**: Next sequential block whose parent hash matches buffer back.
 /// - **Scenario 1 (stream rewind)**: Block within buffer range, parent matches → truncate + push.
 /// - **Scenario 2 (past fork)**: Block within buffer range, parent mismatch → walk back via RPC.
-/// - **Scenario 3 (gap)**: Block beyond buffer head → fetch gap blocks, verify chain.
+/// - **Scenario 3 (batch boundary)**: Non-consecutive block (already verified on-chain) → push.
 /// - **Scenario 4 (deep reorg)**: Block before buffer range → reset to finalized.
 /// - **Duplicate**: Same number and hash as buffer back → no-op.
 #[derive(Clone, Debug)]
@@ -62,8 +68,8 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
     ///
     /// * **Empty buffer** - First block is simply added; no reorg detection possible.
     /// * **Duplicate block** - Same number and hash as buffer back is a no-op.
-    /// * **Gap in block numbers** - Intermediate blocks are fetched and verified for chain
-    ///   continuity.
+    /// * **Gap in block numbers** - Non-consecutive blocks (e.g., batch boundaries) are pushed
+    ///   directly since the on-chain check already verified them.
     /// * **Deep reorg beyond buffer capacity** - Falls back to the finalized block.
     /// * **Network errors** - Propagated immediately, not treated as reorgs.
     #[cfg_attr(
@@ -114,9 +120,17 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
             return self.handle_reorg_within_buffer(block, incoming, parent_hash).await;
         }
 
-        // ── Scenario 3: Gap (block beyond buffer head) ──────────────
+        // ── Scenario 3: Non-consecutive block (batch boundary) ───────
+        // The block was already verified on-chain by reorg_detected() above.
+        // Just push it — no need to fetch intermediate blocks.
         if incoming.number > buffer_back.number + 1 {
-            return self.handle_gap(block, incoming, parent_hash).await;
+            trace!(
+                incoming = incoming.number,
+                buffer_back = buffer_back.number,
+                "Non-consecutive block verified on-chain, pushing to buffer"
+            );
+            self.buffer.push(incoming);
+            return Ok(None);
         }
 
         // ── Scenario 4: Block before buffer range (deep reorg) ──────
@@ -275,88 +289,6 @@ impl<N: Network> DefaultReorgHandler<N> {
 
             current_number = parent_number;
         }
-    }
-
-    /// Handles the case where the stream jumped ahead (gap between buffer back and incoming).
-    /// Fetches missing blocks and verifies chain continuity (Scenario 3).
-    async fn handle_gap(
-        &mut self,
-        incoming_block: &N::BlockResponse,
-        incoming: BlockNumHash,
-        parent_hash: B256,
-    ) -> Result<Option<N::BlockResponse>, ScannerError> {
-        let buffer_back = *self.buffer.back().unwrap();
-        let gap_start = buffer_back.number + 1;
-        let gap_end = incoming.number; // exclusive: we handle incoming separately
-
-        debug!(
-            buffer_tip = buffer_back.number,
-            incoming = incoming.number,
-            gap_size = gap_end - gap_start,
-            "Gap detected, fetching intermediate blocks"
-        );
-
-        // Fetch all gap blocks and record their parent hashes for verification
-        let mut gap_blocks: Vec<BlockNumHash> = Vec::new();
-        let mut gap_parent_hashes: Vec<B256> = Vec::new();
-        for num in gap_start..gap_end {
-            let block = self.provider.get_block_by_number(num.into()).await?;
-            let h = block.header();
-
-            // Verify each gap block links to the previous one
-            if let Some(prev) = gap_blocks.last() &&
-                h.parent_hash() != prev.hash
-            {
-                debug!(
-                    expected_parent = %prev.hash,
-                    actual_parent = %h.parent_hash(),
-                    gap_block_number = h.number(),
-                    "Gap chain discontinuity detected, treating as reorg"
-                );
-                let entry = BlockNumHash::new(h.number(), h.hash());
-                return self
-                    .handle_reorg_within_buffer(incoming_block, entry, h.parent_hash())
-                    .await;
-            }
-
-            gap_parent_hashes.push(h.parent_hash());
-            gap_blocks.push(BlockNumHash::new(h.number(), h.hash()));
-        }
-
-        // Verify the first gap block connects to our buffer
-        if let Some(first_gap_parent) = gap_parent_hashes.first() &&
-            *first_gap_parent != buffer_back.hash
-        {
-            // A reorg happened that affected our buffer tail.
-            // Treat the first gap block as a reorg block.
-            debug!(
-                expected_parent = %buffer_back.hash,
-                actual_parent = %first_gap_parent,
-                "Gap block doesn't connect to buffer, reorg in gap detected"
-            );
-            let first_entry = gap_blocks[0];
-            return self
-                .handle_reorg_within_buffer(incoming_block, first_entry, *first_gap_parent)
-                .await;
-        }
-
-        // Verify incoming block connects to the gap chain
-        let expected_parent = gap_blocks.last().map_or(buffer_back.hash, |b| b.hash);
-        if parent_hash != expected_parent {
-            debug!(
-                expected = %expected_parent,
-                actual = %parent_hash,
-                "Incoming block doesn't connect to gap chain"
-            );
-            return self.walk_back_to_find_fork(incoming_block, incoming).await;
-        }
-
-        // Everything connects — push gap blocks and incoming into buffer
-        self.buffer.append(gap_blocks);
-        self.buffer.push(incoming);
-
-        trace!(buffer_tip = incoming.number, "Gap filled successfully, no reorg");
-        Ok(None)
     }
 
     /// Handles deep reorg where the incoming block is before the buffer range (Scenario 4).
