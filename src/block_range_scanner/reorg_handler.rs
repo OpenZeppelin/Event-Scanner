@@ -53,7 +53,8 @@ pub(crate) struct DefaultReorgHandler<N: Network = Ethereum> {
 }
 
 impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
-    /// Checks an incoming block for reorgs using parent hash verification.
+    /// Checks an incoming block for reorgs using on-chain hash verification and
+    /// parent hash validation against a ring buffer.
     ///
     /// Returns `Ok(None)` if no reorg, or `Ok(Some(common_ancestor))` if a reorg was detected.
     ///
@@ -76,6 +77,13 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
         let header = block.header();
         let incoming = BlockNumHash::new(header.number(), header.hash());
         let parent_hash = header.parent_hash();
+
+        // ── On-chain verification ────────────────────────────────────
+        // Essential when called with a stored block (e.g., previous_batch_end).
+        // If the hash no longer exists on the canonical chain, the block was reorged.
+        if self.reorg_detected(incoming.hash).await? {
+            return self.find_on_chain_ancestor().await;
+        }
 
         // ── Case 0: Empty buffer ─────────────────────────────────────
         if self.buffer.is_empty() {
@@ -127,6 +135,53 @@ impl<N: Network> DefaultReorgHandler<N> {
         Self { provider, buffer: RingBuffer::new(capacity) }
     }
 
+    /// Checks if a block hash still exists on the canonical chain via RPC.
+    async fn reorg_detected(&self, hash: B256) -> Result<bool, ScannerError> {
+        match self.provider.get_block_by_hash(hash).await {
+            Ok(_) => Ok(false),
+            Err(robust_provider::Error::BlockNotFound) => Ok(true),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Walks backwards through the buffer, checking each hash on-chain to find
+    /// the common ancestor after a reorg is detected.
+    async fn find_on_chain_ancestor(&mut self) -> Result<Option<N::BlockResponse>, ScannerError> {
+        debug!("Reorg detected via on-chain verification, searching for common ancestor");
+
+        let (front_number, back_number) = match (self.buffer.front(), self.buffer.back()) {
+            (Some(f), Some(b)) => (f.number, b.number),
+            _ => return self.handle_deep_reorg().await,
+        };
+
+        for number in (front_number..=back_number).rev() {
+            if let Some(entry) = self.buffer.get(number) {
+                match self.provider.get_block_by_hash(entry.hash).await {
+                    Ok(_) => {
+                        debug!(
+                            common_ancestor_number = number,
+                            common_ancestor_hash = %entry.hash,
+                            "Found common ancestor in buffer"
+                        );
+                        self.buffer.truncate_after(number);
+                        return self.return_reorg_ancestor(number).await;
+                    }
+                    Err(robust_provider::Error::BlockNotFound) => {
+                        trace!(
+                            block_number = number,
+                            block_hash = %entry.hash,
+                            "Buffered block was reorged, continuing walk-back"
+                        );
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+
+        // Entire buffer exhausted — all buffered blocks were reorged
+        self.handle_deep_reorg().await
+    }
+
     /// Handles blocks that fall within the buffer range — the stream rewound to a block
     /// we already have stored. Covers Scenario 1 (clean rewind) and Scenario 2 (past fork).
     async fn handle_reorg_within_buffer(
@@ -138,8 +193,8 @@ impl<N: Network> DefaultReorgHandler<N> {
         let fork_number = incoming.number.saturating_sub(1);
 
         // Check if parent is in our buffer and matches
-        if let Some(stored) = self.buffer.get(fork_number)
-            && parent_hash == stored.hash
+        if let Some(stored) = self.buffer.get(fork_number) &&
+            parent_hash == stored.hash
         {
             // ── Scenario 1: Clean rewind, fork point found ───────
             debug!(
@@ -195,8 +250,8 @@ impl<N: Network> DefaultReorgHandler<N> {
 
             // Check if this block's parent matches our buffer
             let grandparent_number = parent_number.saturating_sub(1);
-            if let Some(stored) = self.buffer.get(grandparent_number)
-                && grandparent_hash == stored.hash
+            if let Some(stored) = self.buffer.get(grandparent_number) &&
+                grandparent_hash == stored.hash
             {
                 // Found the fork point
                 let fork_point = grandparent_number;
@@ -248,8 +303,8 @@ impl<N: Network> DefaultReorgHandler<N> {
         }
 
         // Verify the first gap block connects to our buffer
-        if let Some(first_gap_parent) = gap_parent_hashes.first()
-            && *first_gap_parent != buffer_back.hash
+        if let Some(first_gap_parent) = gap_parent_hashes.first() &&
+            *first_gap_parent != buffer_back.hash
         {
             // A reorg happened that affected our buffer tail.
             // Treat the first gap block as a reorg block.

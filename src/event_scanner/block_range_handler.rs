@@ -117,8 +117,8 @@ impl<N: Network> StreamHandler<N> {
 
                     // process all of the buffered results
                     while let Some(result) = stream.next().await {
-                        if let Ok(ScannerMessage::Data(logs)) = result.as_ref()
-                            && logs.is_empty()
+                        if let Ok(ScannerMessage::Data(logs)) = result.as_ref() &&
+                            logs.is_empty()
                         {
                             continue;
                         }

@@ -82,8 +82,8 @@ pub(crate) async fn stream_live_blocks<N: Network, R: ReorgHandler<N>>(
     // only once the first relevant block is received from the subscription, and not before that;
     // otherwise callers might perform certain operations expecting the relevant blocks to start
     // coming, when in fact they are not.
-    if notify_after_first_block
-        && sender.try_stream(Notification::SwitchingToLive).await.is_closed()
+    if notify_after_first_block &&
+        sender.try_stream(Notification::SwitchingToLive).await.is_closed()
     {
         return;
     }
