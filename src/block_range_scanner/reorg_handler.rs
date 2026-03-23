@@ -228,6 +228,10 @@ impl<N: Network> DefaultReorgHandler<N> {
         let mut current_number = incoming.number;
 
         loop {
+            if current_number == 0 {
+                return self.handle_deep_reorg().await;
+            }
+
             let parent_number = current_number.saturating_sub(1);
 
             // If we've walked past our buffer, we can't verify further
@@ -293,11 +297,28 @@ impl<N: Network> DefaultReorgHandler<N> {
         );
 
         // Fetch all gap blocks and record their parent hashes for verification
-        let mut gap_blocks = Vec::new();
+        let mut gap_blocks: Vec<BlockNumHash> = Vec::new();
         let mut gap_parent_hashes: Vec<B256> = Vec::new();
         for num in gap_start..gap_end {
             let block = self.provider.get_block_by_number(num.into()).await?;
             let h = block.header();
+
+            // Verify each gap block links to the previous one
+            if let Some(prev) = gap_blocks.last() &&
+                h.parent_hash() != prev.hash
+            {
+                debug!(
+                    expected_parent = %prev.hash,
+                    actual_parent = %h.parent_hash(),
+                    gap_block_number = h.number(),
+                    "Gap chain discontinuity detected, treating as reorg"
+                );
+                let entry = BlockNumHash::new(h.number(), h.hash());
+                return self
+                    .handle_reorg_within_buffer(incoming_block, entry, h.parent_hash())
+                    .await;
+            }
+
             gap_parent_hashes.push(h.parent_hash());
             gap_blocks.push(BlockNumHash::new(h.number(), h.hash()));
         }
