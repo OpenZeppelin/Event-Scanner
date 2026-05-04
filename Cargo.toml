@@ -112,7 +112,7 @@ bench-utils = [
     "dep:flate2",
     "dep:tracing",
     "alloy/node-bindings",
-    "alloy/provider-ws",   # needed when running ./bin/generate_dump.rs
+    "alloy/provider-ws",   # needed when running `cargo run --bin generate_dump --features bench-utils`
 ]
 example = ["tracing", "dep:anyhow"]
 http-subscription = ["robust-provider/http-subscription"]
