@@ -1,7 +1,7 @@
 {
   "event_count": 100000,
   "contract_address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
-  "block_number": 3298,
-  "generation_time_secs": 32.816945,
-  "anvil_version": "anvil Version: 1.5.1-stable\nCommit SHA: b0a9dd9ceda36f63e2326ce530c10e6916f4b8a2\nBuild Timestamp: 2025-12-22T11:41:09.812070000Z (1766403669)\nBuild Profile: maxperf"
+  "block_number": 28263,
+  "generation_time_secs": 282.780018286,
+  "anvil_version": "anvil Version: 1.6.0-v1.7.0\nCommit SHA: f83bad912a9dba7bf0371def1e70bb1896048356\nBuild Timestamp: 2026-04-28T14:07:10.568929921Z (1777385230)\nBuild Profile: dist"
 }
