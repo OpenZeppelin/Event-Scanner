@@ -29,63 +29,11 @@ pub trait ReorgHandler<N: Network> {
     ) -> Result<Option<N::BlockResponse>, ScannerError>;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy::{
-        consensus::Header as ConsensusHeader,
-        network::Ethereum,
-        providers::{RootProvider, mock::Asserter},
-        rpc::{client::RpcClient, types::Block},
-    };
-    use robust_provider::RobustProviderBuilder;
-
-    fn block(number: u64, hash: BlockHash) -> Block {
-        Block::empty(alloy::rpc::types::Header {
-            hash,
-            inner: ConsensusHeader { number, ..Default::default() },
-            total_difficulty: None,
-            size: None,
-        })
-    }
-
-    #[tokio::test]
-    async fn detects_reorg_when_old_hash_is_available_but_not_canonical() -> anyhow::Result<()> {
-        let parent_hash = BlockHash::repeat_byte(0x09);
-        let old_hash = BlockHash::repeat_byte(0x0a);
-        let new_hash = BlockHash::repeat_byte(0x0b);
-        let parent_block = block(9, parent_hash);
-        let old_block = block(10, old_hash);
-        let new_block = block(10, new_hash);
-
-        let asserter = Asserter::new();
-        asserter.push_success(&Some(new_block.clone()));
-        asserter.push_success(&Some(old_block.clone()));
-        asserter.push_success(&Some(new_block));
-        asserter.push_success(&Some(parent_block.clone()));
-        asserter.push_success(&Some(parent_block.clone()));
-        asserter.push_success(&Some(parent_block));
-
-        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(asserter));
-        let provider = RobustProviderBuilder::fragile(provider).build().await?;
-        let mut handler = DefaultReorgHandler::new(provider, RingBufferCapacity::Limited(10));
-        handler.buffer.push(parent_hash);
-        handler.buffer.push(old_hash);
-
-        let common_ancestor = handler.check(&old_block).await?.expect("reorg should be detected");
-
-        assert_eq!(common_ancestor.header().number(), 9);
-        assert_eq!(common_ancestor.header().hash(), parent_hash);
-
-        Ok(())
-    }
-}
-
 /// Default implementation of [`ReorgHandler`] that uses an RPC provider.
 #[derive(Clone, Debug)]
 pub(crate) struct DefaultReorgHandler<N: Network = Ethereum> {
     provider: RobustProvider<N>,
-    buffer: RingBuffer<BlockHash>,
+    buffer: RingBuffer<(u64, BlockHash)>,
 }
 
 impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
@@ -133,12 +81,13 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
         let block = block.header();
 
         if !self.reorg_detected(block).await? {
+            let block_number = block.number();
             let block_hash = block.hash();
             // store the incoming block's hash for future reference
-            if !matches!(self.buffer.back(), Some(&hash) if hash == block_hash) {
-                self.buffer.push(block_hash);
+            if !matches!(self.buffer.back(), Some(&(_, hash)) if hash == block_hash) {
+                self.buffer.push((block_number, block_hash));
                 trace!(
-                    block_number = block.number(),
+                    block_number,
                     block_hash = %block_hash,
                     "Block hash added to reorg buffer"
                 );
@@ -152,27 +101,27 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
             "Reorg detected, searching for common ancestor"
         );
 
-        while let Some(&block_hash) = self.buffer.back() {
-            trace!(block_hash = %block_hash, "Checking if buffered block exists on chain");
-            match self.provider.get_block_by_hash(block_hash).await {
-                Ok(candidate) if self.is_canonical(candidate.header()).await? => {
+        while let Some(&(candidate_number, candidate_hash)) = self.buffer.back() {
+            trace!(
+                block_number = candidate_number,
+                block_hash = %candidate_hash,
+                "Checking if buffered block is canonical"
+            );
+            match self.provider.get_block_by_number(candidate_number.into()).await {
+                Ok(candidate) if candidate.header().hash() == candidate_hash => {
                     debug!(
-                        common_ancestor_hash = %block_hash,
+                        common_ancestor_hash = %candidate_hash,
                         common_ancestor_number = candidate.header().number(),
                         "Found common ancestor"
                     );
                     return self.return_common_ancestor(candidate).await;
                 }
-                Ok(_candidate) => {
+                Ok(_) | Err(robust_provider::Error::BlockNotFound) => {
                     trace!(
-                        block_hash = %block_hash,
+                        block_number = candidate_number,
+                        block_hash = %candidate_hash,
                         "Buffered block is no longer canonical, removing from buffer"
                     );
-                    _ = self.buffer.pop_back();
-                }
-                Err(robust_provider::Error::BlockNotFound) => {
-                    // block was reorged
-                    trace!(block_hash = %block_hash, "Buffered block was reorged, removing from buffer");
                     _ = self.buffer.pop_back();
                 }
                 Err(e) => return Err(e.into()),
@@ -201,14 +150,6 @@ impl<N: Network> DefaultReorgHandler<N> {
         match self.provider.get_block_by_number(block.number().into()).await {
             Ok(canonical_block) => Ok(canonical_block.header().hash() != block.hash()),
             Err(robust_provider::Error::BlockNotFound) => Ok(true),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    async fn is_canonical(&self, block: &N::HeaderResponse) -> Result<bool, ScannerError> {
-        match self.provider.get_block_by_number(block.number().into()).await {
-            Ok(canonical_block) => Ok(canonical_block.header().hash() == block.hash()),
-            Err(robust_provider::Error::BlockNotFound) => Ok(false),
             Err(e) => Err(e.into()),
         }
     }
@@ -242,5 +183,56 @@ impl<N: Network> DefaultReorgHandler<N> {
             finalized
         };
         Ok(Some(common_ancestor))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::{
+        consensus::Header as ConsensusHeader,
+        network::Ethereum,
+        providers::{RootProvider, mock::Asserter},
+        rpc::{client::RpcClient, types::Block},
+    };
+    use robust_provider::RobustProviderBuilder;
+
+    fn block(number: u64, hash: BlockHash) -> Block {
+        Block::empty(alloy::rpc::types::Header {
+            hash,
+            inner: ConsensusHeader { number, ..Default::default() },
+            total_difficulty: None,
+            size: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn detects_reorg_when_old_hash_is_available_but_not_canonical() -> anyhow::Result<()> {
+        let parent_hash = BlockHash::repeat_byte(0x09);
+        let old_hash = BlockHash::repeat_byte(0x0a);
+        let new_hash = BlockHash::repeat_byte(0x0b);
+        let parent_block = block(9, parent_hash);
+        let old_block = block(10, old_hash);
+        let new_block = block(10, new_hash);
+
+        let asserter = Asserter::new();
+        asserter.push_success(&Some(new_block.clone()));
+        asserter.push_success(&Some(new_block));
+        asserter.push_success(&Some(parent_block.clone()));
+        asserter.push_success(&Some(parent_block.clone()));
+        asserter.push_success(&Some(parent_block));
+
+        let provider = RootProvider::<Ethereum>::new(RpcClient::mocked(asserter));
+        let provider = RobustProviderBuilder::fragile(provider).build().await?;
+        let mut handler = DefaultReorgHandler::new(provider, RingBufferCapacity::Limited(10));
+        handler.buffer.push((9, parent_hash));
+        handler.buffer.push((10, old_hash));
+
+        let common_ancestor = handler.check(&old_block).await?.expect("reorg should be detected");
+
+        assert_eq!(common_ancestor.header().number(), 9);
+        assert_eq!(common_ancestor.header().hash(), parent_hash);
+
+        Ok(())
     }
 }
