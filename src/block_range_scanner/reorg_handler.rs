@@ -2,7 +2,7 @@ use alloy::{
     consensus::BlockHeader,
     eips::BlockNumberOrTag,
     network::{BlockResponse, Ethereum, Network, primitives::HeaderResponse},
-    primitives::BlockHash,
+    primitives::{BlockHash, BlockNumber},
 };
 use robust_provider::RobustProvider;
 
@@ -33,7 +33,7 @@ pub trait ReorgHandler<N: Network> {
 #[derive(Clone, Debug)]
 pub(crate) struct DefaultReorgHandler<N: Network = Ethereum> {
     provider: RobustProvider<N>,
-    buffer: RingBuffer<(u64, BlockHash)>,
+    buffer: RingBuffer<(BlockNumber, BlockHash)>,
 }
 
 impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
