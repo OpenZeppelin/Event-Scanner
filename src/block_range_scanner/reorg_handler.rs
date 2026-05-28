@@ -111,7 +111,7 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
                 Ok(candidate) if candidate.header().hash() == candidate_hash => {
                     debug!(
                         common_ancestor_hash = %candidate_hash,
-                        common_ancestor_number = candidate.header().number(),
+                        common_ancestor_number = candidate_number,
                         "Found common ancestor"
                     );
                     return self.return_common_ancestor(candidate).await;
