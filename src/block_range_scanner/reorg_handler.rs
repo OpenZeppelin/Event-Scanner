@@ -108,13 +108,13 @@ impl<N: Network> ReorgHandler<N> for DefaultReorgHandler<N> {
                 "Checking if buffered block is canonical"
             );
             match self.provider.get_block_by_number(candidate_number.into()).await {
-                Ok(candidate) if candidate.header().hash() == candidate_hash => {
+                Ok(canonical) if canonical.header().hash() == candidate_hash => {
                     debug!(
                         common_ancestor_hash = %candidate_hash,
                         common_ancestor_number = candidate_number,
                         "Found common ancestor"
                     );
-                    return self.return_common_ancestor(candidate).await;
+                    return self.return_common_ancestor(canonical).await;
                 }
                 Ok(_) | Err(robust_provider::Error::BlockNotFound) => {
                     trace!(
