@@ -5,23 +5,9 @@ permissions:
 
 on:
   pull_request:
-    paths-ignore:
-      - "**.md"
-      - ".vscode"
-      - ".cargo"
-      - "benches/**"
-      - "examples/**"
-      - "src/bin/generate_dump.rs"
   merge_group:
   push:
     branches: [main, release-v*]
-    paths-ignore:
-      - "**.md"
-      - ".vscode"
-      - ".cargo"
-      - "benches/**"
-      - "examples/**"
-      - "src/bin/generate_dump.rs"
 
 env:
   CARGO_TERM_COLOR: always
