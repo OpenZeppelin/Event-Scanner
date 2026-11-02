@@ -5,6 +5,7 @@ name: check
 # - clippy: checks that the code does not contain any `clippy` warnings.
 # - doc: checks that the code can be documented without errors.
 # - typos: checks for typos across the repo.
+# - semver: checks that public API changes match the version in Cargo.toml.
 permissions:
   contents: read
 # This configuration allows maintainers of this repo to create a branch and
@@ -150,3 +151,21 @@ jobs:
       # --feature-powerset runs for every combination of features
       - name: cargo hack
         run: cargo hack --feature-powerset --no-dev-deps check
+
+  semver-checks:
+    name: Cargo semver-checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+
+      - name: Fetch Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        with:
+          feature-group: all-features
