@@ -5,9 +5,8 @@ permissions:
   contents: read
 
 on:
-  push:
-    tags:
-      - v*
+  release:
+    types: [published]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
