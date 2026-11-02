@@ -77,15 +77,18 @@ jobs:
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           bencher run \
             --project "$BENCHER_PROJECT" \
             --token "$BENCHER_API_TOKEN" \
-            --branch "${{ github.head_ref || github.ref_name }}" \
+            --branch "$HEAD_REF" \
             --testbed ubuntu-latest \
             --adapter rust_criterion \
-            --start-point "${{ github.base_ref }}" \
-            --start-point-hash "${{ github.event.pull_request.base.sha }}" \
+            --start-point "$BASE_REF" \
+            --start-point-hash "$BASE_SHA" \
             --start-point-clone-thresholds \
             --start-point-reset \
             --github-actions "$GITHUB_TOKEN" \

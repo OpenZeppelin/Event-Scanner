@@ -34,6 +34,9 @@ jobs:
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          # Avoid restoring a cache that a poisoned build on another ref could have written
+          cache: false
 
       - name: Verify tag matches crate version
         id: version-check
