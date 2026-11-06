@@ -35,6 +35,12 @@ jobs:
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
+        with:
+          # Pin anvil instead of tracking `stable`. Foundry v1.9.0 changed anvil's
+          # mining so that each transaction is mined immediately, which shifts the
+          # block numbers the reorg integration tests rely on. Bump this together
+          # with any test changes needed for the new anvil version.
+          version: v1.8.7
 
       - name: Cache cargo-nextest binary
         id: cache-cargo-nextest
