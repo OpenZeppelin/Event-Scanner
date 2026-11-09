@@ -1,8 +1,12 @@
 use alloy::{
     eips::BlockNumberOrTag,
-    node_bindings::Anvil,
+    node_bindings::{Anvil, AnvilInstance},
+    primitives::U256,
     providers::{Provider, ProviderBuilder, ext::AnvilApi},
-    rpc::types::anvil::ReorgOptions,
+    rpc::types::{
+        TransactionRequest,
+        anvil::{ReorgOptions, TransactionData},
+    },
 };
 use event_scanner::{
     BlockRangeScannerBuilder, Notification, ScannerError, assert_closed, assert_empty, assert_next,
@@ -122,7 +126,8 @@ async fn continuous_blocks_if_reorg_less_than_block_confirmation() -> anyhow::Re
     let mut stream = assert_empty!(stream);
 
     // reorg less blocks than the block_confirmation config
-    provider.anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs: vec![] }).await?;
+    let tx_block_pairs = vec![(reorg_marker_tx(&anvil), 0)];
+    provider.anvil_reorg(ReorgOptions { depth: 4, tx_block_pairs }).await?;
     // mint additional blocks so the scanner processes reorged blocks
     provider.anvil_mine(Some(5), None).await?;
 
@@ -155,7 +160,8 @@ async fn shallow_block_confirmation_does_not_mitigate_reorg() -> anyhow::Result<
 
     // reorg more blocks than the block_confirmation config
     let latest = provider.get_block_number().await?;
-    provider.anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs: vec![] }).await?;
+    let tx_block_pairs = vec![(reorg_marker_tx(&anvil), 0)];
+    provider.anvil_reorg(ReorgOptions { depth: 8, tx_block_pairs }).await?;
 
     // mint 1 block to allow the scanner to process reorged blocks (previously streamed + the block
     // confirmed now)
@@ -615,4 +621,19 @@ async fn rewind_skips_reorg_when_tip_is_at_finalized() -> anyhow::Result<()> {
     assert_closed!(stream);
 
     Ok(())
+}
+
+/// Returns a transaction to place in the first block of an `anvil_reorg`.
+///
+/// `anvil_reorg` re-mines the reorged blocks on top of the common ancestor. Since Foundry v1.9.0,
+/// re-mined empty blocks can be identical to the empty blocks they replace, so they keep their
+/// hashes and the chain does not reorg at all. A value transfer in the first replacement block
+/// gives that block, and every block after it, a new hash with any anvil version.
+fn reorg_marker_tx(anvil: &AnvilInstance) -> TransactionData {
+    let recipient = anvil
+        .addresses()
+        .get(1)
+        .copied()
+        .expect("anvil should start with more than one dev account");
+    TransactionData::JSON(TransactionRequest::default().to(recipient).value(U256::from(1)))
 }
