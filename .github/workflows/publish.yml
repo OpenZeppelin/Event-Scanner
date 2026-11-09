@@ -5,9 +5,8 @@ permissions:
   contents: read
 
 on:
-  push:
-    tags:
-      - v*
+  release:
+    types: [published]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -20,6 +19,9 @@ jobs:
   check-publish:
     name: Publish event-scanner on crates.io
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -27,9 +29,14 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          # Avoid restoring a cache that a poisoned build on another ref could have written
+          cache: false
 
       - name: Verify tag matches crate version
         id: version-check
@@ -53,13 +60,12 @@ jobs:
       - name: Check event-scanner
         run: cargo publish --locked --dry-run
 
-      # cargo automatically picks up CARGO_REGISTRY_TOKEN from environment variables
+      # Exchanges the GitHub OIDC token for a short-lived crates.io token
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
       - name: Publish event-scanner
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
-            echo "CARGO_REGISTRY_TOKEN is not set in repository secrets" >&2
-            exit 1
-          fi
-          cargo publish --locked
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked
