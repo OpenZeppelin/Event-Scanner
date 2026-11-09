@@ -2,7 +2,8 @@ use anyhow::Ok;
 
 use crate::common::{LiveScannerSetup, TestCounter::CountIncreased, setup_live_scanner};
 use alloy::{
-    primitives::U256,
+    node_bindings::AnvilInstance,
+    primitives::{Address, U256},
     providers::ext::AnvilApi,
     rpc::types::anvil::{ReorgOptions, TransactionData},
 };
@@ -63,7 +64,7 @@ async fn rescans_events_within_same_block() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
+    let LiveScannerSetup { provider, contract, scanner, subscription, anvil } =
         setup_live_scanner(None, None, 0).await?;
 
     let proof = scanner.start().await?;
@@ -87,10 +88,13 @@ async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
     );
 
     // reorg the chain
+    // note: the replacement txs come from another account so that each replacement block differs
+    // from the block it replaces (see `reorg_sender`)
+    let sender = reorg_sender(&anvil);
     let tx_block_pairs = vec![
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 0),
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 1),
-        (TransactionData::JSON(contract.increase().into_transaction_request()), 2),
+        (TransactionData::JSON(contract.increase().from(sender).into_transaction_request()), 0),
+        (TransactionData::JSON(contract.increase().from(sender).into_transaction_request()), 1),
+        (TransactionData::JSON(contract.increase().from(sender).into_transaction_request()), 2),
     ];
 
     let latest = provider.get_block_number().await?;
@@ -112,7 +116,7 @@ async fn rescans_events_with_ascending_blocks() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn depth_one() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
+    let LiveScannerSetup { provider, contract, scanner, subscription, anvil } =
         setup_live_scanner(None, None, 0).await?;
 
     let proof = scanner.start().await?;
@@ -135,8 +139,13 @@ async fn depth_one() -> anyhow::Result<()> {
     );
 
     // reorg the chain
-    let tx_block_pairs =
-        vec![(TransactionData::JSON(contract.increase().into_transaction_request()), 0)];
+    // note: the replacement tx comes from another account so that the replacement block differs
+    // from the block it replaces (see `reorg_sender`)
+    let sender = reorg_sender(&anvil);
+    let tx_block_pairs = vec![(
+        TransactionData::JSON(contract.increase().from(sender).into_transaction_request()),
+        0,
+    )];
 
     let latest = provider.get_block_number().await?;
     provider.primary().anvil_reorg(ReorgOptions { depth: 1, tx_block_pairs }).await?;
@@ -151,7 +160,7 @@ async fn depth_one() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn depth_two() -> anyhow::Result<()> {
-    let LiveScannerSetup { provider, contract, scanner, subscription, anvil: _anvil } =
+    let LiveScannerSetup { provider, contract, scanner, subscription, anvil } =
         setup_live_scanner(None, None, 0).await?;
 
     let proof = scanner.start().await?;
@@ -174,8 +183,13 @@ async fn depth_two() -> anyhow::Result<()> {
     );
 
     // reorg the chain
-    let tx_block_pairs =
-        vec![(TransactionData::JSON(contract.increase().into_transaction_request()), 0)];
+    // note: the replacement tx comes from another account so that the replacement block differs
+    // from the block it replaces (see `reorg_sender`)
+    let sender = reorg_sender(&anvil);
+    let tx_block_pairs = vec![(
+        TransactionData::JSON(contract.increase().from(sender).into_transaction_request()),
+        0,
+    )];
 
     let latest = provider.get_block_number().await?;
     provider.primary().anvil_reorg(ReorgOptions { depth: 2, tx_block_pairs }).await?;
@@ -236,4 +250,17 @@ async fn block_confirmations_mitigate_reorgs() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+/// Returns the account that sends the replacement transactions of a reorg.
+///
+/// `anvil_reorg` re-mines the reorged blocks on top of the common ancestor. Since Foundry v1.9.0,
+/// a re-mined block can be identical to the block it replaces, for example when both hold the
+/// same `increase` transaction from the same account. Such a block keeps its hash, so the chain
+/// does not reorg at that height and the common ancestor moves up. Sending the replacement
+/// transactions from another account than the original ones gives the first replacement block,
+/// and every block after it, a new hash with any anvil version.
+fn reorg_sender(anvil: &AnvilInstance) -> Address {
+    // the original transactions are sent by the provider's default wallet, the first dev account
+    anvil.addresses().get(1).copied().expect("anvil should start with more than one dev account")
 }
