@@ -58,7 +58,7 @@ Add `event-scanner` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-scanner = "1.1.1"
+event-scanner = "1.1.2"
 ```
 
 Create an event stream for the given event filters registered with the `EventScanner`:
@@ -273,7 +273,7 @@ By default, live block subscriptions rely on WebSocket or IPC transports. If you
 
 ```toml
 [dependencies]
-event-scanner = { version = "1.1.1", features = ["http-subscription"] }
+event-scanner = { version = "1.1.2", features = ["http-subscription"] }
 ```
 
 ```rust
