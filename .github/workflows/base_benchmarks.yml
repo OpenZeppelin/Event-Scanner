@@ -56,10 +56,13 @@ jobs:
           version: v1.7.0
 
       - name: Setup Bencher
-        # Official docs recommend using `main` commit, because discrepancies between CI version and Bencher's API version
-        # can cause bench failures.
+        # Pinned to a release commit like every other action. With the default
+        # `version` input, the action installs the CLI bundled with that commit,
+        # so this SHA also pins the Bencher CLI. Bencher's docs recommend `main`
+        # because a CLI that lags behind Bencher's API can fail benchmark runs;
+        # Dependabot proposes each new release, so keep this pin up to date.
         # https://bencher.dev/docs/how-to/github-actions/
-        uses: bencherdev/bencher@main
+        uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
 
       - name: Prepare benchmark state
         run: |
