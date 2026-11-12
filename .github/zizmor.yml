@@ -9,7 +9,6 @@ rules:
   unpinned-uses:
     config:
       policies:
-        # Every action, including bencherdev/bencher, is pinned to a commit SHA.
         "*": hash-pin
   dependabot-cooldown:
     # Updates are applied as soon as Dependabot proposes them.
